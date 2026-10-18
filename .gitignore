@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# build output — built at pack/publish time via prepack
+lib/
+
+# local build artifacts
+*.tgz
+
+# reverse-engineering research artifacts (third-party sources, never publish)
+research/
+
+# logs and scratch
+*.log
+logs/

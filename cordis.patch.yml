@@ -1,0 +1,6 @@
+# dsh bundle patch: inserts this plugin into a profile's layer stack.
+# `id` is the config row id (keep stable — user configs target it);
+# `name` is the package name to import (must match package.json name).
+- insert:
+    - id: dsh-opencode-free
+      name: 'dsh-opencode-bridge'

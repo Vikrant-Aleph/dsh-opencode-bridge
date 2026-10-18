@@ -1,0 +1,174 @@
+/**
+ * dsh-opencode-free: OpenCode Free models for DeepSeek Harness.
+ *
+ * Registers an LLM adapter that simulates the official OpenCode client wire
+ * protocol so DSH can use the keyless free-tier models hosted at opencode.ai
+ * (big-pickle, mimo-v2.6-flash-free, glm-5.3-flash-free, ...).
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
+import type { AdapterRegistrationHandle, LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
+import { FreeModelCatalog } from './catalog.js'
+import { OpenCodeFreeAdapter } from './adapter.js'
+import type { HeaderRecipe } from './opencode-protocol.js'
+import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
+import { LogService, registerLogAccess } from './log-service.js'
+
+export { FreeModelCatalog } from './catalog.js'
+export { OpenCodeFreeAdapter } from './adapter.js'
+export * from './opencode-protocol.js'
+export { PluginLogger, defaultLogDir } from './logger.js'
+export { LogService } from './log-service.js'
+
+export interface Config {
+  /** OpenAI-compatible relay base. The free tier lives at /inference/v1. */
+  baseUrl: string
+  /** Credential sent as `Bearer <key>`; the signed-out client sentinel is `public`. */
+  apiKey: string
+  /** User-Agent of the simulated client; must contain `opencode/<version>`. */
+  userAgent: string
+  /** `x-opencode-client` value (official client reports `cli` or `desktop`). */
+  client: string
+  /** `x-opencode-project` value; the official default project is `global`. */
+  project: string
+  /** Provider routes this adapter serves. */
+  providers: string[]
+  /** Offer models the registry marks deprecated when the relay still lists them. */
+  includeDeprecated: boolean
+  /** Extra model ids to offer even when unknown to the registry. */
+  extraModels: string[]
+  /** Per-request timeout in milliseconds. */
+  requestTimeoutMs: number
+  /** Send the OpenCode tool fingerprint the free-tier gate requires. */
+  toolFingerprint: boolean
+  /** Translate calls to fingerprint placeholder tools onto DSH tools. */
+  toolTranslation: boolean
+  /** Minimum log level written to disk: `debug` | `info` | `warn` | `error` | `off`. */
+  logLevel: string
+  /** Log directory; empty means the profile default (`<profile>/logs/dsh-opencode-free`). */
+  logDir: string
+  /** Per-file size ceiling in bytes before rotation. */
+  logMaxBytes: number
+  /** Total log files kept (active + rotated); oldest is deleted first on overflow. */
+  logMaxFiles: number
+}
+
+export const Config: Schema<Config> = Schema.object({
+  baseUrl: Schema.string().default('https://opencode.ai/inference/v1'),
+  apiKey: Schema.string().default('public'),
+  userAgent: Schema.string().default('opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'),
+  client: Schema.string().default('cli'),
+  project: Schema.string().default('global'),
+  providers: Schema.array(Schema.string()).default(['opencode-free']),
+  includeDeprecated: Schema.boolean().default(false),
+  extraModels: Schema.array(Schema.string()).default([]),
+  requestTimeoutMs: Schema.number().default(600_000),
+  toolFingerprint: Schema.boolean().default(true),
+  toolTranslation: Schema.boolean().default(true),
+  logLevel: Schema.string().default('info'),
+  logDir: Schema.string().default(''),
+  logMaxBytes: Schema.number().default(512 * 1024),
+  logMaxFiles: Schema.number().default(5),
+})
+
+export const name = 'dsh-opencode-free'
+export const inject = ['llm']
+
+const LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error', 'off']
+
+function normalizeLevel(value: string): LogLevel {
+  return (LEVELS as readonly string[]).includes(value) ? (value as LogLevel) : 'info'
+}
+
+export function apply(ctx: Context, config: Config): void {
+  const logger = new PluginLogger({
+    level: normalizeLevel(config.logLevel),
+    dir: config.logDir || defaultLogDir(),
+    maxBytes: config.logMaxBytes,
+    maxFiles: config.logMaxFiles,
+    // The only literal secret the plugin handles; scrubbed from every line.
+    secrets: [config.apiKey],
+    mirror: (line) => console.log(`[dsh-opencode-free] ${line}`),
+  })
+  logger.info('plugin', 'starting', {
+    providers: config.providers.join(','),
+    baseUrl: config.baseUrl,
+    logLevel: logger.getLevel(),
+  })
+
+  const logService = new LogService(logger)
+  ctx.effect(() => registerLogAccess(ctx, logService))
+
+  const recipe: HeaderRecipe = {
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    userAgent: config.userAgent,
+    client: config.client,
+    project: config.project,
+    extraHeaders: {},
+  }
+  const catalog = new FreeModelCatalog(
+    config.baseUrl,
+    { includeDeprecated: config.includeDeprecated, extraModels: config.extraModels },
+    logger,
+  )
+  const adapter = new OpenCodeFreeAdapter(catalog, {
+    providerRoute: config.providers[0] ?? 'opencode-free',
+    recipe,
+    requestTimeoutMs: config.requestTimeoutMs,
+    toolFingerprint: config.toolFingerprint,
+    toolTranslation: config.toolTranslation,
+    logger,
+  })
+
+  let registration: AdapterRegistrationHandle | undefined
+  try {
+    registration = ctx.llm.registerAdapter(config.providers.length ? config.providers : ['opencode-free'], adapter)
+    logger.info('plugin', 'LLM adapter registered', { providers: config.providers.join(',') })
+  } catch (error) {
+    logger.error('plugin', 'failed to register LLM adapter', { error: String(error) })
+    return
+  }
+
+  if (typeof ctx.llm.registerConfigurableProviders === 'function') {
+    try {
+      ctx.llm.registerConfigurableProviders(
+        (config.providers.length ? config.providers : ['opencode-free']).map((provider) => ({
+          provider,
+          displayName: 'OpenCode Free',
+          settingsNs: 'opencode-free',
+          settingsPath: [] as string[],
+        })),
+      )
+    } catch (error) {
+      logger.warn('plugin', 'registerConfigurableProviders note', { error: String(error) })
+    }
+  }
+
+  if (typeof ctx.llm.registerModelDiscovery === 'function') {
+    try {
+      ctx.llm.registerModelDiscovery('opencode-free', async (_request, signal): Promise<readonly LlmDiscoveredModel[]> => {
+        const models = await catalog.list(signal)
+        return models.map((model) => ({
+          id: model.id,
+          name: model.name,
+          ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+          ...(model.maxOutputTokens ? { maxTokens: model.maxOutputTokens } : {}),
+        }))
+      })
+    } catch (error) {
+      logger.warn('plugin', 'registerModelDiscovery note', { error: String(error) })
+    }
+  }
+
+  ctx.effect(() => () => {
+    registration?.()
+  })
+
+  void catalog.list().then((models) => {
+    logger.info('plugin', 'free models available', {
+      ids: models.map((m) => m.id).join(',') || '(catalog not reachable yet)',
+    })
+  })
+}

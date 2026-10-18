@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Original mark: two nodes bridged by an arc, with a spark = a protocol bridge to free models. -->
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#1e293b"/>
+  <path d="M18 40 C 18 26, 46 26, 46 40" fill="none" stroke="#38bdf8" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="18" cy="42" r="6" fill="#38bdf8"/>
+  <circle cx="46" cy="42" r="6" fill="#38bdf8"/>
+  <path d="M32 12 L 35 19 L 42 22 L 35 25 L 32 32 L 29 25 L 22 22 L 29 19 Z" fill="#facc15"/>
+</svg>

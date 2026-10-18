@@ -1,6 +1,6 @@
-// Client half of dsh-opencode-free: a Settings page that views and copies the
+// Client half of dsh-opencode-bridge: a Settings page that views and copies the
 // plugin diagnostic log. Registers into the `settings.section` slot and talks
-// to the Host half over the package's `/api/opencode-free-logs/*` RPC routes.
+// to the Host half over the package's `/api/opencode-bridge-logs/*` RPC routes.
 //
 // Robustness rules — the desktop treats a failed module activation as a fatal
 // web-boot error ("web boot: 1 entry did not activate"), so:
@@ -20,12 +20,16 @@ window.__ModuleLoader__.load({
     const NS = 'settings.opencodeFree';
     const LEVELS = ['debug', 'info', 'warn', 'error'];
     const RPC_CHANNEL = '/api';
-    const RPC_NAMESPACE = 'opencode-free-logs';
-    const PROXY_RPC_NAMESPACE = 'opencode-free-proxies';
+    const RPC_NAMESPACE = 'opencode-bridge-logs';
+    const PROXY_RPC_NAMESPACE = 'opencode-bridge-proxies';
 
     const en = {
-      nav: 'OpenCode Free',
-      title: 'OpenCode Free — Diagnostic Log',
+      nav: 'OpenCode Bridge',
+      pageTitle: 'OpenCode Bridge',
+      pageIntro: 'Settings for the OpenCode free-model bridge: diagnostics and egress rotation.',
+      tabLogs: 'Diagnostic log',
+      tabProxies: 'Egress rotation (optional)',
+      title: 'OpenCode Bridge — Diagnostic Log',
       intro: 'Adapter log for the OpenCode free-model bridge. Lines are scrubbed of credentials and message content before they are written.',
       level: 'Minimum level',
       refresh: 'Refresh',
@@ -41,7 +45,7 @@ window.__ModuleLoader__.load({
       total: 'Total size',
       clearConfirm: 'Delete all log files?',
       copyAccessible: 'Copy the whole log to the clipboard',
-      proxyNav: 'OpenCode Free — Proxies',
+      proxyNav: 'OpenCode Bridge — Proxies',
       proxyTitle: 'Egress rotation',
       proxyIntro: 'The free tier throttles each egress IP. When one is rate-limited it cools down and the next entry is used. Keep “direct” to use this machine\u2019s IP.',
       proxyAddLabel: 'Add a proxy',
@@ -67,8 +71,12 @@ window.__ModuleLoader__.load({
       proxyOffline: 'Proxy service unreachable.',
     };
     const zh = {
-      nav: 'OpenCode Free',
-      title: 'OpenCode Free — 诊断日志',
+      nav: 'OpenCode Bridge',
+      pageTitle: 'OpenCode Bridge',
+      pageIntro: 'OpenCode 免费模型桥接插件的设置：诊断日志与出口代理。',
+      tabLogs: '诊断日志',
+      tabProxies: '出口代理轮换（可选）',
+      title: 'OpenCode Bridge — 诊断日志',
       intro: 'OpenCode 免费模型桥接适配器的日志。每行在写入前已脱敏：不含凭据与消息内容。',
       level: '最低级别',
       refresh: '刷新',
@@ -84,7 +92,7 @@ window.__ModuleLoader__.load({
       total: '总大小',
       clearConfirm: '删除全部日志文件？',
       copyAccessible: '把完整日志复制到剪贴板',
-      proxyNav: 'OpenCode Free — 代理',
+      proxyNav: 'OpenCode Bridge — 代理',
       proxyTitle: '出口轮换',
       proxyIntro: '免费层按出口 IP 限流。某个出口被限流后进入冷却，自动改用下一个。保留“本机直连”即可继续使用本机 IP。',
       proxyAddLabel: '添加代理',
@@ -116,7 +124,6 @@ window.__ModuleLoader__.load({
       .ocf-log-wrap { display: flex; flex-direction: column; gap: 12px; }
       .ocf-log-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
       .ocf-log-toolbar label { font-size: 12px; color: var(--dsw-alias-label-secondary, #71717a); }
-      .ocf-log-toolbar select,
       .ocf-log-toolbar button {
         font-size: 12px;
         padding: 5px 12px;
@@ -128,6 +135,29 @@ window.__ModuleLoader__.load({
       }
       .ocf-log-toolbar button:hover { border-color: var(--dsw-alias-brand-primary, #247bbf); }
       .ocf-log-toolbar button:disabled { opacity: 0.5; cursor: default; }
+      /* Wrapper owns the visible frame: host CSS resets bare selects, so their
+         resting border would otherwise appear only on focus. */
+      .ocf-select {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.15));
+        border-radius: 8px;
+        background: var(--dsw-alias-bg-layer-2, transparent);
+      }
+      .ocf-select select {
+        margin: 0;
+        padding: 5px 10px;
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.25;
+        color: var(--dsw-alias-label-primary, #18181b);
+        background: transparent;
+        border: 0;
+        border-radius: 8px;
+        outline: none;
+        cursor: pointer;
+      }
+      .ocf-select:focus-within { border-color: var(--dsw-alias-brand-primary, #247bbf); }
       .ocf-log-note { font-size: 12px; color: var(--dsw-alias-label-secondary, #71717a); margin: 0; }
       .ocf-log-body {
         margin: 0;
@@ -157,6 +187,65 @@ window.__ModuleLoader__.load({
       .ocf-proxy-state.is-cooling { color: var(--dsw-alias-state-warn-primary, #d97706); background: var(--dsw-alias-bg-layer-2, rgba(217,119,6,0.12)); }
       .ocf-proxy-code { font-size: 11px; color: var(--dsw-alias-label-secondary, #71717a); }
       .ocf-proxy-row button { margin-left: auto; }
+      /* Browser-style tabs inside one rounded card.
+         - The card carries the visible 1px border in border-l2, the same weight
+           the host's own settings cards use; border-l1 was nearly invisible.
+         - The tab strip sits under the card's top edge, so the card's top-left
+           and top-right corners stay rounded while the tabs still read as tabs:
+           the active tab paints its own basline away and joins the panel. */
+      .ocf-tabbed {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.16));
+        border-radius: 12px;
+        background: var(--dsw-alias-bg-layer-1, #ffffff);
+        overflow: hidden;
+      }
+      .ocf-tabs {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+        padding: 8px 10px 0;
+        border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.16));
+        background: var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.03));
+      }
+      .ocf-tab {
+        position: relative;
+        bottom: -1px;
+        max-width: 260px;
+        padding: 6px 14px;
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--dsw-alias-label-secondary, #71717a);
+        background: transparent;
+        border: 1px solid transparent;
+        border-bottom: 1px solid transparent;
+        border-radius: 8px 8px 0 0;
+        cursor: pointer;
+      }
+      .ocf-tab:hover:not(.is-active) {
+        color: var(--dsw-alias-label-primary, #18181b);
+        background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.6));
+      }
+      .ocf-tab.is-active {
+        color: var(--dsw-alias-label-primary, #18181b);
+        font-weight: 600;
+        background: var(--dsw-alias-bg-layer-1, #ffffff);
+        border-color: var(--dsw-alias-border-l2, rgba(0,0,0,0.16));
+        border-bottom-color: var(--dsw-alias-bg-layer-1, #ffffff);
+      }
+      .ocf-tab:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #2563eb); outline-offset: -3px; }
+      .ocf-tabpanel {
+        padding: 12px;
+        background: var(--dsw-alias-bg-layer-1, #ffffff);
+        border: none;
+        border-radius: 0;
+      }
     `;
 
     function levelClass(line) {
@@ -171,7 +260,7 @@ window.__ModuleLoader__.load({
       // fallback for hosts that do not forward registration props.
       const t = (props && props.t) || LogPanel.t || fallbackT;
       const rpc = (props && props.rpc) || LogPanel.rpc || null;
-      const [level, setLevel] = useState('debug');
+      const [level, setLevel] = useState('warn');
       const [lines, setLines] = useState([]);
       const [meta, setMeta] = useState(null);
       const [error, setError] = useState('');
@@ -263,21 +352,26 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'ocf-log-wrap' },
-        h('h1', { style: { margin: '0 0 4px', fontSize: '18px', color: 'var(--dsw-alias-label-primary, #18181b)' } }, t('title')),
         h('p', { className: 'ocf-log-note' }, t('intro')),
         h(
           'div',
           { className: 'ocf-log-toolbar' },
           h('label', { htmlFor: 'ocf-log-level' }, t('level')),
+          // The host styles bare `select` elements and drops the resting border,
+          // so the frame lives on a wrapper span instead.
           h(
-            'select',
-            {
-              id: 'ocf-log-level',
-              value: level,
-              onChange: (e) => setLevel(e.target.value),
-              'aria-label': t('level'),
-            },
-            LEVELS.map((l) => h('option', { key: l, value: l }, l)),
+            'span',
+            { className: 'ocf-select' },
+            h(
+              'select',
+              {
+                id: 'ocf-log-level',
+                value: level,
+                onChange: (e) => setLevel(e.target.value),
+                'aria-label': t('level'),
+              },
+              LEVELS.map((l) => h('option', { key: l, value: l }, l)),
+            ),
           ),
           h('button', { type: 'button', onClick: () => load(false), disabled: busy }, busy ? t('loading') : t('refresh')),
           h(
@@ -425,7 +519,6 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'ocf-log-wrap' },
-        h('h1', { style: { margin: '0 0 4px', fontSize: '18px', color: 'var(--dsw-alias-label-primary, #18181b)' } }, t('proxyTitle')),
         h('p', { className: 'ocf-log-note' }, t('proxyIntro')),
         h(
           'div',
@@ -486,6 +579,81 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // One settings page with two tabs: the log viewer and the egress pool used
+    // to live in separate sections, which read as two unrelated plugins.
+    function BridgePanel(props) {
+      const t = (props && props.t) || BridgePanel.t || fallbackT;
+      const rpc = (props && props.rpc) || BridgePanel.rpc || null;
+      const [tab, setTab] = useState('logs');
+      const styleRef = useRef(null);
+
+      useEffect(() => {
+        if (typeof document === 'undefined') return undefined;
+        try {
+          const el = document.createElement('style');
+          el.textContent = CSS;
+          document.head.appendChild(el);
+          styleRef.current = el;
+          return () => {
+            if (el.parentNode) el.parentNode.removeChild(el);
+          };
+        } catch (e) {
+          return undefined;
+        }
+      }, []);
+
+      return h(
+        'div',
+        { className: 'ocf-log-wrap' },
+        h('h1', { style: { margin: '0 0 4px', fontSize: '18px', color: 'var(--dsw-alias-label-primary, #18181b)' } }, t('pageTitle')),
+        h('p', { className: 'ocf-log-note' }, t('pageIntro')),
+        // Tabs and panel share one zero-gap column: the outer wrap's 12px gap
+        // would separate the strip's baseline from the panel and leave the
+        // top corners visually open.
+        h(
+          'div',
+          { className: 'ocf-tabbed' },
+          h(
+            'div',
+            { className: 'ocf-tabs', role: 'tablist', 'aria-label': t('pageTitle') },
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'tab',
+                id: 'ocf-tab-logs',
+                'aria-selected': tab === 'logs',
+                'aria-controls': 'ocf-tabpanel',
+                'data-active': tab === 'logs',
+                className: `ocf-tab${tab === 'logs' ? ' is-active' : ''}`,
+                onClick: () => setTab('logs'),
+              },
+              t('tabLogs'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'tab',
+                id: 'ocf-tab-proxies',
+                'aria-selected': tab === 'proxies',
+                'aria-controls': 'ocf-tabpanel',
+                'data-active': tab === 'proxies',
+                className: `ocf-tab${tab === 'proxies' ? ' is-active' : ''}`,
+                onClick: () => setTab('proxies'),
+              },
+              t('tabProxies'),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'ocf-tabpanel', id: 'ocf-tabpanel', role: 'tabpanel', 'aria-labelledby': tab === 'logs' ? 'ocf-tab-logs' : 'ocf-tab-proxies' },
+            tab === 'logs' ? h(LogPanel, { rpc, t }) : h(ProxyPanel, { rpc, t }),
+          ),
+        ),
+      );
+    }
+
     return {
       // Only slots is a hard dependency; locale/connection degrade gracefully.
       inject: ['slots'],
@@ -509,7 +677,7 @@ window.__ModuleLoader__.load({
                   if (typeof d2 === 'function') d2();
                 };
               } catch (e2) {
-                console.error('[dsh-opencode-free] locale register failed:', e2);
+                console.error('[dsh-opencode-bridge] locale register failed:', e2);
               }
             }
             if (typeof dispose === 'function' && typeof ctx.effect === 'function') ctx.effect(() => dispose);
@@ -518,7 +686,7 @@ window.__ModuleLoader__.load({
             t = ctx.locale.bind(NS) || fallbackT;
           }
         } catch (e) {
-          console.error('[dsh-opencode-free] locale setup failed:', e);
+          console.error('[dsh-opencode-bridge] locale setup failed:', e);
         }
 
         // 2. RPC client — soft access; the panel reports "unreachable" if absent.
@@ -527,7 +695,7 @@ window.__ModuleLoader__.load({
           const connection = ctx.get ? ctx.get('connection') : ctx.connection;
           rpc = (connection && connection.rpc) || null;
         } catch (e) {
-          console.error('[dsh-opencode-free] connection lookup failed:', e);
+          console.error('[dsh-opencode-bridge] connection lookup failed:', e);
         }
 
         // Statics as a fallback for hosts that do not forward registration props.
@@ -535,41 +703,32 @@ window.__ModuleLoader__.load({
         LogPanel.rpc = rpc;
         ProxyPanel.t = t;
         ProxyPanel.rpc = rpc;
+        BridgePanel.t = t;
+        BridgePanel.rpc = rpc;
 
         // 3. Slot registration — guarded and optional-chained: the settings
-        // slot may not be declared yet at activation time.
+        // slot may not be declared yet at activation time. One section only:
+        // the log viewer and the proxy pool are tabs inside it.
         try {
           if (ctx.slots && typeof ctx.slots.inject === 'function' && typeof ctx.slots.register === 'function') {
             ctx.slots.inject('settings.section', () =>
               ctx.slots.register(
                 {
                   name: 'settings.section',
-                  id: 'opencode-free-logs',
+                  id: 'opencode-bridge',
                   order: 30,
                   label: () => t('nav'),
                   inject: () => ({ rpc, t }),
                 },
-                LogPanel,
-              ),
-            );
-            ctx.slots.inject('settings.section', () =>
-              ctx.slots.register(
-                {
-                  name: 'settings.section',
-                  id: 'opencode-free-proxies',
-                  order: 31,
-                  label: () => t('proxyNav'),
-                  inject: () => ({ rpc, t }),
-                },
-                ProxyPanel,
+                BridgePanel,
               ),
             );
           } else {
-            console.error('[dsh-opencode-free] slots service unavailable; settings page not registered');
+            console.error('[dsh-opencode-bridge] slots service unavailable; settings page not registered');
           }
         } catch (e) {
           // Never rethrow: a failed activation is a fatal web-boot error.
-          console.error('[dsh-opencode-free] settings registration failed:', e);
+          console.error('[dsh-opencode-bridge] settings registration failed:', e);
         }
       },
     };

@@ -59,7 +59,7 @@ test('rotation: oldest file is deleted first when oversized', () => {
   const dir = tmpDir()
   const logger = makeLogger(dir, { maxBytes: 2048, maxFiles: 3 })
   for (let i = 0; i < 200; i++) logger.info('t', `line ${i} ${'y'.repeat(80)}`)
-  const files = fs.readdirSync(dir).filter((f) => f.startsWith('dsh-opencode-free.log'))
+  const files = fs.readdirSync(dir).filter((f) => f.startsWith('dsh-opencode-bridge.log'))
   assert.ok(files.length <= 3, `expected <=3 files, got ${files.length}`)
   const stat = logger.stat()
   assert.ok(stat.totalBytes <= 3 * 2048, `total ${stat.totalBytes} exceeded bound`)

@@ -80,7 +80,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
-    return { id: provider, name: 'OpenCode Free' }
+    return { id: provider, name: 'OpenCode Bridge' }
   }
 
   override listModels(provider: string): Promise<readonly LlmModelInfo[]> {

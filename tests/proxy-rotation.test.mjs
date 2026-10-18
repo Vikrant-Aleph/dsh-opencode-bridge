@@ -4,7 +4,7 @@ import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 import { ProxyPool } from '../lib/proxy-pool.js'
 
 const recipe = { baseUrl: 'https://relay.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} }
-const options = { provider: 'opencode-free', model: 'fixture-free', messages: [], tools: [] }
+const options = { provider: 'opencode-bridge', model: 'fixture-free', messages: [], tools: [] }
 
 function streamOf(text) {
   const events = [
@@ -24,7 +24,7 @@ function makeAdapter(t, pool, behaviour) {
   const logs = []
   const logger = Object.fromEntries(['debug', 'info', 'warn', 'error'].map((level) => [level, (...args) => logs.push(args)]))
   const adapter = new OpenCodeFreeAdapter({ list: async () => [] }, {
-    providerRoute: 'opencode-free', recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: true, logger, pool,
+    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: true, logger, pool,
     dispatcherFor: (url) => ({ url }),
   })
   return { adapter, seen, logs }
@@ -120,7 +120,7 @@ test('without a pool the adapter still uses a plain fetch', async (t) => {
     return new Response(streamOf('PLAIN'), { status: 200 })
   })
   const adapter = new OpenCodeFreeAdapter({ list: async () => [] }, {
-    providerRoute: 'opencode-free', recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: true,
+    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: true,
   })
   const result = await run(adapter)
   assert.equal(result.text, 'PLAIN')

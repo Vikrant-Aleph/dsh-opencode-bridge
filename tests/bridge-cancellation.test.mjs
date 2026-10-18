@@ -4,7 +4,7 @@ import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 
 function adapter() {
   return new OpenCodeFreeAdapter({ list: async () => [] }, {
-    providerRoute: 'opencode-free', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
+    providerRoute: 'opencode-bridge', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
     requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true,
   })
 }
@@ -15,7 +15,7 @@ const events = [
   { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
 ]
 const body = events.map(e => `data: ${JSON.stringify(e)}\n\n`).join('') + 'data: [DONE]\n\n'
-const options = signal => ({ provider: 'opencode-free', model: 'fixture-free', messages: [], tools: [native], signal })
+const options = signal => ({ provider: 'opencode-bridge', model: 'fixture-free', messages: [], tools: [native], signal })
 
 test('cancellation while parsing one buffered SSE chunk never releases buffered tool calls', async t => {
   const controller = new AbortController()

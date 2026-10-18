@@ -47,7 +47,7 @@ pnpm install && pnpm build && pnpm pack
 dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.0.tgz
 ```
 
-Restart the profile, then pick any `opencode-free/*` model in the model
+Restart the profile, then pick any `opencode-bridge/*` model in the model
 selector. No configuration is required — the plugin is keyless.
 
 ## Configuration (optional)
@@ -55,24 +55,24 @@ selector. No configuration is required — the plugin is keyless.
 All settings have working defaults; change them in `cordis.patch.yml`:
 
 ```yaml
-- id: dsh-opencode-free
+- id: dsh-opencode-bridge
   config:
     baseUrl: https://opencode.ai/inference/v1   # relay base
     apiKey: public                              # signed-out sentinel
     userAgent: opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14
     client: cli                                 # x-opencode-client
     project: global                             # x-opencode-project
-    providers: [opencode-free]                  # provider route(s)
+    providers: [opencode-bridge]                  # provider route(s)
     includeDeprecated: false                    # also offer deprecated models still listed live
     extraModels: []                             # force-add model ids
     requestTimeoutMs: 600000
     proxies: []                                 # direct only; e.g. [direct, 'http://127.0.0.1:7890']
     proxyCooldownMs: 60000                       # base cooldown after HTTP 429
-    proxyStorePath: ''                           # empty = $DSH_PROFILE_DIR (or ~/.dsh) + /data/dsh-opencode-free/proxies.json
+    proxyStorePath: ''                           # empty = $DSH_PROFILE_DIR (or ~/.dsh) + /data/dsh-opencode-bridge/proxies.json
     toolFingerprint: true                       # send the tool fingerprint
     toolTranslation: true                       # allow validated read/search decoys; never shell
-    logLevel: info                              # debug|info|warn|error|off
-    logDir: ''                                  # empty = ~/.dsh/logs/dsh-opencode-free
+    logLevel: warn                              # debug|info|warn|error|off
+    logDir: ''                                  # empty = ~/.dsh/logs/dsh-opencode-bridge
     logMaxBytes: 524288                         # per-file size cap before rotation
     logMaxFiles: 5                              # total files kept; oldest deleted first
 ```
@@ -124,7 +124,7 @@ for the local IP, or HTTP(S) proxy URLs/bare `host:port`. Duplicates are removed
 SOCKS/other schemes are rejected. HTTP proxy credentials can be supplied as
 `http://user:password@host:port` (URL-encode reserved characters).
 
-In Settings → **OpenCode Free — Proxies**, add/remove entries, refresh health or
+In Settings → **OpenCode Bridge** → **Egress rotation (optional)**, add/remove entries, refresh health or
 **Test all**. Rows show a credential-redacted address, ready/cooling with remaining
 seconds and lastCode. Test all calls relay `GET /models` per entry: no prompts or
 completion request, but still network traffic subject to upstream rules; 429 cools
@@ -141,7 +141,7 @@ When all entries cool, the earliest recovery gets a best-effort attempt instead
 of a local hard failure. Streaming-body failures are surfaced, never retried.
 
 The UI-saved list overrides config at startup and is stored at
-`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-free/proxies.json` unless
+`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-bridge/proxies.json` unless
 `proxyStorePath` overrides it. Health/UI reads omit userinfo; remove/reset do not
 echo saved passwords. Adding necessarily sends the newly entered URL to the Host.
 **Proxy passwords remain plaintext in this local JSON, not encrypted.**
@@ -151,7 +151,7 @@ proven to depend only on IP. Use only authorized proxies and respect service lim
 
 ## Logging & diagnostics
 
-`opencode_free_log` supports `action: read|stat|clear|level`. Call sites aim to
+`opencode_bridge_log` supports `action: read|stat|clear|level`. Call sites aim to
 record metadata only, with best-effort secret redaction and oldest-first rotation.
 These are not perfect privacy or strict byte-cap guarantees: error text and
 metadata can be sensitive, a write may overshoot the rotation threshold, and

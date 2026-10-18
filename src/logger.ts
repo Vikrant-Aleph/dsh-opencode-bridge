@@ -1,5 +1,5 @@
 /**
- * Leveled file logger for dsh-opencode-free.
+ * Leveled file logger for dsh-opencode-bridge.
  *
  * Design constraints (see TECHNICAL.md "Logging & diagnostics"):
  *
@@ -55,7 +55,7 @@ export interface LogRecord {
 export interface LoggerOptions {
   /** Minimum level written to disk. `off` disables file output entirely. */
   level: LogLevel
-  /** Directory holding `dsh-opencode-free.log` and its rotated siblings. */
+  /** Directory holding `dsh-opencode-bridge.log` and its rotated siblings. */
   dir: string
   /** Size ceiling per file in bytes. */
   maxBytes: number
@@ -88,7 +88,7 @@ const MEMORY_FALLBACK_LIMIT = 200
 /** Default log directory: profile logs dir when known, else `~/.dsh/logs`. */
 export function defaultLogDir(): string {
   const base = process.env.DSH_PROFILE_DIR || path.join(os.homedir(), '.dsh')
-  return path.join(base, 'logs', 'dsh-opencode-free')
+  return path.join(base, 'logs', 'dsh-opencode-bridge')
 }
 
 export class PluginLogger {
@@ -106,7 +106,7 @@ export class PluginLogger {
     this.dir = options.dir
     this.maxBytes = Math.max(256, options.maxBytes)
     this.maxFiles = Math.max(1, Math.min(50, options.maxFiles))
-    this.base = path.join(this.dir, 'dsh-opencode-free.log')
+    this.base = path.join(this.dir, 'dsh-opencode-bridge.log')
     this.secrets = (options.secrets ?? []).filter((s) => typeof s === 'string' && s.length >= 4 && s !== 'public')
     this.mirror = options.mirror
     this.pruneExcess()
@@ -319,7 +319,7 @@ export class PluginLogger {
 export function consoleLogger(level: LogLevel = 'debug'): PluginLogger {
   return new PluginLogger({
     level,
-    dir: path.join(os.tmpdir(), 'dsh-opencode-free-console'),
+    dir: path.join(os.tmpdir(), 'dsh-opencode-bridge-console'),
     maxBytes: 64 * 1024,
     maxFiles: 1,
   })

@@ -261,7 +261,7 @@ export interface ProxyStore {
 
 export function defaultProxyStorePath(): string {
   const base = process.env.DSH_PROFILE_DIR || path.join(os.homedir(), '.dsh')
-  return path.join(base, 'data', 'dsh-opencode-free', 'proxies.json')
+  return path.join(base, 'data', 'dsh-opencode-bridge', 'proxies.json')
 }
 
 export function loadProxyStore(file: string): ProxyStore {

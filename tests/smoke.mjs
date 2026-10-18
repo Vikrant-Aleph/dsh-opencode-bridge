@@ -45,7 +45,7 @@ console.log('models:', models.map((m) => m.id).join(', '))
 
 // 3. Live streaming call
 const adapter = new OpenCodeFreeAdapter(catalog, {
-  providerRoute: 'opencode-free',
+  providerRoute: 'opencode-bridge',
   recipe: {
     baseUrl: 'https://opencode.ai/inference/v1',
     apiKey: 'public',
@@ -62,7 +62,7 @@ const adapter = new OpenCodeFreeAdapter(catalog, {
 
 const messageId = 'ses_smoke'
 const options = {
-  provider: 'opencode-free',
+  provider: 'opencode-bridge',
   model: process.argv[2] ?? 'glm-5.3-flash-free',
   messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly: SMOKE_OK' }], id: 'm1', source: { kind: 'user' } }],
   system: 'You are a test harness.',

@@ -2,7 +2,7 @@
 
 [English](TECHNICAL.md) | 中文
 
-`dsh-opencode-free` 插件的工程文档：免费层闸门如何被逆向、线上协议如何被复刻、
+`dsh-opencode-bridge` 插件的工程文档：免费层闸门如何被逆向、线上协议如何被复刻、
 适配器如何映射到 DSH 的 LLM 契约，以及上游变化时该怎么办。
 
 读者：本插件的维护者，以及想找一个"厂商线上协议型 `LlmAdapter`"完整范例的 DSH 插件作者。
@@ -93,7 +93,7 @@ HTTP(S) CONNECT 代理发出（见6.9）。
 主要的 DSH LLM 适配/发现接缝为：
 
 1. **`ctx.llm.registerAdapter(providers, adapter)`** —— 提供 provider 路由
-   （`opencode-free`）与流式实现。
+   （`opencode-bridge`）与流式实现。
 2. **`ctx.llm.registerModelDiscovery(id, fn)`** —— 提供 GUI 的模型列表。
 
 它不修改 agent loop、不执行工具。可选工具注册新增 `opencode_bridge_audit`
@@ -124,7 +124,7 @@ HTTP(S) CONNECT 代理发出（见6.9）。
 | [docs/research-notes/](docs/research-notes/README.md) | — | 可公开的调研笔记（自研分析），仓库不含第三方源码。 |
 | `src/catalog.ts` | — | `FreeModelCatalog`：元数据/实时列表筛选、缓存与降级。 |
 | `src/logger.ts` | 326 | `PluginLogger`：分级、脱敏、按大小轮转（最旧优先清理）、内存兜底。见第 15 章。 |
-| `src/log-service.ts` | 245 | `LogService` + RPC 路由 + `opencode_free_log` agent 工具（一套实现两个调用方）。 |
+| `src/log-service.ts` | 245 | `LogService` + RPC 路由 + `opencode_bridge_log` agent 工具（一套实现两个调用方）。 |
 | [client.js](client.js) | — | 日志页order30、代理增删/探测页order31；浏览器模块非tsc产物。见6.9、15.3、15.6。 |
 | `cordis.patch.yml` | 4 | 把插件行插入配置层的 bundle 补丁。 |
 | `tests/logger.test.mjs` | — | 日志模块密闭单测（分级/脱敏/轮转/读取）。 |
@@ -360,7 +360,7 @@ stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 
 | 钩子 | 目的 |
 |---|---|
-| `providerInfo(provider)` | GUI 显示名 `OpenCode Free`。 |
+| `providerInfo(provider)` | GUI 显示名 `OpenCode Bridge`。 |
 | `listModels(provider)` | 目录驱动的模型选择器。 |
 | `resolveModel(provider, model, signal)` | 发布 `context.contextWindow`、`defaultMaxTokens`、`reasoning.efforts`。 |
 | `prepareCall(provider, model, signal)` | 把元数据与流入口绑定到同一代实现。 |
@@ -371,7 +371,7 @@ finish，但本适配器同时做内部捕获，以便附加稳定的失败码�
 ### 6.2 注册与生命周期
 
 ```ts
-export const name = 'dsh-opencode-free'
+export const name = 'dsh-opencode-bridge'
 export const inject = ['llm']
 export function apply(ctx: Context, config: Config): void
 ```
@@ -380,8 +380,8 @@ export function apply(ctx: Context, config: Config): void
 
 1. `ctx.llm.registerAdapter(providers, adapter)` → 返回清理器。
 2. `ctx.llm.registerConfigurableProviders(...)` → 设置界面元数据
-   （`displayName: 'OpenCode Free'`、`settingsNs: 'opencode-free'`）。
-3. `ctx.llm.registerModelDiscovery('opencode-free', fn)` → 每个模型的
+   （`displayName: 'OpenCode Bridge'`、`settingsNs: 'opencode-bridge'`）。
+3. `ctx.llm.registerModelDiscovery('opencode-bridge', fn)` → 每个模型的
    `id`、`name`、`contextWindow`、`maxTokens`。
 
 清理交给 Cordis 管理：
@@ -594,7 +594,7 @@ base 默认60秒、最小钳到1秒；传输冷却为 `min(15秒,base)`。
 **持久化与凭据。** 启动时有效设置 JSON store 优先于 config，包括已保存空列表（解析为直连）；
 文件缺失/不可读/非法才退 config；解析JSON前剥UTF-8 BOM以兼容PowerShell/编辑器。
 默认位置为
-`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-free/proxies.json`，可设 `proxyStorePath`。
+`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-bridge/proxies.json`，可设 `proxyStorePath`。
 编辑先作用于内存池再保存；保存失败会报告，内存变更不保证重启后保留。
 文件含原始 URL 与**明文未加密代理密码**，用户账户可读；代码不构成专用安全 ACL 或秘密库。
 
@@ -603,9 +603,10 @@ health/日志/UI display 去掉 userinfo；稳定 id 形如 `proxy:host:port#<8�
 `{reset:true}` 操作，而非读取/回传已有凭据；添加必然把新输入 URL 发给 Host，输入框也非密码掩码。
 不要截图敏感输入或发布 store；Host service 另接受持有原值者用 `{proxies}` 整体替换。
 
-**管理与探测。** 两处 settings.section 并存：日志 order30、
-“OpenCode Free — 代理” order31。代理页可添加/删除、测试全部、刷新，显示脱敏地址、
-就绪/冷却剩余秒与 lastCode。包私有 RPC 为 `/api/opencode-free-proxies/{read,write,test}`。
+**管理与探测。** 设置里只有**一个** `settings.section`（id `opencode-bridge`，order 30，
+导航名 “OpenCode Bridge”）；页内用两个浏览器式标签页区分“诊断日志”与“出口代理轮换（可选）”，
+避免同一插件在设置里出现两处入口。代理标签可添加/删除、测试全部、刷新，显示脱敏地址、
+就绪/冷却剩余秒与 lastCode。包私有 RPC 为 `/api/opencode-bridge-proxies/{read,write,test}`。
 测试全部逐条 GET relay `/models`（默认每条8秒超时），不发提示词或补全请求；但会改变健康状态：
 429冷却、传输失败短冷却、成功清零。它是可达性/状态检查，不是模型/工具/剩余额度验证，
 仍有受上游规则约束的网络流量。UI 渲染和真实 RPC 需另验；任意 `/api` 路径都可返回
@@ -667,22 +668,34 @@ provider.api             → api             → 按请求覆盖对话端点
 | `userAgent` | string | `opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14` | 必须包含足够新的 `opencode/<版本>`。 |
 | `client` | string | `cli` | `x-opencode-client`。 |
 | `project` | string | `global` | `x-opencode-project`。 |
-| `providers` | string[] | `['opencode-free']` | 本适配器服务的 provider 路由。 |
+| `providers` | string[] | `['opencode-bridge']` | 本适配器服务的 provider 路由。 |
 | `includeDeprecated` | boolean | `false` | 是否提供已弃用但在线的模型。 |
 | `extraModels` | string[] | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
 | `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S) CONNECT/直连条目；启动时已保存 store 优先。 |
 | `proxyCooldownMs` | number | `60000` | 429 基础冷却，最小钳到1秒，指数递增。 |
-| `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-free/proxies.json`，URL/凭据明文存储。 |
+| `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-bridge/proxies.json`，URL/凭据明文存储。 |
 | `toolFingerprint` | boolean | `true` | 注入指纹并遮蔽冲突；false 保留调用方工具且不加诱饵。 |
 | `toolTranslation` | boolean | `true` | 允许保守校验的只读/搜索诱饵；false 拒绝诱饵但仍恢复别名。注入 shell 始终拒绝。 |
-| `logLevel` | string | `info` | 写盘最低级别：`debug`\|`info`\|`warn`\|`error`\|`off`（`off` 关闭文件日志）。 |
-| `logDir` | string | `''` | 日志目录；空 = `<DSH_PROFILE_DIR 或 ~/.dsh>/logs/dsh-opencode-free`（实测 Host 进程通常没有 `DSH_PROFILE_DIR`，因此多为 `~/.dsh/logs/dsh-opencode-free`）。 |
+| `logLevel` | string | `warn` | 写盘最低级别：`debug`\|`info`\|`warn`\|`error`\|`off`（`off` 关闭文件日志）。 |
+| `logDir` | string | `''` | 日志目录；空 = `<DSH_PROFILE_DIR 或 ~/.dsh>/logs/dsh-opencode-bridge`（实测 Host 进程通常没有 `DSH_PROFILE_DIR`，因此多为 `~/.dsh/logs/dsh-opencode-bridge`）。 |
 | `logMaxBytes` | number | `524288` | 单个日志文件大小上限（字节），超出即轮转。 |
 | `logMaxFiles` | number | `5` | 保留文件总数（当前 + 轮转）；溢出时**最旧的先删**。 |
 
 在 profile 中覆盖配置是**整行替换**（无深合并），
 因此覆盖行必须重述它想保留的每一个键。
+
+**0.4.0 迁移注意（路由与标识改名）。** provider 路由由 `opencode-free` 改为
+`opencode-bridge`，行 id 改为 `dsh-opencode-bridge`。迁移时：
+
+1. 如果你的 profile 覆盖行里写过 `providers: [opencode-free]`，改成
+   `providers: [opencode-bridge]`；不写就用新默认值。
+2. 若把 `dsh-opencode-free` 当作默认模型 provider（例如 `agent-default-model`），
+   把 provider 改成 `opencode-bridge`、模型 id 前缀改成 `opencode-bridge/`。
+3. 历史会话里已选中的 `opencode-free/*` 模型不会自动跟随，需重新选择一次。
+4. 日志目录默认从 `~/.dsh/logs/dsh-opencode-free` 变为 `.../dsh-opencode-bridge`；
+   需要保留旧日志就手动移动目录（插件不会读旧路径）。
+5. 代理池 store 同样改到 `~/.dsh/data/dsh-opencode-bridge/proxies.json`。
 
 ---
 
@@ -797,7 +810,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 1. **线上层** —— `tests/smoke.mjs` 返回 `finish{kind:'stop'}`，
    文本非空，`ses_` id 合法。
-2. **宿主层** —— 在运行中的 DSH profile 内，经 provider `opencode-free`
+2. **宿主层** —— 在运行中的 DSH profile 内，经 provider `opencode-bridge`
    路由的一次性模型调用返回预期答案，证明适配器已注册、被发现，
    且能通过 `LlmRuntime` 抵达。
 
@@ -856,6 +869,9 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-18 | 0.4.0 | **设置界面合并与改名**：原“日志/代理”两处 settings.section 合成一个 `opencode-bridge` 页（页内两个标签），插件显示名由 “OpenCode Free” 改为 “OpenCode Bridge”（`locale` 标题、`providerInfo`、`displayName`、设置导航）。 | 3、6.2、6.9、15.4 |
+| 2026-10-18 | 0.4.0 | **路由与标识统一改名**：provider 路由 `opencode-free` → `opencode-bridge`（默认 `providers`、model discovery、`settingsNs`），插件行 id 与导出名 → `dsh-opencode-bridge`，RPC 命名空间 → `/api/opencode-bridge-{logs,proxies}/*`，工具 `opencode_free_log` → `opencode_bridge_log`，日志目录/文件名与代理 store → `dsh-opencode-bridge`。旧会话里已选的 `opencode-free/*` 模型需重新选择；磁盘上没有需要迁移的 profile 配置（迁移说明见第 8 章）。 | 0、3、6.2、6.9、8、11、15 |
+| 2026-10-18 | 0.4.0 | **默认日志级别改为 `warn`**（原 `info`）：`Config.logLevel` 默认值与非法值兜底同步改为 `warn`，设置页下拉默认也显示 `warn`，减少默认写盘量。 | 8、15 |
 | 2026-10-18 | 0.4.0 | **仓库整理**：`research/` 确认不上传（第三方源码/二进制）；把两份自研调研笔记整理到 `docs/research-notes/` 并加入版本库；删除重复的上游 tarball 与未使用的 `bun.exe`（约 92 MiB）。 | 附录 A |
 | 2026-10-18 | 0.4.0 | **运行时要求**：声明 `engines.node: ">=20.3"`（`AbortSignal.any` 所需），两份 README 的开发段写明 Node 版本与 `lib/` 未提交、需先 `pnpm build`。 | 9、附录 A |
 | 2026-10-18 | 0.4.0 | **发布规约**：第 0 章新增“升版本必须同步两份 README 的安装命令与 tarball 示例版本”，并加 `tests/readme-version.test.mjs` 守卫（命令/tarball 版本必须等于 `package.json`）。同时把 README 安装命令改为 `dsh plugin --profile desktop add dsh-opencode-bridge@<版本>`。 | 0、11、附录 A |
@@ -864,7 +880,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 | 2026-10-18 | 0.3.0 | **离线作用域审计**：可选 `opencode_bridge_audit` 只用 `tools.schemas(exec.agent)`，有界输出名字/别名/路线决定；不退全局，不导出聊天/入参/schema 描述，不联网不执行。新增桥/审计回归及固定 HEAD 比较；收窄隐私/轮转与 Desktop 验证声明。 | 3、6.4.1、11–15、附录 A |
 | 2026-10-18 | 0.2.1 | **发布准备**：npm 包名定为 `dsh-opencode-bridge`（无 scope 的 `dsh-opencode-free` 已被他人占用；scoped 名辨识度不足，改为桥接寓意的独立名字）；`client.js` 模块 id 与 `cordis.patch.yml` 的 `name` 同步包名（行 `id` 不变）；新增 LICENSE、`.gitignore`、`prepack` 构建钩子；插件介绍移除设置日志查看器的宣传文案。 | 3、14、附录 A |
 | 2026-10-18 | 0.2.1 | **客户端激活加固**：每步 try/catch、可选服务访问、locale 先注册后绑定、不设 `immediately:true`，新增敌对 ctx 回归测试。测试仅覆盖 mock 激活，不证明 Desktop 崩溃已复现、根因已确认或真实恢复已通过。 | 3、15.6 |
-| 2026-10-18 | 0.2.0 | 新增分级日志（脱敏 + 按大小轮转自动清理最旧）、DSH 设置界面日志查看/复制 UI、`opencode_free_log` agent 工具；建立文档维护规约。 | 0、3、8、11、13、14、15 |
+| 2026-10-18 | 0.2.0 | 新增分级日志（脱敏 + 按大小轮转自动清理最旧）、DSH 设置界面日志查看/复制 UI、`opencode_bridge_log` agent 工具；建立文档维护规约。 | 0、3、8、11、13、14、15 |
 | 2026-10-17 | 0.1.0 | 首版：三层闸门复刻、`OpenCodeFreeAdapter`、免费模型目录、工具遮蔽/翻译。 | 1–13 |
 
 ---
@@ -907,7 +923,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 ### 15.3 轮转与自动清理
 
-追加前按 `logMaxBytes`（默认 512 KiB）检查阈值并触发轮转：`dsh-opencode-free.log`
+追加前按 `logMaxBytes`（默认 512 KiB）检查阈值并触发轮转：`dsh-opencode-bridge.log`
 → `.1` → `.2` …，按 `logMaxFiles`（默认 5）尝试最旧优先清理。这是 best-effort 保留，
 **不是** `logMaxBytes × logMaxFiles` 的严格上限：超大行可越过阈值，轮转/删除可能失败，
 单文件配置还有 `.1` 边界问题。启动仅在固定扫描范围内清理数字后缀。
@@ -918,12 +934,12 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 `src/log-service.ts` 的 `LogService` 是唯一的读/清/改级操作实现：
 
 - **设置界面 UI**（`client.js`）：注册进 `settings.section` 插槽
-  （设置页 "OpenCode Free"），提供级别过滤、刷新、**复制全部**（Clipboard API
+  （设置页 “OpenCode Bridge” → “诊断日志”标签），提供级别过滤、刷新、**复制全部**（Clipboard API
   带 `execCommand` 兜底）、清空（带确认）。数据经包私有 JSON RPC
-  `/api/opencode-free-logs/{read,stat,clear,level}` 获取——与已验证的
+  `/api/opencode-bridge-logs/{read,stat,clear,level}` 获取——与已验证的
   `connection.fetch.register` / `connection.rpc.call` 通道同款（见
   `dsh-tool-antigravity` 的实现）。
-- **agent 工具 `opencode_free_log`**：`action: read|stat|clear|level`，
+- **agent 工具 `opencode_bridge_log`**：`action: read|stat|clear|level`，
   走同一 `LogService`。模型可自行拉取诊断日志；仅 best-effort 脱敏，分享/回传上下文前仍需复核。
 
 UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改配置"路径——

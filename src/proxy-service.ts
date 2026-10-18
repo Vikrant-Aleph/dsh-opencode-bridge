@@ -19,7 +19,7 @@ import {
   type ProxyHealth,
 } from './proxy-pool.js'
 
-export const PROXY_RPC_NAMESPACE = 'opencode-free-proxies'
+export const PROXY_RPC_NAMESPACE = 'opencode-bridge-proxies'
 const RPC_CHANNEL = '/api'
 const RPC_ENDPOINTS = ['read', 'write', 'test'] as const
 type RpcEndpoint = (typeof RPC_ENDPOINTS)[number]
@@ -186,7 +186,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** `/api/opencode-free-proxies/{read,write,test}` for the Settings page. */
+/** `/api/opencode-bridge-proxies/{read,write,test}` for the Settings page. */
 export function registerProxyAccess(ctx: Context, service: ProxyService): () => void {
   const disposers: Array<() => void | Promise<void>> = []
 
@@ -196,8 +196,9 @@ export function registerProxyAccess(ctx: Context, service: ProxyService): () => 
     const routeDisposers = RPC_ENDPOINTS.map((endpoint) =>
       connection.fetch.register({
         path: `${RPC_CHANNEL}/${PROXY_RPC_NAMESPACE}/${endpoint}`,
+        methods: ['POST'],
         requestBody: 'buffered',
-        handler: async (request: Request) => {
+        fetch: async (request: Request) => {
           let envelope: RpcEnvelope
           try {
             envelope = (await request.json()) as RpcEnvelope
@@ -206,13 +207,15 @@ export function registerProxyAccess(ctx: Context, service: ProxyService): () => 
           }
           const rpcId = typeof envelope.rpcId === 'string' ? envelope.rpcId : ''
           const method = typeof envelope.method === 'string' ? envelope.method : ''
+          // Same validated envelope as the log routes (see log-service.ts).
+          const reply = (result: unknown) => Response.json({ type: 'server-response', rpcId, result })
           const failure = (code: string, message: string) =>
-            Response.json({ rpcId, ok: false, error: { code, message, details: {} } })
+            reply({ ok: false, error: { code, message, details: {} } })
           if (method !== `${PROXY_RPC_NAMESPACE}/${endpoint}`) return failure('bad-request', 'proxy request method does not match its endpoint')
           try {
-            if (endpoint === 'read') return Response.json({ rpcId, ok: true, value: service.read() })
-            if (endpoint === 'write') return Response.json({ rpcId, ok: true, value: service.write(envelope.payload) })
-            return Response.json({ rpcId, ok: true, value: await service.test() })
+            if (endpoint === 'read') return reply({ ok: true, value: service.read() })
+            if (endpoint === 'write') return reply({ ok: true, value: service.write(envelope.payload) })
+            return reply({ ok: true, value: await service.test() })
           } catch (error) {
             return failure('internal', error instanceof Error ? error.message : String(error))
           }

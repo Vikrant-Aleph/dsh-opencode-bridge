@@ -46,31 +46,31 @@ pnpm install && pnpm build && pnpm pack
 dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.0.tgz
 ```
 
-重启 profile 后，在模型选择器里选任意 `opencode-free/*` 模型即可，无需任何配置。
+重启 profile 后，在模型选择器里选任意 `opencode-bridge/*` 模型即可，无需任何配置。
 
 ## 配置（可选）
 
 所有配置项均有可用默认值，可在 `cordis.patch.yml` 中覆盖（覆盖行需写在顶层并重述全部键）：
 
 ```yaml
-- id: dsh-opencode-free
+- id: dsh-opencode-bridge
   config:
     baseUrl: https://opencode.ai/inference/v1   # relay 地址
     apiKey: public                              # 未登录哨兵值
     userAgent: opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14
     client: cli                                 # x-opencode-client
     project: global                             # x-opencode-project
-    providers: [opencode-free]                  # 提供方路由
+    providers: [opencode-bridge]                  # 提供方路由
     includeDeprecated: false                    # 是否提供仍在线的 deprecated 模型
     extraModels: []                             # 强制附加的模型 id
     requestTimeoutMs: 600000
     proxies: []                                 # 仅直连；如 [direct, 'http://127.0.0.1:7890']
     proxyCooldownMs: 60000                       # HTTP 429 后的基础冷却
-    proxyStorePath: ''                           # 空 = $DSH_PROFILE_DIR（未设置则 ~/.dsh）+ /data/dsh-opencode-free/proxies.json
+    proxyStorePath: ''                           # 空 = $DSH_PROFILE_DIR（未设置则 ~/.dsh）+ /data/dsh-opencode-bridge/proxies.json
     toolFingerprint: true                       # 发送工具指纹
     toolTranslation: true                       # 允许已验证的只读/搜索诱饵；不映射 shell
-    logLevel: info                              # debug|info|warn|error|off
-    logDir: ''                                  # 空 = ~/.dsh/logs/dsh-opencode-free
+    logLevel: warn                              # debug|info|warn|error|off
+    logDir: ''                                  # 空 = ~/.dsh/logs/dsh-opencode-bridge
     logMaxBytes: 524288                         # 单文件大小上限，超出即轮转
     logMaxFiles: 5                              # 保留文件总数，最旧的先删
 ```
@@ -113,7 +113,7 @@ DSH 自身校验并执行。原生/别名调用也要求参数是 JSON 对象（
 其它条目可用 HTTP(S) 代理 URL 或裸 `host:port`。去重后保留顺序，SOCKS/其它协议拒绝。
 HTTP 代理凭据可写 `http://user:password@host:port`，特殊字符需 URL 编码。
 
-设置 → **OpenCode Free — 代理**可添加/删除、刷新状态、**测试全部**。
+设置 → **OpenCode Bridge** → **出口代理轮换（可选）**标签可添加/删除、刷新状态、**测试全部**。
 每行显示去掉凭据的地址、就绪/冷却（剩余秒）及 lastCode。测试逐条访问 relay
 `GET /models`，不发提示词或补全请求，但仍产生受上游规则约束的网络流量；429 会冷却该条。
 离线测试本身不证明浏览器渲染或真实 RPC 已验收。
@@ -125,14 +125,14 @@ HTTP 代理凭据可写 `http://user:password@host:port`，特殊字符需 URL �
 全池冷却时仍尽力尝试最早恢复者，不在本地直接硬失败；流响应体中途失败直接报错，不重试。
 
 UI 保存列表在启动时优先于 config，默认存于
-`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-free/proxies.json`，可由 `proxyStorePath` 覆盖。
+`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-bridge/proxies.json`，可由 `proxyStorePath` 覆盖。
 health/UI 读取去掉 userinfo；删除/重置不回传已有密码，但添加必然将新输入 URL 发给 Host。
 **代理密码在本地 JSON 中明文保存，未加密。**仅支持 HTTP(S) CONNECT，不 patch 全局 fetch/dispatcher。
 不同代理不一定有不同公网 IP，上游配额也未证实只由 IP 决定。只使用获授权代理并遵守服务限制。
 
 ## 日志与诊断
 
-`opencode_free_log` 支持 `action: read|stat|clear|level`。调用点力求只记元数据，
+`opencode_bridge_log` 支持 `action: read|stat|clear|level`。调用点力求只记元数据，
 并提供 best-effort 秘密脱敏、最旧优先轮转；这不是完美隐私或严格字节上限保证。
 错误正文与元数据仍可能敏感，单次写入可能超出轮转阈值，清理也可能失败。分享前请复核日志。
 

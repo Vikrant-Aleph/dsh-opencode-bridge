@@ -12,6 +12,10 @@ import vm from 'node:vm'
 const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
 
 function loadFactory() {
+  return loadFactoryWith(false)
+}
+
+function loadFactoryWith(nodes) {
   let captured = null
   const errors = []
   const sandbox = {
@@ -41,7 +45,11 @@ function loadFactory() {
   assert.equal(captured.id, 'dsh-opencode-bridge')
 
   const fakeReact = {
-    createElement: () => null,
+    // `nodes: true` builds inspectable trees so a test can assert the markup
+    // (tab roles/labels) instead of only that rendering does not throw.
+    createElement: nodes
+      ? (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) })
+      : () => null,
     useState: (v) => [typeof v === 'function' ? v() : v, () => {}],
     useEffect: () => {},
     useCallback: (fn) => fn,
@@ -99,14 +107,59 @@ test('healthy ctx: locale registered before bind, settings section registered', 
     },
   }
   assertNoThrow(mod, ctx, 'healthy')
-  assert.deepEqual(order, ['register', 'bind', 'inject:settings.section', 'inject:settings.section'])
-  assert.equal(registrations.length, 2)
-  assert.deepEqual(registrations.map((r) => r.id), ['opencode-free-logs', 'opencode-free-proxies'])
-  for (const registration of registrations) {
-    assert.equal(typeof registration.label, 'function')
-    assert.ok(registration.label().length > 0)
-  }
+  assert.deepEqual(order, ['register', 'bind', 'inject:settings.section'])
+  assert.equal(registrations.length, 1, 'one settings page collects logs and proxies')
+  assert.equal(registrations[0].id, 'opencode-bridge')
+  assert.equal(typeof registrations[0].label, 'function')
+  assert.ok(registrations[0].label().length > 0)
   assert.equal(errors.length, 0)
+})
+
+test('settings page renders browser-style tabs with one panel', () => {
+  const { mod } = loadFactoryWith(true)
+  const labels = {
+    pageTitle: 'OpenCode Bridge',
+    pageIntro: 'intro',
+    tabLogs: '诊断日志',
+    tabProxies: '出口代理轮换（可选）',
+  }
+  const t = (key) => labels[key] ?? key
+  let component
+  const ctx = {
+    effect: (fn) => { fn(); return () => {} },
+    on: () => () => {},
+    get: () => undefined,
+    locale: { register: () => () => {}, bind: () => t },
+    slots: {
+      inject: (key, cb) => { cb(); return () => {} },
+      register: (_opts, next) => { component = next; return () => {} },
+    },
+  }
+  mod.apply(ctx)
+  assert.equal(typeof component, 'function')
+
+  const tree = component({ t, rpc: null })
+  const flat = []
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return
+    flat.push(node)
+    for (const child of node.children ?? []) walk(child)
+  }
+  walk(tree)
+
+  const tabs = flat.filter((n) => n.props && n.props.role === 'tab')
+  assert.equal(tabs.length, 2, 'exactly two tabs')
+  assert.deepEqual(tabs.map((n) => n.children.join('')), ['诊断日志', '出口代理轮换（可选）'])
+  assert.deepEqual(tabs.map((n) => n.props['aria-selected']), [true, false])
+  assert.equal(tabs[0].props.className, 'ocf-tab is-active')
+  assert.equal(tabs[1].props.className, 'ocf-tab')
+
+  const strip = flat.find((n) => n.props && n.props.className === 'ocf-tabs')
+  assert.ok(strip, 'tab strip uses the browser-tab container class')
+  const panel = flat.find((n) => n.props && n.props.className === 'ocf-tabpanel')
+  assert.ok(panel, 'one shared panel below the tabs')
+  assert.equal(panel.props.role, 'tabpanel')
+  assert.equal(panel.props['aria-labelledby'], 'ocf-tab-logs')
 })
 
 test('hostile ctx: every service missing — apply still succeeds', () => {

@@ -2,7 +2,7 @@
 
 [中文](TECHNICAL.zh.md) | English
 
-Engineering documentation for the `dsh-opencode-free` DSH plugin: how the
+Engineering documentation for the `dsh-opencode-bridge` DSH plugin: how the
 OpenCode free-tier gate was reverse-engineered, how the wire protocol is
 reproduced, how the adapter maps onto the DSH LLM contract, and what to do when
 the upstream changes.
@@ -108,7 +108,7 @@ route relay traffic through user-configured HTTP(S) CONNECT proxies (section 6.9
 The principal adapter/discovery seams of the DSH LLM service are:
 
 1. **`ctx.llm.registerAdapter(providers, adapter)`** — supplies the provider
-   route (`opencode-free`) and the streaming implementation.
+   route (`opencode-bridge`) and the streaming implementation.
 2. **`ctx.llm.registerModelDiscovery(id, fn)`** — supplies the GUI's model list.
 
 It does not modify the agent loop or execute tools. Optional tool registration
@@ -140,7 +140,7 @@ patch global HTTP entry points.
 | [docs/research-notes/](docs/research-notes/README.md) | — | Publishable research notes (own analysis); the repo ships no third-party sources. |
 | `src/catalog.ts` | — | `FreeModelCatalog`: metadata/live-list filtering, caching and degradation. |
 | `src/logger.ts` | 326 | `PluginLogger`: levels, redaction, size-based rotation (oldest-first cleanup), memory fallback. See chapter 15. |
-| `src/log-service.ts` | 245 | `LogService` + RPC routes + the `opencode_free_log` agent tool (one implementation, two callers). |
+| `src/log-service.ts` | 245 | `LogService` + RPC routes + the `opencode_bridge_log` agent tool (one implementation, two callers). |
 | [client.js](client.js) | — | Log panel (order30) and proxy add/remove/probe panel (order31); browser module, not a tsc product. See 6.9, 15.3, 15.6. |
 | `cordis.patch.yml` | 4 | Bundle layer patch that inserts the plugin row. |
 | `tests/logger.test.mjs` | — | Hermetic unit tests for the logging module (levels/redaction/rotation/read). |
@@ -393,7 +393,7 @@ The plugin overrides four optional hooks:
 
 | Hook | Why |
 |---|---|
-| `providerInfo(provider)` | Display name `OpenCode Free` for the GUI. |
+| `providerInfo(provider)` | Display name `OpenCode Bridge` for the GUI. |
 | `listModels(provider)` | Catalog-driven model selector. |
 | `resolveModel(provider, model, signal)` | Publishes `context.contextWindow`, `defaultMaxTokens`, and `reasoning.efforts`. |
 | `prepareCall(provider, model, signal)` | Binds metadata and the stream entry point to one generation. |
@@ -405,7 +405,7 @@ it can attach a stable failure code.
 ### 6.2 Registration and lifecycle
 
 ```ts
-export const name = 'dsh-opencode-free'
+export const name = 'dsh-opencode-bridge'
 export const inject = ['llm']
 export function apply(ctx: Context, config: Config): void
 ```
@@ -415,8 +415,8 @@ older host degrades instead of throwing:
 
 1. `ctx.llm.registerAdapter(providers, adapter)` → returns a disposer.
 2. `ctx.llm.registerConfigurableProviders(...)` → settings-UI metadata
-   (`displayName: 'OpenCode Free'`, `settingsNs: 'opencode-free'`).
-3. `ctx.llm.registerModelDiscovery('opencode-free', fn)` → `id`, `name`,
+   (`displayName: 'OpenCode Bridge'`, `settingsNs: 'opencode-bridge'`).
+3. `ctx.llm.registerModelDiscovery('opencode-bridge', fn)` → `id`, `name`,
    `contextWindow`, `maxTokens` per model.
 
 Cleanup is Cordis-managed:
@@ -673,7 +673,7 @@ prove that a timed-out POST was never computed upstream, nor govern Host retries
 at startup, including an empty saved list (which resolves to direct). Missing/
 unreadable/invalid store falls back to config; UTF-8 BOM is stripped before JSON
 parsing (PowerShell/editor compatibility). Default path is
-`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-free/proxies.json`; `proxyStorePath`
+`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-bridge/proxies.json`; `proxyStorePath`
 overrides it. Edits apply to the live pool first, then save; failed save is
 reported and memory changes need not survive restart. The file contains raw
 URLs, including **plaintext unencrypted proxy passwords**, readable by the
@@ -687,10 +687,12 @@ credentials. Add necessarily sends the newly entered URL to the Host; the
 input is not a password-masked field. Avoid screenshots or publishing the store.
 The Host service also accepts full `{proxies}` replacement for owned values.
 
-**Management/probes.** Two settings.section entries coexist: logs order 30 and
-“OpenCode Free — Proxies” order 31. The proxy panel provides add/remove, Test all,
+**Management/probes.** Settings holds a **single** `settings.section`
+(id `opencode-bridge`, order 30, labelled “OpenCode Bridge”); two browser-style
+tabs inside it separate “Diagnostic log” from “Egress rotation (optional)”, so one plugin no longer appears
+as two unrelated entries. The proxy tab provides add/remove, Test all,
 refresh, redacted addresses, ready/cooling with remaining seconds and lastCode.
-Package-private RPC routes are `/api/opencode-free-proxies/{read,write,test}`.
+Package-private RPC routes are `/api/opencode-bridge-proxies/{read,write,test}`.
 Test all sequentially GETs relay `/models` per entry (8s timeout by default),
 without prompts or completion requests; it can change health (429 cools it,
 transport failure cools briefly, successful probe clears failures). It is a
@@ -760,22 +762,38 @@ keyless and config-free out of the box.
 | `userAgent` | string | `opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14` | Must contain a current `opencode/<version>`. |
 | `client` | string | `cli` | `x-opencode-client`. |
 | `project` | string | `global` | `x-opencode-project`. |
-| `providers` | string[] | `['opencode-free']` | Provider routes served by this adapter. |
+| `providers` | string[] | `['opencode-bridge']` | Provider routes served by this adapter. |
 | `includeDeprecated` | boolean | `false` | Offer deprecated-but-still-live models. |
 | `extraModels` | string[] | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
 | `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S) CONNECT proxy/direct entries; saved store wins at startup. |
 | `proxyCooldownMs` | number | `60000` | Base 429 cooldown, clamped to at least 1s; exponential escalation. |
-| `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-free/proxies.json`; plaintext URL/credential store. |
+| `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-bridge/proxies.json`; plaintext URL/credential store. |
 | `toolFingerprint` | boolean | `true` | Add fingerprint declarations and cloak conflicts; false preserves caller tools and adds no decoys. |
 | `toolTranslation` | boolean | `true` | Enable conservatively validated read/search decoys; false rejects decoys but still restores caller aliases. Injected shell is always rejected. |
-| `logLevel` | string | `info` | Minimum level written to disk: `debug`\|`info`\|`warn`\|`error`\|`off` (`off` disables file logging). |
-| `logDir` | string | `''` | Log directory; empty = `<DSH_PROFILE_DIR or ~/.dsh>/logs/dsh-opencode-free` (the Host process usually has no `DSH_PROFILE_DIR`, so in practice `~/.dsh/logs/dsh-opencode-free`). |
+| `logLevel` | string | `warn` | Minimum level written to disk: `debug`\|`info`\|`warn`\|`error`\|`off` (`off` disables file logging). |
+| `logDir` | string | `''` | Log directory; empty = `<DSH_PROFILE_DIR or ~/.dsh>/logs/dsh-opencode-bridge` (the Host process usually has no `DSH_PROFILE_DIR`, so in practice `~/.dsh/logs/dsh-opencode-bridge`). |
 | `logMaxBytes` | number | `524288` | Per-file size ceiling in bytes before rotation. |
 | `logMaxFiles` | number | `5` | Total files kept (active + rotated); the **oldest is deleted first** on overflow. |
 
 Overriding config in a profile is whole-row replacement (no deep merge), so an
 override row must restate every key it wants to keep.
+
+**0.4.0 migration (route and identifier rename).** The provider route changed
+from `opencode-free` to `opencode-bridge`, and the plugin row id is now
+`dsh-opencode-bridge`:
+
+1. If a profile override row sets `providers: [opencode-free]`, change it to
+   `providers: [opencode-bridge]`; omitting it picks up the new default.
+2. If you use `dsh-opencode-free` as the default model provider (for example in
+   `agent-default-model`), point the provider at `opencode-bridge` and prefix
+   model ids with `opencode-bridge/`.
+3. Sessions that already selected an `opencode-free/*` model do not follow the
+   rename; pick the model again once.
+4. The default log directory moves from `~/.dsh/logs/dsh-opencode-free` to
+   `.../dsh-opencode-bridge`; move it manually if you want the old lines kept.
+5. The proxy-pool store likewise moves to
+   `~/.dsh/data/dsh-opencode-bridge/proxies.json`.
 
 ---
 
@@ -912,7 +930,7 @@ An end-to-end acceptance run has two parts:
 1. **Wire level** — `tests/smoke.mjs` returns `finish{kind:'stop'}` with
    non-empty text and a valid `ses_` id.
 2. **Host level** — inside a running DSH profile, a one-shot model call routed
-   through provider `opencode-free` returns the expected answer, proving the
+   through provider `opencode-bridge` returns the expected answer, proving the
    adapter is registered, discovered, and reachable through `LlmRuntime`.
 
 ---
@@ -987,6 +1005,9 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-18 | 0.4.0 | **Settings merged and renamed**: the former log and proxy `settings.section` entries became one `opencode-bridge` page with two tabs, and the display name changed from “OpenCode Free” to “OpenCode Bridge” (`locale` title, `providerInfo`, `displayName`, settings nav). | 3, 6.2, 6.9, 15.4 |
+| 2026-10-18 | 0.4.0 | **Route and identifier rename**: provider route `opencode-free` → `opencode-bridge` (default `providers`, model discovery, `settingsNs`), plugin row id and exported name → `dsh-opencode-bridge`, RPC namespaces → `/api/opencode-bridge-{logs,proxies}/*`, tool `opencode_free_log` → `opencode_bridge_log`, log directory/file and proxy store → `dsh-opencode-bridge`. Sessions that already selected an `opencode-free/*` model must re-pick it; no profile configuration needed migrating (see chapter 8). | 0, 3, 6.2, 6.9, 8, 11, 15 |
+| 2026-10-18 | 0.4.0 | **Default log level is now `warn`** (was `info`): both the `Config.logLevel` default and the invalid-value fallback became `warn`, and the Settings dropdown starts on `warn`, so less is written by default. | 8, 15 |
 | 2026-10-18 | 0.4.0 | **Repository hygiene**: `research/` stays unpublished (third-party sources and binaries); the two original analysis notes were curated into `docs/research-notes/` and versioned; removed duplicate upstream tarballs and an unused `bun.exe` (~92 MiB). | Appendix A |
 | 2026-10-18 | 0.4.0 | **Runtime requirement**: declares `engines.node: ">=20.3"` (needed for `AbortSignal.any`); both READMEs' development sections state the Node version and that `lib/` is generated, so `pnpm build` comes first. | 9, Appendix A |
 | 2026-10-18 | 0.4.0 | **Release rule**: chapter 0 now requires a version bump to update the install command and tarball example in both READMEs, guarded by `tests/readme-version.test.mjs` (both must equal `package.json`); READMEs now use `dsh plugin --profile desktop add dsh-opencode-bridge@<version>`. | 0, 11, Appendix A |
@@ -995,7 +1016,7 @@ line here (see the chapter 0 policy).
 | 2026-10-18 | 0.3.0 | **Offline scope audit**: optional `opencode_bridge_audit` uses only `tools.schemas(exec.agent)` with bounded names/aliases/route decisions; no global fallback, chat/arguments/schema-description export, network or execution. Added bridge/audit regression suites and fixed-HEAD source comparison; narrowed privacy/rotation and Desktop verification claims. | 3, 6.4.1, 11–15, Appendix A |
 | 2026-10-18 | 0.2.1 | **Release prep**: npm package name set to `dsh-opencode-bridge` (unscoped `dsh-opencode-free` is taken by another author; the scoped name lacked distinction, so renamed to evoke the protocol bridge); `client.js` module id and `cordis.patch.yml` `name` follow the package name (row `id` unchanged); added LICENSE, `.gitignore`, `prepack` build hook; removed the settings log-viewer pitch from the plugin description. | 3, 14, Appendix A |
 | 2026-10-18 | 0.2.1 | **Client activation hardening**: per-step try/catch, optional service access, locale registration before binding, no `immediately:true`; added hostile-ctx regression tests. These tests cover mocked activation, not proof of Desktop crash reproduction/root cause or live recovery. | 3, 15.6 |
-| 2026-10-18 | 0.2.0 | Added leveled logging (redaction + size-based rotation that cleans oldest first), a DSH Settings log view/copy UI, and the `opencode_free_log` agent tool; established the documentation maintenance policy. | 0, 3, 8, 11, 13, 14, 15 |
+| 2026-10-18 | 0.2.0 | Added leveled logging (redaction + size-based rotation that cleans oldest first), a DSH Settings log view/copy UI, and the `opencode_bridge_log` agent tool; established the documentation maintenance policy. | 0, 3, 8, 11, 13, 14, 15 |
 | 2026-10-17 | 0.1.0 | First release: three-layer gate reproduction, `OpenCodeFreeAdapter`, free-model catalog, tool cloaking/translation. | 1–13 |
 
 ---
@@ -1043,7 +1064,7 @@ may not match the heuristics. Truncation is not redaction. The tested rules
 ### 15.3 Rotation and automatic cleanup
 
 Before append, a threshold check against `logMaxBytes` (default 512 KiB)
-triggers `dsh-opencode-free.log` → `.1` → `.2` …, attempting oldest-first cleanup
+triggers `dsh-opencode-bridge.log` → `.1` → `.2` …, attempting oldest-first cleanup
 under `logMaxFiles` (default 5). This is best-effort retention, **not** the strict
 bound `logMaxBytes × logMaxFiles`: an oversized line may exceed the threshold,
 rotation/deletion may fail, and the one-file setting has a `.1` edge case.
@@ -1057,13 +1078,13 @@ storage quota or secure erasure mechanism.
 read/clear/set-level:
 
 - **Settings UI** (`client.js`): registers into the `settings.section` slot
-  (Settings page "OpenCode Free") with level filtering, refresh, **copy all**
+  (Settings page “OpenCode Bridge” → “Diagnostic log” tab) with level filtering, refresh, **copy all**
   (Clipboard API with an `execCommand` fallback), and clear (with
   confirmation). Data comes from the package-private JSON RPC
-  `/api/opencode-free-logs/{read,stat,clear,level}` — the same
+  `/api/opencode-bridge-logs/{read,stat,clear,level}` — the same
   `connection.fetch.register` / `connection.rpc.call` channel a verified
   shipped plugin uses (see `dsh-tool-antigravity`).
-- **Agent tool `opencode_free_log`**: `action: read|stat|clear|level`, backed
+- **Agent tool `opencode_bridge_log`**: `action: read|stat|clear|level`, backed
   by the same `LogService`, so the model can pull its own diagnostics. The log
   uses best-effort redaction; review it before sharing or putting it into context.
 

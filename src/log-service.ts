@@ -5,9 +5,9 @@
  * level operations live here once and are reachable from both:
  *
  * - the settings UI, through package-private JSON RPC routes registered on
- *   `connection.fetch` under `/api/opencode-free-logs/*` (the same transport a
+ *   `connection.fetch` under `/api/opencode-bridge-logs/*` (the same transport a
  *   verified shipped plugin uses), and
- * - the agent, through the `opencode_free_log` tool.
+ * - the agent, through the `opencode_bridge_log` tool.
  *
  * Every byte served is already redacted by `PluginLogger`; nothing in this
  * module adds formatting that could reintroduce sensitive material.
@@ -17,7 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { PluginLogger, type LogLevel } from './logger.js'
 
-const RPC_NAMESPACE = 'opencode-free-logs'
+const RPC_NAMESPACE = 'opencode-bridge-logs'
 const RPC_CHANNEL = '/api'
 const RPC_ENDPOINTS = ['read', 'stat', 'clear', 'level'] as const
 type RpcEndpoint = (typeof RPC_ENDPOINTS)[number]
@@ -92,7 +92,7 @@ function parsePayload(endpoint: RpcEndpoint, payload: unknown): { ok: true; args
 }
 
 /**
- * Register the `/api/opencode-free-logs/*` routes and the `opencode_free_log`
+ * Register the `/api/opencode-bridge-logs/*` routes and the `opencode_bridge_log`
  * tool. Returns one disposer for everything registered here.
  */
 export function registerLogAccess(ctx: Context, service: LogService): () => void {
@@ -104,8 +104,9 @@ export function registerLogAccess(ctx: Context, service: LogService): () => void
     const routeDisposers = RPC_ENDPOINTS.map((endpoint) =>
       connection.fetch.register({
         path: `${RPC_CHANNEL}/${RPC_NAMESPACE}/${endpoint}`,
+        methods: ['POST'],
         requestBody: 'buffered',
-        handler: async (request: Request) => {
+        fetch: async (request: Request) => {
           let envelope: RpcEnvelope
           try {
             envelope = (await request.json()) as RpcEnvelope
@@ -114,8 +115,12 @@ export function registerLogAccess(ctx: Context, service: LogService): () => void
           }
           const rpcId = typeof envelope.rpcId === 'string' ? envelope.rpcId : ''
           const method = typeof envelope.method === 'string' ? envelope.method : ''
+          // DSH's browser RPC client validates this exact envelope and returns
+          // `result` to the caller; any other shape fails as
+          // "invalid server-response envelope".
+          const reply = (result: unknown) => Response.json({ type: 'server-response', rpcId, result })
           const failure = (code: string, message: string) =>
-            Response.json({ rpcId, ok: false, error: { code, message, details: {} } })
+            reply({ ok: false, error: { code, message, details: {} } })
           if (method !== `${RPC_NAMESPACE}/${endpoint}`) return failure('bad-request', 'log request method does not match its endpoint')
           const parsed = parsePayload(endpoint, envelope.payload)
           if (!parsed.ok) return failure('bad-request', parsed.message)
@@ -137,7 +142,7 @@ export function registerLogAccess(ctx: Context, service: LogService): () => void
             } else {
               value = service.setLevel(parsed.args.level ?? 'info')
             }
-            return Response.json({ rpcId, ok: true, value })
+            return reply({ ok: true, value })
           } catch (error) {
             return failure('internal', error instanceof Error ? error.message : String(error))
           }
@@ -155,9 +160,9 @@ export function registerLogAccess(ctx: Context, service: LogService): () => void
     try {
       disposers.push(
         tools.register({
-          name: 'opencode_free_log',
+          name: 'opencode_bridge_log',
           description:
-            'Read or manage the dsh-opencode-free plugin diagnostic log (the log of the OpenCode free-model adapter). ' +
+            'Read or manage the dsh-opencode-bridge plugin diagnostic log (the log of the OpenCode free-model adapter). ' +
             'Use action "read" to fetch recent log lines, "stat" for file sizes and the current level, ' +
             '"level" to change the runtime verbosity (debug|info|warn|error|off), and "clear" to delete all log files. ' +
             'Log lines are already scrubbed of credentials and message content.',

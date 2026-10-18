@@ -32,7 +32,7 @@ if (probe.reachable === 0) {
 // 2. One synthetic completion, ordered proxy-first so the tunnel must carry it.
 const catalog = new FreeModelCatalog(baseUrl, { includeDeprecated: false, extraModels: [], pool, dispatcherFor }, silent)
 const adapter = new OpenCodeFreeAdapter(catalog, {
-  providerRoute: 'opencode-free',
+  providerRoute: 'opencode-bridge',
   recipe: { baseUrl, apiKey: 'public', userAgent: 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14', client: 'cli', project: 'global', extraHeaders: {} },
   requestTimeoutMs: 120_000,
   toolFingerprint: true,
@@ -45,7 +45,7 @@ const adapter = new OpenCodeFreeAdapter(catalog, {
 let text = ''
 let terminal
 for await (const chunk of adapter.stream({
-  provider: 'opencode-free',
+  provider: 'opencode-bridge',
   model,
   messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly: PROXY_OK' }], id: 'm1', source: { kind: 'user' } }],
   system: 'You are a test harness.',

@@ -2,5 +2,5 @@
 # `id` is the config row id (keep stable — user configs target it);
 # `name` is the package name to import (must match package.json name).
 - insert:
-    - id: dsh-opencode-free
+    - id: dsh-opencode-bridge
       name: 'dsh-opencode-bridge'

@@ -8,7 +8,7 @@ const str = { type: 'string' }
 const read = { name: 'read', description: 'Read text', parameters: { type: 'object', properties: { file_path: str, offset: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1 } }, required: ['file_path'], additionalProperties: false } }
 const pwsh = { name: 'pwsh', description: 'PowerShell only', parameters: { type: 'object', properties: { command: str, description: str }, required: ['command', 'description'] } }
 const recipe = { baseUrl: 'https://example.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} }
-const options = { provider: 'opencode-free', model: 'fake-free', messages: [], tools: [read, pwsh] }
+const options = { provider: 'opencode-bridge', model: 'fake-free', messages: [], tools: [read, pwsh] }
 
 function response(calls, finish = 'tool_calls') {
   const events = calls.map((call, index) => ({ choices: [{ delta: { tool_calls: [{ index, id: `call_${index}`, function: { name: call.name, arguments: call.arguments } }] } }] }))
@@ -21,7 +21,7 @@ async function run(t, calls, config = {}, input = {}, finish = 'tool_calls') {
   t.mock.method(globalThis, 'fetch', async (_url, init) => { sent = JSON.parse(init.body); return response(calls, finish) })
   const logger = Object.fromEntries(['debug', 'info', 'warn', 'error'].map(level => [level, (...args) => logs.push(args)]))
   const adapter = new OpenCodeFreeAdapter({ list: async () => [{ id: 'fake-free', name: 'Fake' }] }, {
-    providerRoute: 'opencode-free', recipe, requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true, logger, ...config,
+    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true, logger, ...config,
   })
   const chunks = []
   for await (const chunk of adapter.stream({ ...options, ...input })) chunks.push(chunk)

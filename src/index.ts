@@ -1,5 +1,5 @@
 /**
- * dsh-opencode-free: OpenCode Free models for DeepSeek Harness.
+ * dsh-opencode-bridge: OpenCode free models for DeepSeek Harness.
  *
  * Registers an LLM adapter that simulates the official OpenCode client wire
  * protocol so DSH can use the keyless free-tier models hosted at opencode.ai
@@ -53,7 +53,7 @@ export interface Config {
   toolTranslation: boolean
   /** Minimum log level written to disk: `debug` | `info` | `warn` | `error` | `off`. */
   logLevel: string
-  /** Log directory; empty means the profile default (`<profile>/logs/dsh-opencode-free`). */
+  /** Log directory; empty means the profile default (`<profile>/logs/dsh-opencode-bridge`). */
   logDir: string
   /** Per-file size ceiling in bytes before rotation. */
   logMaxBytes: number
@@ -73,13 +73,13 @@ export const Config: Schema<Config> = Schema.object({
   userAgent: Schema.string().default('opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'),
   client: Schema.string().default('cli'),
   project: Schema.string().default('global'),
-  providers: Schema.array(Schema.string()).default(['opencode-free']),
+  providers: Schema.array(Schema.string()).default(['opencode-bridge']),
   includeDeprecated: Schema.boolean().default(false),
   extraModels: Schema.array(Schema.string()).default([]),
   requestTimeoutMs: Schema.number().default(600_000),
   toolFingerprint: Schema.boolean().default(true),
   toolTranslation: Schema.boolean().default(true),
-  logLevel: Schema.string().default('info'),
+  logLevel: Schema.string().default('warn'),
   logDir: Schema.string().default(''),
   logMaxBytes: Schema.number().default(512 * 1024),
   logMaxFiles: Schema.number().default(5),
@@ -88,13 +88,13 @@ export const Config: Schema<Config> = Schema.object({
   proxyStorePath: Schema.string().default(''),
 })
 
-export const name = 'dsh-opencode-free'
+export const name = 'dsh-opencode-bridge'
 export const inject = ['llm']
 
 const LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error', 'off']
 
 function normalizeLevel(value: string): LogLevel {
-  return (LEVELS as readonly string[]).includes(value) ? (value as LogLevel) : 'info'
+  return (LEVELS as readonly string[]).includes(value) ? (value as LogLevel) : 'warn'
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -105,7 +105,7 @@ export function apply(ctx: Context, config: Config): void {
     maxFiles: config.logMaxFiles,
     // The only literal secret the plugin handles; scrubbed from every line.
     secrets: [config.apiKey],
-    mirror: (line) => console.log(`[dsh-opencode-free] ${line}`),
+    mirror: (line) => console.log(`[dsh-opencode-bridge] ${line}`),
   })
   logger.info('plugin', 'starting', {
     providers: config.providers.join(','),
@@ -142,7 +142,7 @@ export function apply(ctx: Context, config: Config): void {
   )
   registerBridgeAudit(ctx, { fingerprint: config.toolFingerprint, translateDecoys: config.toolTranslation })
   const adapter = new OpenCodeFreeAdapter(catalog, {
-    providerRoute: config.providers[0] ?? 'opencode-free',
+    providerRoute: config.providers[0] ?? 'opencode-bridge',
     recipe,
     requestTimeoutMs: config.requestTimeoutMs,
     toolFingerprint: config.toolFingerprint,
@@ -154,7 +154,7 @@ export function apply(ctx: Context, config: Config): void {
 
   let registration: AdapterRegistrationHandle | undefined
   try {
-    registration = ctx.llm.registerAdapter(config.providers.length ? config.providers : ['opencode-free'], adapter)
+    registration = ctx.llm.registerAdapter(config.providers.length ? config.providers : ['opencode-bridge'], adapter)
     logger.info('plugin', 'LLM adapter registered', { providers: config.providers.join(',') })
   } catch (error) {
     logger.error('plugin', 'failed to register LLM adapter', { error: String(error) })
@@ -164,10 +164,10 @@ export function apply(ctx: Context, config: Config): void {
   if (typeof ctx.llm.registerConfigurableProviders === 'function') {
     try {
       ctx.llm.registerConfigurableProviders(
-        (config.providers.length ? config.providers : ['opencode-free']).map((provider) => ({
+        (config.providers.length ? config.providers : ['opencode-bridge']).map((provider) => ({
           provider,
-          displayName: 'OpenCode Free',
-          settingsNs: 'opencode-free',
+          displayName: 'OpenCode Bridge',
+          settingsNs: 'opencode-bridge',
           settingsPath: [] as string[],
         })),
       )
@@ -178,7 +178,7 @@ export function apply(ctx: Context, config: Config): void {
 
   if (typeof ctx.llm.registerModelDiscovery === 'function') {
     try {
-      ctx.llm.registerModelDiscovery('opencode-free', async (_request, signal): Promise<readonly LlmDiscoveredModel[]> => {
+      ctx.llm.registerModelDiscovery('opencode-bridge', async (_request, signal): Promise<readonly LlmDiscoveredModel[]> => {
         const models = await catalog.list(signal)
         return models.map((model) => ({
           id: model.id,

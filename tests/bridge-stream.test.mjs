@@ -5,10 +5,10 @@ import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 const callerRead = { name: 'read', description: 'Host text reader', parameters: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'], additionalProperties: false } }
 const callerPwsh = { name: 'pwsh', description: 'Host PowerShell', parameters: { type: 'object', properties: { command: { type: 'string' } } } }
 const base = {
-  providerRoute: 'opencode-free', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
+  providerRoute: 'opencode-bridge', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
   requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true,
 }
-const options = { provider: 'opencode-free', model: 'fixture-free', messages: [], tools: [callerRead, callerPwsh] }
+const options = { provider: 'opencode-bridge', model: 'fixture-free', messages: [], tools: [callerRead, callerPwsh] }
 const finish = { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }
 function delta(index, name, args, id = `c${index}`) {
   return { choices: [{ delta: { tool_calls: [{ index, id, function: { name, arguments: args } }] } }] }

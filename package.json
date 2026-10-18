@@ -1,10 +1,13 @@
 {
   "name": "dsh-opencode-bridge",
-  "description": "OpenCode Free models for DeepSeek Harness - simulate the opencode client protocol to use opencode.ai free-tier models (keyless) inside DSH.",
-  "version": "0.2.1",
+  "description": "OpenCode free models for DSH with egress-proxy rotation, a fail-closed tool bridge and an offline, agent-scoped compatibility audit.",
+  "version": "0.4.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "engines": {
+    "node": ">=20.3"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -51,7 +54,8 @@
     "README.md",
     "README.zh.md",
     "TECHNICAL.md",
-    "TECHNICAL.zh.md"
+    "TECHNICAL.zh.md",
+    "docs/COMPARISON.zh.md"
   ],
   "dsh": {
     "bundle": {
@@ -89,5 +93,8 @@
     "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "undici": "^7.30.1"
   }
 }

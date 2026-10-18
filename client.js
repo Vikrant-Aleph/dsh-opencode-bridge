@@ -21,6 +21,7 @@ window.__ModuleLoader__.load({
     const LEVELS = ['debug', 'info', 'warn', 'error'];
     const RPC_CHANNEL = '/api';
     const RPC_NAMESPACE = 'opencode-free-logs';
+    const PROXY_RPC_NAMESPACE = 'opencode-free-proxies';
 
     const en = {
       nav: 'OpenCode Free',
@@ -40,6 +41,30 @@ window.__ModuleLoader__.load({
       total: 'Total size',
       clearConfirm: 'Delete all log files?',
       copyAccessible: 'Copy the whole log to the clipboard',
+      proxyNav: 'OpenCode Free — Proxies',
+      proxyTitle: 'Egress rotation',
+      proxyIntro: 'The free tier throttles each egress IP. When one is rate-limited it cools down and the next entry is used. Keep “direct” to use this machine\u2019s IP.',
+      proxyAddLabel: 'Add a proxy',
+      proxyPlaceholder: 'http://127.0.0.1:7890 or direct',
+      proxyAdd: 'Add',
+      proxyRemove: 'Remove',
+      proxyTest: 'Test all',
+      proxyTesting: 'Testing…',
+      proxyRefresh: 'Refresh',
+      proxyReady: 'ready',
+      proxyCooling: 'cooling',
+      proxyFailures: 'failures',
+      proxyEmpty: 'The pool is empty.',
+      proxyHint: 'Accepts an http:// or https:// proxy, or host:port. SOCKS proxies are not supported.',
+      proxyDirect: 'direct (this machine)',
+      proxySaved: 'Saved and applied to the live pool.',
+      proxySaveFailed: 'Saved locally, but the pool could not be written to disk.',
+      proxyReachable: 'reachable',
+      proxyTestingDone: 'Probe finished.',
+      proxyRemoveFailed: 'Could not remove that entry.',
+      proxyAddFailed: 'Could not add that proxy.',
+      proxyTestFailed: 'Test failed.',
+      proxyOffline: 'Proxy service unreachable.',
     };
     const zh = {
       nav: 'OpenCode Free',
@@ -59,6 +84,30 @@ window.__ModuleLoader__.load({
       total: '总大小',
       clearConfirm: '删除全部日志文件？',
       copyAccessible: '把完整日志复制到剪贴板',
+      proxyNav: 'OpenCode Free — 代理',
+      proxyTitle: '出口轮换',
+      proxyIntro: '免费层按出口 IP 限流。某个出口被限流后进入冷却，自动改用下一个。保留“本机直连”即可继续使用本机 IP。',
+      proxyAddLabel: '添加代理',
+      proxyPlaceholder: 'http://127.0.0.1:7890 或 direct',
+      proxyAdd: '添加',
+      proxyRemove: '删除',
+      proxyTest: '测试全部',
+      proxyTesting: '测试中…',
+      proxyRefresh: '刷新',
+      proxyReady: '就绪',
+      proxyCooling: '冷却中',
+      proxyFailures: '失败次数',
+      proxyEmpty: '代理池为空。',
+      proxyHint: '支持 http:// 或 https:// 代理，也接受 host:port。暂不支持 SOCKS 代理。',
+      proxyDirect: '本机直连',
+      proxySaved: '已保存并应用到运行中的代理池。',
+      proxySaveFailed: '已在内存中生效，但写入磁盘失败。',
+      proxyReachable: '可达',
+      proxyTestingDone: '测试完成。',
+      proxyRemoveFailed: '删除该条目失败。',
+      proxyAddFailed: '添加代理失败。',
+      proxyTestFailed: '测试失败。',
+      proxyOffline: '代理服务不可用。',
     };
 
     const fallbackT = (key) => zh[key] || en[key] || key;
@@ -100,6 +149,14 @@ window.__ModuleLoader__.load({
       .ocf-log-line.ocf-warn { color: var(--dsw-alias-state-warn-primary, #d97706); }
       .ocf-log-line.ocf-error { color: var(--dsw-alias-state-error-primary, #dc2626); }
       .ocf-log-meta { font-size: 12px; color: var(--dsw-alias-label-secondary, #71717a); margin: 0; overflow-wrap: anywhere; }
+      .ocf-proxy-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+      .ocf-proxy-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.12)); border-radius: 10px; }
+      .ocf-proxy-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dsw-alias-label-primary, #18181b); overflow-wrap: anywhere; }
+      .ocf-proxy-state { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+      .ocf-proxy-state.is-ready { color: var(--dsw-alias-state-success-primary, #16a34a); background: var(--dsw-alias-bg-layer-2, rgba(22,163,74,0.10)); }
+      .ocf-proxy-state.is-cooling { color: var(--dsw-alias-state-warn-primary, #d97706); background: var(--dsw-alias-bg-layer-2, rgba(217,119,6,0.12)); }
+      .ocf-proxy-code { font-size: 11px; color: var(--dsw-alias-label-secondary, #71717a); }
+      .ocf-proxy-row button { margin-left: auto; }
     `;
 
     function levelClass(line) {
@@ -246,6 +303,189 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function ProxyPanel(props) {
+      const t = (props && props.t) || ProxyPanel.t || fallbackT;
+      const rpc = (props && props.rpc) || ProxyPanel.rpc || null;
+      const [entries, setEntries] = useState([]);
+      const [draft, setDraft] = useState('');
+      const [busy, setBusy] = useState(false);
+      const [message, setMessage] = useState('');
+      const [error, setError] = useState('');
+      const styleRef = useRef(null);
+
+      useEffect(() => {
+        if (typeof document === 'undefined') return undefined;
+        try {
+          const el = document.createElement('style');
+          el.textContent = CSS;
+          document.head.appendChild(el);
+          styleRef.current = el;
+          return () => {
+            if (el.parentNode) el.parentNode.removeChild(el);
+          };
+        } catch (e) {
+          return undefined;
+        }
+      }, []);
+
+      const call = useCallback(
+        async (method, payload) => {
+          if (!rpc) throw new Error(t('proxyOffline'));
+          const result = await rpc.call(RPC_CHANNEL, `${PROXY_RPC_NAMESPACE}/${method}`, payload || {});
+          if (!result || !result.ok) {
+            throw new Error((result && result.error && result.error.message) || t('proxyOffline'));
+          }
+          return result.value || {};
+        },
+        [rpc, t],
+      );
+
+      const load = useCallback(async () => {
+        setError('');
+        try {
+          const value = await call('read', {});
+          setEntries(Array.isArray(value.entries) ? value.entries : []);
+        } catch (e) {
+          setError(String(e && e.message ? e.message : e));
+        }
+      }, [call]);
+
+      useEffect(() => {
+        load();
+      }, [load]);
+
+      const submit = useCallback(
+        async (payload, failureKey) => {
+          setBusy(true);
+          setError('');
+          setMessage('');
+          try {
+            const value = await call('write', payload);
+            setEntries(Array.isArray(value.entries) ? value.entries : []);
+            const rejected = Array.isArray(value.rejected) ? value.rejected : [];
+            if (rejected.length) {
+              setError(`${rejected[0].raw}: ${rejected[0].reason}`);
+            } else {
+              setMessage(value.saved === false ? t('proxySaveFailed') : t('proxySaved'));
+            }
+          } catch (e) {
+            setError(`${t(failureKey)} ${String(e && e.message ? e.message : e)}`);
+          } finally {
+            setBusy(false);
+          }
+        },
+        [call, t],
+      );
+
+      const add = useCallback(async () => {
+        const value = draft.trim();
+        if (!value) return;
+        await submit({ add: value }, 'proxyAddFailed');
+        setDraft('');
+      }, [draft, submit]);
+
+      const testAll = useCallback(async () => {
+        setBusy(true);
+        setError('');
+        setMessage(t('proxyTesting'));
+        try {
+          const value = await call('test', {});
+          setEntries(Array.isArray(value.entries) ? value.entries : entries);
+          const results = Array.isArray(value.results) ? value.results : [];
+          const reachable = results.filter((r) => r && r.ok).length;
+          const failed = results.filter((r) => r && !r.ok);
+          if (failed.length) {
+            const first = failed[0];
+            setError(`${first.display}: ${first.code || 'unreachable'}`);
+          }
+          setMessage(`${t('proxyTestingDone')} ${reachable}/${results.length} ${t('proxyReachable')}.`);
+          // A probe retires throttled egresses, so refresh the state chips.
+          const after = await call('read', {});
+          if (Array.isArray(after.entries)) setEntries(after.entries);
+        } catch (e) {
+          setError(`${t('proxyTestFailed')} ${String(e && e.message ? e.message : e)}`);
+          setMessage('');
+        } finally {
+          setBusy(false);
+        }
+      }, [call, entries, t]);
+
+      const remove = useCallback(
+        async (id) => {
+          await submit({ remove: id }, 'proxyRemoveFailed');
+        },
+        [submit],
+      );
+
+      const stateLabel = (entry) =>
+        entry && entry.state === 'cooling'
+          ? `${t('proxyCooling')}${entry.coolingUntil ? ` · ${Math.max(0, Math.round((entry.coolingUntil - Date.now()) / 1000))}s` : ''}`
+          : t('proxyReady');
+
+      return h(
+        'div',
+        { className: 'ocf-log-wrap' },
+        h('h1', { style: { margin: '0 0 4px', fontSize: '18px', color: 'var(--dsw-alias-label-primary, #18181b)' } }, t('proxyTitle')),
+        h('p', { className: 'ocf-log-note' }, t('proxyIntro')),
+        h(
+          'div',
+          { className: 'ocf-log-toolbar' },
+          h('label', { htmlFor: 'ocf-proxy-add' }, t('proxyAddLabel')),
+          h('input', {
+            id: 'ocf-proxy-add',
+            type: 'text',
+            value: draft,
+            spellCheck: false,
+            placeholder: t('proxyPlaceholder'),
+            onChange: (e) => setDraft(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === 'Enter') add();
+            },
+            style: {
+              minWidth: '260px',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: '12px',
+              padding: '5px 10px',
+              borderRadius: '8px',
+              border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.15))',
+              background: 'var(--dsw-alias-bg-layer-2, transparent)',
+              color: 'var(--dsw-alias-label-primary, #18181b)',
+            },
+          }),
+          h('button', { type: 'button', onClick: add, disabled: busy || !draft.trim() }, t('proxyAdd')),
+          h('button', { type: 'button', onClick: testAll, disabled: busy }, busy ? t('proxyTesting') : t('proxyTest')),
+          h('button', { type: 'button', onClick: load, disabled: busy }, t('proxyRefresh')),
+        ),
+        h('p', { className: 'ocf-log-note' }, t('proxyHint')),
+        error ? h('p', { className: 'ocf-log-note', role: 'alert' }, error) : null,
+        message ? h('p', { className: 'ocf-log-note' }, message) : null,
+        entries.length
+          ? h(
+              'ul',
+              { className: 'ocf-proxy-list' },
+              entries.map((entry) =>
+                h(
+                  'li',
+                  { key: entry.id, className: 'ocf-proxy-row' },
+                  h('span', { className: 'ocf-proxy-name' }, entry.display || t('proxyDirect')),
+                  h(
+                    'span',
+                    { className: `ocf-proxy-state ${entry.state === 'cooling' ? 'is-cooling' : 'is-ready'}` },
+                    stateLabel(entry),
+                  ),
+                  entry.lastCode ? h('span', { className: 'ocf-proxy-code' }, entry.lastCode) : null,
+                  h(
+                    'button',
+                    { type: 'button', onClick: () => remove(entry.id), disabled: busy },
+                    t('proxyRemove'),
+                  ),
+                ),
+              ),
+            )
+          : h('p', { className: 'ocf-log-note' }, t('proxyEmpty')),
+      );
+    }
+
     return {
       // Only slots is a hard dependency; locale/connection degrade gracefully.
       inject: ['slots'],
@@ -293,6 +533,8 @@ window.__ModuleLoader__.load({
         // Statics as a fallback for hosts that do not forward registration props.
         LogPanel.t = t;
         LogPanel.rpc = rpc;
+        ProxyPanel.t = t;
+        ProxyPanel.rpc = rpc;
 
         // 3. Slot registration — guarded and optional-chained: the settings
         // slot may not be declared yet at activation time.
@@ -308,6 +550,18 @@ window.__ModuleLoader__.load({
                   inject: () => ({ rpc, t }),
                 },
                 LogPanel,
+              ),
+            );
+            ctx.slots.inject('settings.section', () =>
+              ctx.slots.register(
+                {
+                  name: 'settings.section',
+                  id: 'opencode-free-proxies',
+                  order: 31,
+                  label: () => t('proxyNav'),
+                  inject: () => ({ rpc, t }),
+                },
+                ProxyPanel,
               ),
             );
           } else {

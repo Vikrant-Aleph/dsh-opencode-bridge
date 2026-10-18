@@ -10,6 +10,7 @@
  */
 
 import { noopLogger, type LoggerLike } from './logger.js'
+import { fetchWithPool, type ProxyPool } from './proxy-pool.js'
 
 export interface FreeModel {
   id: string
@@ -46,7 +47,7 @@ export class FreeModelCatalog {
 
   constructor(
     private readonly baseUrl: string,
-    private readonly options: { includeDeprecated: boolean; extraModels: string[] },
+    private readonly options: { includeDeprecated: boolean; extraModels: string[]; pool?: ProxyPool | undefined; dispatcherFor?: ((url: string) => Promise<unknown> | unknown) | undefined },
     private readonly logger: LoggerLike = noopLogger,
   ) {}
 
@@ -123,9 +124,16 @@ export class FreeModelCatalog {
   }
 
   private async fetchLive(signal?: AbortSignal): Promise<Set<string> | null> {
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/models`, {
-      headers: { 'user-agent': 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' },
+    // The live listing is IP-throttled too, so it uses the same egress pool.
+    const res = await fetchWithPool({
+      pool: this.options.pool,
+      url: `${this.baseUrl.replace(/\/$/, '')}/models`,
+      init: {
+        headers: { 'user-agent': 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' },
+        ...(signal ? { signal } : {}),
+      } as RequestInit,
       ...(signal ? { signal } : {}),
+      ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
     })
     if (!res.ok) return null
     const data = (await res.json()) as { data?: Array<{ id?: string }> }

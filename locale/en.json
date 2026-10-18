@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "OpenCode Free",
-    "description": "Use OpenCode's keyless free-tier models in DSH. Simulates the official OpenCode client wire protocol."
+    "description": "Use OpenCode free models in DSH with a fail-closed tool bridge and offline, agent-scoped compatibility audit."
   }
 }

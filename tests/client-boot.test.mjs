@@ -99,11 +99,13 @@ test('healthy ctx: locale registered before bind, settings section registered', 
     },
   }
   assertNoThrow(mod, ctx, 'healthy')
-  assert.deepEqual(order, ['register', 'bind', 'inject:settings.section'])
-  assert.equal(registrations.length, 1)
-  assert.equal(registrations[0].id, 'opencode-free-logs')
-  assert.equal(typeof registrations[0].label, 'function')
-  assert.ok(registrations[0].label().length > 0)
+  assert.deepEqual(order, ['register', 'bind', 'inject:settings.section', 'inject:settings.section'])
+  assert.equal(registrations.length, 2)
+  assert.deepEqual(registrations.map((r) => r.id), ['opencode-free-logs', 'opencode-free-proxies'])
+  for (const registration of registrations) {
+    assert.equal(typeof registration.label, 'function')
+    assert.ok(registration.label().length > 0)
+  }
   assert.equal(errors.length, 0)
 })
 

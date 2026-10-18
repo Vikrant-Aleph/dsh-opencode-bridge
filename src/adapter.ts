@@ -20,6 +20,8 @@ import type {
 import type { FreeModelCatalog, FreeModel } from './catalog.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { noopLogger, type LoggerLike } from './logger.js'
+import { ToolBridgeError } from './tool-bridge.js'
+import { fetchWithPool, type ProxyPool } from './proxy-pool.js'
 import {
   buildChatMessages,
   buildHeaders,
@@ -38,6 +40,10 @@ export interface AdapterOptions {
   toolTranslation: boolean
   /** Leveled diagnostic logger. Messages must stay metadata-only (see logger.ts). */
   logger?: LoggerLike
+  /** Optional egress pool; absent means a plain fetch from this machine. */
+  pool?: ProxyPool
+  /** Build the CONNECT dispatcher for one proxy URL (injectable for tests). */
+  dispatcherFor?: (url: string) => Promise<unknown> | unknown
 }
 
 interface ChatChunk {
@@ -128,8 +134,20 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       const meta = models.find((m) => m.id === options.model)
       const sessionId = this.sessionIdFor(options)
       const requestId = mintRequestId()
-      const plan = planTools(this.options.toolFingerprint && !options.purpose ? options.tools ?? [] : [])
+      const plan = planTools(options.purpose ? [] : options.tools ?? [], { fingerprint: this.options.toolFingerprint })
       const messages = buildChatMessages(options, plan)
+      if (plan.decoys.size) {
+        const nativeCommands = plan.tools.filter(tool => ['pwsh', 'bash', 'shell'].includes(plan.aliasToOriginal.get(tool.function.name) ?? tool.function.name) && !plan.decoys.has(tool.function.name)).map(tool => tool.function.name)
+        const aliases = [...plan.aliasToOriginal].map(([wire, original]) => `${wire} = caller ${original}`).join('; ')
+        messages.unshift({
+          role: 'system',
+          content: 'Tool bridge policy: injected fingerprint declarations do not grant execution authority. ' +
+            'Do not call injected bash or shell; use the caller\'s native tools in their declared runtime, never reinterpret Bash commands as PowerShell. ' +
+            `Native command wire names: ${nativeCommands.join(', ') || '(none)'}. ` +
+            `Prefer caller aliases where supplied: ${aliases || '(none)'}. ` +
+            (plan.callerNames.size ? 'Injected read/search calls are accepted only after conservative schema validation.' : 'This request has no executable caller tools; return text only.'),
+        })
+      }
 
       const body: Record<string, unknown> = {
         model: options.model,
@@ -160,11 +178,21 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
 
       const timeout = AbortSignal.timeout(this.options.requestTimeoutMs)
       const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: buildHeaders(this.options.recipe, sessionId, requestId),
-        body: JSON.stringify(body),
+      signal.throwIfAborted()
+      const response = await fetchWithPool({
+        pool: this.options.pool,
+        url: endpoint,
+        init: {
+          method: 'POST',
+          headers: buildHeaders(this.options.recipe, sessionId, requestId),
+          body: JSON.stringify(body),
+          signal,
+        },
         signal,
+        ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
+        onAttempt: (event) => {
+          this.logger.info('proxy', 'egress attempt', { ...event })
+        },
       })
 
       if (!response.ok) {
@@ -214,7 +242,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
           const slot = call.index ?? 0
           const current = calls.get(slot) ?? { id: '', name: '', arguments: '' }
           if (call.id) current.id = call.id
-          if (call.function?.name) current.name = call.function.name
+          if (call.function?.name) current.name += call.function.name
           if (call.function?.arguments) current.arguments += call.function.arguments
           calls.set(slot, current)
         }
@@ -223,14 +251,24 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         if (reason) finishReason = reason
       }
 
+      signal.throwIfAborted()
       yield* close()
 
       const wireCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call)
-      const normalized = wireCalls.map((call) => (this.options.toolTranslation ? normalizeToolCall(call, plan) : call))
+      if (wireCalls.length && finishReason !== 'tool_calls') {
+        throw new LlmError('Tool call batch did not finish completely; no tools were emitted.', 'TOOL_BRIDGE_INCOMPLETE')
+      }
+      // Validate the WHOLE returned batch before emitting any executable tool
+      // block. If one decoy is unsafe, none of this batch can reach DSH dispatch.
+      // Aliases are always restored, even when decoy translation is disabled.
+      const normalized = wireCalls.map((call) => normalizeToolCall(call, plan, { translateDecoys: this.options.toolTranslation }))
       for (const call of normalized) {
+        signal.throwIfAborted()
         const id = ToolCallId(call.id || `call_${call.name}_${blockIndex}`)
         yield { type: 'block-start', index: blockIndex, blockType: 'tool-call' }
+        signal.throwIfAborted()
         yield { type: 'tool-call-delta', index: blockIndex, id, name: call.name, argumentsDelta: call.arguments }
+        signal.throwIfAborted()
         yield {
           type: 'block-end',
           index: blockIndex,
@@ -239,6 +277,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         blockIndex++
       }
 
+      signal.throwIfAborted()
       this.logger.info('adapter', 'completed', {
         model: options.model,
         session: sessionId,
@@ -262,12 +301,14 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         return
       }
       const failure =
-        error instanceof LlmError
-          ? error.failure
-          : {
-              message,
-              code: (error as { name?: string }).name === 'TimeoutError' ? 'TIMEOUT' : 'STREAM_FAILED',
-            }
+        error instanceof ToolBridgeError
+          ? { message, code: 'TOOL_BRIDGE_REJECTED' }
+          : error instanceof LlmError
+            ? error.failure
+            : {
+                message,
+                code: (error as { name?: string }).name === 'TimeoutError' ? 'TIMEOUT' : 'STREAM_FAILED',
+              }
       this.logger.error('adapter', 'stream failed', { code: failure.code, error: message })
       yield { type: 'finish', reason: { kind: 'error', failure } }
     }
@@ -326,10 +367,13 @@ async function httpError(response: Response): Promise<LlmError> {
         : response.status === 429
           ? 'RATE_LIMIT'
           : 'PROVIDER_HTTP_ERROR'
+  // Only pass a real log id: an absent header is null, and LlmError rejects a
+  // non-string requestId — which used to mask 429/auth failures as STREAM_FAILED.
+  const logId = response.headers.get('x-opencode-log-id') ?? ''
   return new LlmError(message, code, {
     status: response.status,
     ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { providerRetryAfterMs: retryAfter * (response.headers.get('retry-after-ms') ? 1 : 1000) } : {}),
-    requestId: response.headers.get('x-opencode-log-id') as never,
+    ...(logId ? { requestId: logId as never } : {}),
   })
 }
 
@@ -340,7 +384,7 @@ async function* sseEvents(body: ReadableStream<Uint8Array>, signal: AbortSignal)
   let buffer = ''
   try {
     for (;;) {
-      if (signal.aborted) return
+      signal.throwIfAborted()
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })

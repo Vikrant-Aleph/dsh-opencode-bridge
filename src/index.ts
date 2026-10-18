@@ -14,12 +14,19 @@ import { OpenCodeFreeAdapter } from './adapter.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
+import { registerBridgeAudit } from './bridge-audit.js'
+import { ProxyPool, defaultProxyStorePath, dispatcherFor, loadProxyStore } from './proxy-pool.js'
+import { ProxyService, registerProxyAccess } from './proxy-service.js'
 
 export { FreeModelCatalog } from './catalog.js'
 export { OpenCodeFreeAdapter } from './adapter.js'
 export * from './opencode-protocol.js'
 export { PluginLogger, defaultLogDir } from './logger.js'
 export { LogService } from './log-service.js'
+export { auditToolBridge, resolveToolCall, ToolBridgeError } from './tool-bridge.js'
+export { createBridgeAuditTool } from './bridge-audit.js'
+export { ProxyPool, normalizeEntry, redactProxyUrl, fetchWithPool } from './proxy-pool.js'
+export { ProxyService } from './proxy-service.js'
 
 export interface Config {
   /** OpenAI-compatible relay base. The free tier lives at /inference/v1. */
@@ -42,7 +49,7 @@ export interface Config {
   requestTimeoutMs: number
   /** Send the OpenCode tool fingerprint the free-tier gate requires. */
   toolFingerprint: boolean
-  /** Translate calls to fingerprint placeholder tools onto DSH tools. */
+  /** Allow schema-checked read/search decoy mapping. Executable decoys are always rejected. */
   toolTranslation: boolean
   /** Minimum log level written to disk: `debug` | `info` | `warn` | `error` | `off`. */
   logLevel: string
@@ -52,6 +59,12 @@ export interface Config {
   logMaxBytes: number
   /** Total log files kept (active + rotated); oldest is deleted first on overflow. */
   logMaxFiles: number
+  /** Egress pool: `direct` (this machine) or http(s) proxy URLs, tried in order. */
+  proxies: string[]
+  /** Base cooldown in ms for an egress that answered 429. */
+  proxyCooldownMs: number
+  /** Pool store written by the Settings page; empty means the profile data dir. */
+  proxyStorePath: string
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -70,6 +83,9 @@ export const Config: Schema<Config> = Schema.object({
   logDir: Schema.string().default(''),
   logMaxBytes: Schema.number().default(512 * 1024),
   logMaxFiles: Schema.number().default(5),
+  proxies: Schema.array(Schema.string()).default([]),
+  proxyCooldownMs: Schema.number().default(60_000),
+  proxyStorePath: Schema.string().default(''),
 })
 
 export const name = 'dsh-opencode-free'
@@ -100,6 +116,17 @@ export function apply(ctx: Context, config: Config): void {
   const logService = new LogService(logger)
   ctx.effect(() => registerLogAccess(ctx, logService))
 
+  // Egress pool: the Settings page owns a JSON store; plugin config seeds it.
+  const proxyStorePath = config.proxyStorePath || defaultProxyStorePath()
+  const storedProxies = loadProxyStore(proxyStorePath)
+  const pool = new ProxyPool(storedProxies.urls ?? config.proxies, { cooldownMs: config.proxyCooldownMs })
+  const proxyService = new ProxyService(pool, { storePath: proxyStorePath, baseUrl: config.baseUrl, logger, dispatcherFor })
+  ctx.effect(() => registerProxyAccess(ctx, proxyService))
+  logger.info('proxy', 'egress pool ready', {
+    source: storedProxies.urls ? 'settings-store' : 'plugin-config',
+    entries: pool.health().map((entry) => entry.display).join(', '),
+  })
+
   const recipe: HeaderRecipe = {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
@@ -110,9 +137,10 @@ export function apply(ctx: Context, config: Config): void {
   }
   const catalog = new FreeModelCatalog(
     config.baseUrl,
-    { includeDeprecated: config.includeDeprecated, extraModels: config.extraModels },
+    { includeDeprecated: config.includeDeprecated, extraModels: config.extraModels, pool, dispatcherFor },
     logger,
   )
+  registerBridgeAudit(ctx, { fingerprint: config.toolFingerprint, translateDecoys: config.toolTranslation })
   const adapter = new OpenCodeFreeAdapter(catalog, {
     providerRoute: config.providers[0] ?? 'opencode-free',
     recipe,
@@ -120,6 +148,8 @@ export function apply(ctx: Context, config: Config): void {
     toolFingerprint: config.toolFingerprint,
     toolTranslation: config.toolTranslation,
     logger,
+    pool,
+    dispatcherFor,
   })
 
   let registration: AdapterRegistrationHandle | undefined

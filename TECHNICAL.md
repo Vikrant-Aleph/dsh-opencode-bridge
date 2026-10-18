@@ -30,7 +30,12 @@ update this file (`TECHNICAL.md`) and its Chinese counterpart
    module boundary, error taxonomy);
 3. any documented constant is replaced (UA, fingerprint tools, endpoints,
    defaults, thresholds);
-4. the build/pack/publish flow or a DSH dependency version changes.
+4. the build/pack/publish flow or a DSH dependency version changes;
+5. **the version number is bumped** — in the same change, update the install
+   command (`dsh plugin ... add dsh-opencode-bridge@<version>`) and the local
+   tarball example (`./dsh-opencode-bridge-<version>.tgz`) in both READMEs to
+   the new `package.json` version. Both must match `version` exactly;
+   `tests/readme-version.test.mjs` enforces this — do not bypass it.
 
 Record every such change in chapter 14 "Change log" — one line per change,
 written as part of the same commit. **Never leave a "code changed, docs stale"
@@ -43,24 +48,25 @@ touching code:
 
 1. **Read this section and chapters 1–2** — what the plugin does and where it
    attaches to DSH.
-2. **Read chapter 3, the module map** — `opencode-protocol.ts` is the single
-   home of gate constants; **change protocol behavior only there**. Keep
-   adapter/catalog/logger within their own boundaries.
+2. **Read chapter 3, the module map** — `opencode-protocol.ts` owns gate constants
+   and planning; `tool-bridge.ts` owns conservative mapping/validation and
+   `bridge-audit.ts` the scoped audit. Keep adapter/catalog/logger boundaries.
 3. **Before editing, read chapter 4 (the gate) and chapter 5 (the wire)** —
    this is the highest-risk area: one wrong constant turns every request into
    a 403.
 4. **After changes, always run**: `node node_modules/typescript/bin/tsc -p
    tsconfig.json` (build), `node --test tests/*.test.mjs` (unit tests),
-   `node tests/smoke.mjs` (live probe; needs network — see chapter 10 for what
-   429/403 mean).
+   and, when network/quota use is explicitly appropriate, `node tests/smoke.mjs`
+   (live probe — see chapter 10 for 429/403). Report skipped verification; never
+   substitute offline tests for live acceptance.
 5. **Before finishing, apply the maintenance policy above** and update this
    document plus the change log.
 6. Logging/diagnostic questions belong to chapter 15; the settings-panel UI
    lives in `client.js` (a browser `__ModuleLoader__` module, not TypeScript —
    see 15.3).
-7. **Read 15.6 before touching `client.js`**: an uncaught exception from
-   `apply()` crashes all of DSH Desktop (web-boot treats activation failure as
-   fatal). After any change run `node --test tests/client-boot.test.mjs`.
+7. **Read 15.6 before touching `client.js`**: activation exceptions can break
+   client startup; regression tests do not prove Desktop crash recovery. After
+   changes run `node --test tests/client-boot.test.mjs` and report live limits.
 
 ---
 
@@ -74,7 +80,8 @@ touching code:
 | **Credential** | None. The relay accepts the signed-out sentinel `Bearer public`. |
 | **Distribution** | npm bundle with a `cordis.patch.yml` layer patch. |
 
-The plugin never proxies through a local server; it is a pure in-process adapter.
+The plugin is an in-process adapter and creates no local proxy server. It may
+route relay traffic through user-configured HTTP(S) CONNECT proxies (section 6.9).
 
 ---
 
@@ -98,13 +105,16 @@ The plugin never proxies through a local server; it is a pure in-process adapter
                     https://opencode.ai/inference/v1
 ```
 
-The plugin occupies exactly two seams of the DSH LLM service:
+The principal adapter/discovery seams of the DSH LLM service are:
 
 1. **`ctx.llm.registerAdapter(providers, adapter)`** — supplies the provider
    route (`opencode-free`) and the streaming implementation.
 2. **`ctx.llm.registerModelDiscovery(id, fn)`** — supplies the GUI's model list.
 
-It does not touch sessions, tools, or the agent loop.
+It does not modify the agent loop or execute tools. Optional tool registration
+adds `opencode_bridge_audit` (current-agent schemas only) and the existing log
+utility. The adapter transforms request/response tool declarations; it does not
+patch global HTTP entry points.
 
 ---
 
@@ -112,13 +122,26 @@ It does not touch sessions, tools, or the agent loop.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `src/index.ts` | 174 | Cordis plugin entry: `name`, `inject`, Schemastery `Config`, `apply()`, registrations, disposer. |
-| `src/opencode-protocol.ts` | 375 | **All gate-sensitive constants.** ID minting, header recipe, verbatim fingerprint tools, tool cloaking/translation, message projection. |
-| `src/adapter.ts` | 361 | `OpenCodeFreeAdapter`: model metadata, request assembly, SSE parsing, `StreamChunk` emission, error taxonomy. |
-| `src/catalog.ts` | 143 | `FreeModelCatalog`: models.dev ∪ live listing, caching, degradation. |
+| `src/index.ts` | — | Cordis plugin entry: `name`, `inject`, Schemastery `Config`, `apply()`, registrations, disposer. |
+| `src/opencode-protocol.ts` | — | **All gate-sensitive constants.** ID minting, header recipe, verbatim fingerprint tools, tool cloaking/translation, message projection. |
+| [src/adapter.ts](src/adapter.ts) | — | `OpenCodeFreeAdapter`: model metadata, request/SSE handling, whole-batch tool validation before chunk release, errors. |
+| [src/tool-bridge.ts](src/tool-bridge.ts) | — | Pure fail-closed mapping/schema subset; reject executable decoys; no I/O or execution. |
+| [src/bridge-audit.ts](src/bridge-audit.ts) | — | Current-agent scoped registry audit tool; metadata-only results, no network/execution. |
+| [src/proxy-pool.ts](src/proxy-pool.ts) | — | Ordered egress/cooldown state, proxy store, pooled fetch and lazy undici CONNECT dispatchers. |
+| [src/proxy-service.ts](src/proxy-service.ts) | — | Live edits/persistence, credential-redacted health, relay GET probes and package-private RPC. |
+| [tests/proxy-pool.test.mjs](tests/proxy-pool.test.mjs) | — | Entry normalization, ordered healthy reuse, cooldown, redaction, BOM/store and transport tests. |
+| [tests/proxy-rotation.test.mjs](tests/proxy-rotation.test.mjs) | — | Adapter 429/connection failover, exhausted pool and no mid-stream replay. |
+| [tests/proxy-live.mjs](tests/proxy-live.mjs) | — | Opt-in real CONNECT/direct relay probes and fixed-marker synthetic completion. |
+| [tests/readme-version.test.mjs](tests/readme-version.test.mjs) | — | Guard: both READMEs' install command/tarball versions must equal `package.json`. |
+| [tests/tool-bridge.test.mjs](tests/tool-bridge.test.mjs) | — | Planning/collision, flag semantics, schema subset, native/decoy rejection tests. |
+| [tests/bridge-integration.test.mjs](tests/bridge-integration.test.mjs) | — | Audit execution scope and mock-SSE batch/finish/error regression tests. |
+| [tests/bridge-cancellation.test.mjs](tests/bridge-cancellation.test.mjs) | — | Pre-POST, buffered-call and per-chunk cancellation regression tests. |
+| [docs/COMPARISON.zh.md](docs/COMPARISON.zh.md) | — | Six fixed-HEAD source comparison and differentiation limits. |
+| [docs/research-notes/](docs/research-notes/README.md) | — | Publishable research notes (own analysis); the repo ships no third-party sources. |
+| `src/catalog.ts` | — | `FreeModelCatalog`: metadata/live-list filtering, caching and degradation. |
 | `src/logger.ts` | 326 | `PluginLogger`: levels, redaction, size-based rotation (oldest-first cleanup), memory fallback. See chapter 15. |
 | `src/log-service.ts` | 245 | `LogService` + RPC routes + the `opencode_free_log` agent tool (one implementation, two callers). |
-| `client.js` | 321 | Settings log viewer/copy panel (browser module, not a tsc product). See 15.3, 15.6. |
+| [client.js](client.js) | — | Log panel (order30) and proxy add/remove/probe panel (order31); browser module, not a tsc product. See 6.9, 15.3, 15.6. |
 | `cordis.patch.yml` | 4 | Bundle layer patch that inserts the plugin row. |
 | `tests/logger.test.mjs` | — | Hermetic unit tests for the logging module (levels/redaction/rotation/read). |
 | `tests/client-boot.test.mjs` | — | Client-module activation regression tests (apply never throws; 8 hostile-ctx cases). |
@@ -127,8 +150,8 @@ It does not touch sessions, tools, or the agent loop.
 
 **Design invariant:** every constant the upstream gate can key on lives in
 `opencode-protocol.ts`. Nothing else in the codebase hard-codes a
-protocol detail. When the gate moves, that is the only file that should need
-editing.
+gate fingerprint constant. Changes to planning may also need bridge, adapter,
+audit and test updates; a new upstream declaration never grants execution authority.
 
 ---
 
@@ -427,71 +450,95 @@ Details:
 - **Interleaving.** `reasoning_content` and `content` arrive interleaved. The
   adapter keeps one open block; a kind switch closes it and opens the next, so
   block indexes are strictly monotonic and no block is emitted twice.
-- **Tool calls.** Deltas are accumulated by `tool_calls[].index` (id, name, and
-  concatenated argument fragments), then emitted as complete blocks after the
-  text stream ends, sorted by index. `tool-call-delta` carries the full
-  argument string because the upstream sends the id/name once and fragments the
-  rest.
-- **Finish reason.** `tool-calls` if any call was emitted; `max-tokens` when
-  `finish_reason === 'length'`; otherwise `stop`. Aborts surface as `aborted`;
-  failures as `error` with a stable `code`.
+- **Tool calls.** Names/arguments are buffered by `tool_calls[].index`, not
+  streamed to execution as fragments. After `finish_reason:'tool_calls'`, all
+  calls must pass bridge checks before any tool-call block is emitted, sorted
+  by index. `tool-call-delta` then carries each complete argument string.
+- **Finish reason.** A validated emitted batch yields `tool-calls`. Any buffered
+  tool call without `finish_reason:'tool_calls'` (EOF/length/stop) is
+  `TOOL_BRIDGE_INCOMPLETE`, not a usable tool batch. Without calls, length yields
+  `max-tokens`, otherwise `stop`. Aborts yield `aborted`; failures `error`.
+  Previously streamed text/reasoning is not rolled back by tool rejection.
 
-### 6.4 Tool cloaking and translation
+### 6.4 Safe tool bridge and collision-free planning (0.3.0)
 
-This is the most subtle part of the plugin: the body must contain OpenCode's
-tools, yet DSH's tools must remain callable.
-
-`planTools(callerTools)` produces four things:
+`planTools(callerTools, { fingerprint })` returns:
 
 ```ts
-{ tools, aliasToOriginal, decoys, callerNames }
+{ tools, aliasToOriginal, decoys, callerNames, callerTools }
 ```
 
-Algorithm:
+It reserves **all caller names before allocation**, including names appearing
+later in the input, so `read_client` cannot accidentally become another tool's
+alias. Duplicate caller names are rejected. With fingerprinting enabled,
+noncanonical conflicts use `<name>_client`, `_client2`, …; exact canonical
+caller definitions remain native, and only missing fingerprint names are
+injected as decoys. With `toolFingerprint:false`, caller tools pass unchanged,
+no aliases/decoys are added. This fixes the previous flag path that discarded
+caller tools while still injecting declarations.
 
-1. For each caller tool:
-   - not in `FINGERPRINT_NAMES` → send unchanged;
-   - in `FINGERPRINT_NAMES` **and** exactly canonical → send unchanged (it
-     doubles as the fingerprint, no decoy is appended);
-   - in `FINGERPRINT_NAMES` with a different definition → **cloak**: send it as
-     `<name>_client` (then `_client2`, `_client3`, … if taken) and record the
-     alias. DSH's `read` tool has a different schema than OpenCode's, so in
-     practice DSH's `read` always travels as `read_client`.
-2. Append every fingerprint name that is not already satisfied, marking them as
-   `decoys`.
+Actual requests plan from `GenerateOptions.tools`; auxiliary calls with
+`options.purpose` use an empty caller set, not the global registry. With
+fingerprinting on they receive admission declarations, but none can execute
+without a current caller target. With it off the auxiliary set stays empty.
 
-On the response side, `normalizeToolCall(call, plan)`:
+`normalizeToolCall` always runs, including with `toolTranslation:false`:
 
-- **alias → original**: `read_client` becomes `read` again, so DSH executes its
-  own tool with its own arguments untouched.
-- **decoy → caller tool**: a model that calls the appended `read`/`shell`/etc.
-  is rerouted onto the caller's equivalent, with arguments translated:
+| Returned name | Policy |
+|---|---|
+| Caller alias | Restore original name; require JSON object arguments; preserve raw argument bytes. |
+| Caller native name, including canonical `bash`/`shell` | Require JSON object arguments; otherwise pass unchanged to DSH's own schema/permission checks. |
+| Injected `bash`/`shell` | Reject `EXECUTABLE_DECOY`; never guess Bash→PowerShell or another runtime. |
+| Injected `read` | Only current caller `read`; `path`→`file_path`, optional `offset`/`limit`. |
+| Injected `glob` / `grep` | Only same-named caller target; map `pattern`/`path` and grep `include`. |
+| Unknown name | Reject `UNKNOWN_TOOL`. |
 
-  | Decoy | Caller target (preference order) | Argument mapping |
-  |---|---|---|
-  | `read` | `read` | `path`→`file_path`, `offset`, `limit` |
-  | `shell`, `bash` | `pwsh` → `bash` → `shell` | `command`, `description` (command's first 120 chars), `workdir`, `timeout`→`timeoutMs` |
-  | `glob` | `glob` | `pattern`, `path` |
-  | `grep` | `grep` | `pattern`, `path`, `include` |
+Read/search mappings require a known object schema and compatible required
+fields. Source arguments must be an object with only known keys, string paths/
+patterns, and nonnegative safe-integer offset/limit; mapped values must satisfy
+the target's **conservative JSON Schema subset**. Supported checks cover types,
+properties/required/additionalProperties, items, enum/const, oneOf/anyOf and
+listed numeric/string/container bounds. Unknown constraints such as `$ref`,
+`pattern`, `format` or `allOf` reject rather than disappear. This is not a full
+JSON Schema validator; native caller tools receive only JSON-object validation
+here, with complete schema validation and permissions left to DSH.
 
-**Safety property:** translation applies *only* when `plan.decoys` contains the
-name. A tool the caller declared is never re-mapped — its arguments are already
-in the caller's schema. This prevents silently corrupting arguments for tools
-that happen to share a name with a fingerprint tool.
+`toolTranslation:false` rejects read/search decoys as `TRANSLATION_DISABLED`
+(and executable decoys remain rejected), but **still restores caller aliases**.
+The model receives guidance to prefer caller aliases and native command wire
+names such as `pwsh`, not the injected shell declarations.
 
-**Preference order note:** the shell decoy prefers `pwsh` over `bash` over
-`shell`. The DSH desktop profile ships `pwsh` (and disables `bash`), so CLI
-models' Linux-flavoured `shell` calls land on the PowerShell tool.
+The adapter buffers the whole tool-call batch until `finish_reason:tool_calls`,
+then normalizes every call before emitting **any** tool-call chunk. Any bridge
+rejection blocks all tool-call chunks in that response. EOF, `length` or `stop`
+with tool fragments instead produces `TOOL_BRIDGE_INCOMPLETE`. Text/reasoning
+already streamed is not rolled back. This is bridge-level atomic release, not
+transactional tool execution or side-effect rollback: DSH can later reject a
+native schema or permission constraint independently.
 
-**Auxiliary calls:** for `options.purpose` set (`compaction`,
-`session-title`), caller tools are dropped — `planTools([])` — leaving only the
-5 fingerprint declarations. The gate stays satisfied without offering tools to
-an auxiliary call.
+All execution stays in DSH. The plugin adds no exec/spawn or global HTTP patch.
+“Read-only” names the read/search bridge routes, not a proof that an arbitrary
+caller-provided same-named implementation has no side effects.
 
-If `config.toolTranslation` is disabled, `normalizeToolCall` is skipped: decoy
-calls then reach DSH with OpenCode's argument names (`path`, `command`) and
-will fail schema validation. This is why it defaults to `true`; the flag exists
-so a future gate can be satisfied with the fingerprint alone.
+Cancellation is checked before the POST, after stream buffering and before
+each tool chunk; cancellation must not release cached tool calls.
+
+### 6.4.1 Offline current-agent scope audit
+
+`opencode_bridge_audit` accepts `{}` or `{ "limit": 12 }`; limit is an integer
+1–200, default 80. It calls only `tools.schemas(exec.agent)`. Missing agent
+scope returns `AGENT_SCOPE_REQUIRED`; it never calls `schemas(undefined)` for a
+global fallback. Results contain names, aliases, route decisions/reasons and
+counts/truncation metadata, not descriptions, defaults, arguments or chat.
+It performs no network requests and executes no tools.
+
+The report basis is `current-agent-scoped-native-registry`. Code Mode/PTC and
+auxiliary calls may expose a different set: the real request always plans again
+from `GenerateOptions.tools`. An audit is not call history, an HTTP/model health
+test, a full schema certificate, or a permission grant. Cancellation, invalid
+limits and unavailable registries return fixed status/code fields without
+service error text. See [the source comparison](docs/COMPARISON.zh.md) for
+alternative implementations and the limits of differentiation claims.
 
 ### 6.5 Message projection
 
@@ -545,7 +592,14 @@ HTTP failures become `LlmError` with a stable `code` (`httpError()`):
 
 Also extracted: the upstream's `error.message` (surfaced verbatim — it explains
 quota resets), `retry-after` / `retry-after-ms` (as `providerRetryAfterMs`),
-and `x-opencode-log-id` (as `requestId`, for upstream support tickets).
+and `x-opencode-log-id` (as `requestId`, for upstream support tickets), **only
+when nonempty**. In 0.4.0 this fixes absent headers passing `requestId:null` to
+`LlmError`, which previously masked real 429/401 HTTP failures as `STREAM_FAILED`.
+Pool health/attempt `lastCode` may be `RATE_LIMIT`, an underlying transport code
+such as `ECONNREFUSED`, `TIMEOUT`, or fallback `TRANSPORT_ERROR`. These are egress
+state codes, not new outer LlmError types: exhausted transport errors still
+surface as `TIMEOUT` (TimeoutError) or `STREAM_FAILED`; HTTP 503 stays
+`PROVIDER_HTTP_ERROR` and does not trigger pool failover.
 
 Stream-level failures:
 
@@ -553,13 +607,101 @@ Stream-level failures:
 |---|---|
 | `options.signal` aborted | `finish{kind:'aborted', failure:{code:'ABORTED'}}` |
 | `DOMException.name === 'TimeoutError'` | code `TIMEOUT` |
+| Bridge check rejection | `TOOL_BRIDGE_REJECTED`; fixed reason only, never arguments |
+| Tool fragments without terminal `tool_calls` | `TOOL_BRIDGE_INCOMPLETE`; no tool-call chunks |
 | any other throw | code `STREAM_FAILED` |
 | mid-stream `{"error":…}` frame | `LlmError` with `PROVIDER_STREAM_ERROR` |
+
+Bridge reason codes are `UNKNOWN_TOOL`, `TRANSLATION_DISABLED`,
+`EXECUTABLE_DECOY`, `NO_CALLER_TARGET`, `UNSUPPORTED_TARGET_SCHEMA` and
+`INVALID_ARGUMENTS`. Error text is fixed (`Tool bridge rejected call: <reason>`),
+not a dump of names, schema values or arguments. Native malformed/nonobject JSON
+also yields `INVALID_ARGUMENTS`; valid native raw JSON is not reserialized.
 
 Timeouts are enforced with
 `AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)])`, so
 caller cancellation and the request deadline both work, and the caller's signal
 is never ignored.
+
+### 6.9 Egress proxy pool (0.4.0)
+
+[ProxyPool](src/proxy-pool.ts) owns ordered selection, per-egress cooldown and
+store helpers; [ProxyService](src/proxy-service.ts) owns edits and probes.
+The adapter's inference POST and relay catalog `GET /models` share this pool;
+public models.dev metadata remains direct. No local proxy server is created.
+`undici` is lazily imported only for proxy use; one CONNECT `ProxyAgent` is
+cached per URL. No global fetch/dispatcher or HTTP hook is patched.
+
+**Entries and selection.** `proxies:[]` defaults to direct. Empty strings,
+`direct` and `none` select the machine's local egress. HTTP(S) URLs or bare
+`host:port` are normalized/deduplicated, preserving order; other schemes,
+including SOCKS, are rejected with a reason. Every request selects the first
+ready configured entry, **not round-robin**, reusing a healthy egress for quota/
+cache affinity. This is not a per-session binding; earlier entries regain
+priority when cooldown expires. Different proxies may share a public IP.
+An explicit proxy-only list does not silently add direct, but an empty pool or
+removing its last entry restores direct; adding to a direct-only pool retains it.
+
+| Event | State/action |
+|---|---|
+| HTTP 429 | Increment failures, set lastCode=RATE_LIMIT, cool entry, try another before streaming. |
+| Pre-stream fetch/CONNECT/DNS/reset failure | Increment failures, record transport code, cool briefly and try another. |
+| Other HTTP status (including 401/403/503) | Return immediately, no failover; pooled fetch clears cooldown/failure state on this transport response, not proof of inference success. |
+| Cooldown elapsed | Entry is selectable again; failure count resets only on a non-429 pooled response/successful probe. |
+| All entries cooling | Select earliest-to-recover for best effort, not immediate local hard failure. |
+
+A pooled request budgets at most the pool size in attempts, without sleeping
+until cooldown expiry. If attempts all throttle, the last 429 is returned; if
+only transport attempts fail, the final exception is surfaced. This is not a
+guarantee of fresh quota, distinct public IPs or eventual success.
+
+For 429, positive numeric `retry-after-ms` takes precedence over numeric
+`retry-after` seconds. HTTP-date is not parsed. Otherwise cooldown is
+`base * 2^(failures-1)`, capped at `max(base,30min)` with the configured base
+clamped to at least 1s (default 60s). Transport cooldown is `min(15s,base)`.
+The probe and normal pooled requests share this header parser. Cooldowns/failure
+counts are process-memory state; saved URLs, not health history, survive restart.
+
+**Safe retry boundary.** Failover is limited to the fetch/response-status phase,
+before handing a response body to the SSE reader. A 429 already has an HTTP
+response; no successful streaming body has been exposed. Once a response is
+returned to the adapter, any body/stream failure is reported without pool
+replay, so already streamed text is not duplicated by this pool. This does not
+prove that a timed-out POST was never computed upstream, nor govern Host retries.
+
+**Persistence and credentials.** A valid settings JSON store wins over config
+at startup, including an empty saved list (which resolves to direct). Missing/
+unreadable/invalid store falls back to config; UTF-8 BOM is stripped before JSON
+parsing (PowerShell/editor compatibility). Default path is
+`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-free/proxies.json`; `proxyStorePath`
+overrides it. Edits apply to the live pool first, then save; failed save is
+reported and memory changes need not survive restart. The file contains raw
+URLs, including **plaintext unencrypted proxy passwords**, readable by the
+account; this code does not establish a dedicated secure ACL or secret store.
+
+Health/log/UI display removes userinfo; stable IDs have the form
+`proxy:host:port#<8-hex digest>`, not a literal password. A short digest is an
+identifier, not encryption or a general anonymity guarantee. UI edits use
+`{add}` / `{remove:id}` / `{reset:true}` instead of reading/reposting existing
+credentials. Add necessarily sends the newly entered URL to the Host; the
+input is not a password-masked field. Avoid screenshots or publishing the store.
+The Host service also accepts full `{proxies}` replacement for owned values.
+
+**Management/probes.** Two settings.section entries coexist: logs order 30 and
+“OpenCode Free — Proxies” order 31. The proxy panel provides add/remove, Test all,
+refresh, redacted addresses, ready/cooling with remaining seconds and lastCode.
+Package-private RPC routes are `/api/opencode-free-proxies/{read,write,test}`.
+Test all sequentially GETs relay `/models` per entry (8s timeout by default),
+without prompts or completion requests; it can change health (429 cools it,
+transport failure cools briefly, successful probe clears failures). It is a
+reachability/status check, not model/tool/remaining-quota validation; network
+traffic is still subject to provider rules. UI rendering and real RPC require
+separate verification; an unauthenticated 401 on arbitrary `/api` paths proves
+neither route registration nor handler success.
+
+Only HTTP(S) CONNECT is supported, not SOCKS, automatic proxy discovery,
+per-session affinity or a paid/alternate-model fallback. Upstream quota may
+also depend on non-IP signals. Use authorized egresses and respect service limits.
 
 ---
 
@@ -622,8 +764,11 @@ keyless and config-free out of the box.
 | `includeDeprecated` | boolean | `false` | Offer deprecated-but-still-live models. |
 | `extraModels` | string[] | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
-| `toolFingerprint` | boolean | `true` | Send the OpenCode tool declarations. |
-| `toolTranslation` | boolean | `true` | Translate fingerprint-tool calls onto DSH tools. |
+| `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S) CONNECT proxy/direct entries; saved store wins at startup. |
+| `proxyCooldownMs` | number | `60000` | Base 429 cooldown, clamped to at least 1s; exponential escalation. |
+| `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-free/proxies.json`; plaintext URL/credential store. |
+| `toolFingerprint` | boolean | `true` | Add fingerprint declarations and cloak conflicts; false preserves caller tools and adds no decoys. |
+| `toolTranslation` | boolean | `true` | Enable conservatively validated read/search decoys; false rejects decoys but still restores caller aliases. Injected shell is always rejected. |
 | `logLevel` | string | `info` | Minimum level written to disk: `debug`\|`info`\|`warn`\|`error`\|`off` (`off` disables file logging). |
 | `logDir` | string | `''` | Log directory; empty = `<DSH_PROFILE_DIR or ~/.dsh>/logs/dsh-opencode-free` (the Host process usually has no `DSH_PROFILE_DIR`, so in practice `~/.dsh/logs/dsh-opencode-free`). |
 | `logMaxBytes` | number | `524288` | Per-file size ceiling in bytes before rotation. |
@@ -647,6 +792,11 @@ Verified against this framework generation:
 Peer dependencies are declared with `peerDependenciesMeta.optional = true` so
 the bundle installs into a profile without hoisting a second copy of the
 framework.
+
+The runtime requires **Node ≥ 20.3** (declared as `engines.node`): the adapter
+merges caller cancellation with the request deadline via `AbortSignal.any`,
+which only exists from Node 20.3. Older runtimes are unsupported and are not
+blocked by the installer.
 
 API differences that already bit this plugin — worth checking on any framework
 upgrade:
@@ -672,9 +822,13 @@ upgrade:
 |---|---|---|
 | `403 FREE_TIER_GATE` returns | The gate moved (new UA floor, changed id scheme, schema diff) | Update the constants in `src/opencode-protocol.ts` (below), then rebuild + repack. |
 | `401 AUTH` | The `Bearer public` sentinel changed | Check the client's signed-out path; update `apiKey`. |
-| `429 RATE_LIMIT` | Per-IP free-tier quota, or upstream capacity (`Upstream request failed: Endpoint is unavailable.`) | Wait for reset; the upstream message states it. Not a plugin bug. |
+| `429 RATE_LIMIT` | Selected egress throttled; other quota dimensions are possible | Pool cools it and tries another within budget; if exhausted, wait/check Retry-After and configured authorized egresses. |
+| HTTP 503 / Endpoint is unavailable | Inference endpoint unavailable; root cause not isolated | No pool rotation on 503; do not equate it with IP quota or promise another proxy fixes it. |
+| Pool lastCode ECONNREFUSED/TIMEOUT/TRANSPORT_ERROR | Pre-stream connection/transport failure | Check proxy reachability; short cooldown permits another egress. Body failures do not replay. |
 | Model missing from the selector | Registry/live mismatch | Add the id to `extraModels`, or set `includeDeprecated: true`. |
-| Tool calls fail schema validation | `toolTranslation` disabled, or a mapping drifted | Re-enable it; re-check `translations()` against the current DSH tool schemas. |
+| `TOOL_BRIDGE_REJECTED` | Unknown/executable decoy, disabled translation, unsupported schema, missing target or invalid JSON/values | Read the fixed reason; run scoped `opencode_bridge_audit`; prefer caller aliases/native pwsh. Never bypass refusal by guessing another shell. |
+| `TOOL_BRIDGE_INCOMPLETE` | Tool fragments ended with EOF/length/stop rather than tool_calls | No tool-call chunks were released; inspect upstream truncation/finish handling. |
+| DSH rejects a restored native call | Host schema/permissions differ from the model's arguments | Check the caller's actual tool contract; bridge object validation does not replace host policy. |
 
 ### How to re-derive the gate
 
@@ -695,14 +849,63 @@ upgrade:
 |---|---|
 | `pnpm build` | `tsc -p tsconfig.json` → `lib/` (ESM + `.d.ts`). |
 | `pnpm typecheck` | Same compiler, `--noEmit`. |
-| `pnpm test` | `node --test tests/*.test.mjs` — hermetic unit tests. Currently covers the logging module (8 cases: levels/redaction/rotation/read). |
+| `pnpm test` | `node --test tests/*.test.mjs` — offline bridge/audit/batch/cancellation, proxy pool/rotation, logging and mock client activation regressions. |
+| `node tests/proxy-live.mjs [proxyUrl] [model-id]` | Real CONNECT/direct relay GET probes plus a fixed-marker synthetic completion; needs network and completion quota. Not a deliberate 429 stress test. |
 | `node tests/wire-dump.mjs` | Prints `attributionSuffix()`, `buildHeaders()`, `SESSION_ID_RE`, and the planned tool names — the fastest way to confirm the wire fingerprint without network I/O. |
 | `node tests/smoke.mjs [model-id]` | Full live path: id regex + low-12-bit invariant, tool plan/alias/translation, live catalog, real streaming completion. |
 
-**Current state:** `tests/logger.test.mjs` is hermetic; `tests/smoke.mjs` and
-`tests/wire-dump.mjs` are live probes. Hermetic protocol tests remain on the
-roadmap (section 13); until they land, treat the smoke probe as the live
-acceptance test — it is what validated the recipe in section 4.6.
+**Verification scope:** [tool-bridge tests](tests/tool-bridge.test.mjs) and
+[bridge integration tests](tests/bridge-integration.test.mjs) cover caller-name
+reservation, config switches, schema rejection, native JSON-object checks,
+agent-scoped audit and atomic mock-SSE batches (including incomplete finishes).
+[Cancellation regressions](tests/bridge-cancellation.test.mjs) cover pre-POST,
+buffered calls and cancellation while yielding tools.
+Logging/client tests are offline too. `tests/wire-dump.mjs` is an offline dump;
+`tests/smoke.mjs` is a live network/quota-consuming probe. Test existence or an
+offline pass is not proof of every model, real tool dispatch, or Desktop startup.
+Final release verification results should be recorded separately, without
+recasting the historical gate observations as a fresh full acceptance run.
+
+### 0.4.0 verification record (2026-10-18)
+
+- Compilation succeeded; **66/66 offline tests** passed (11 proxy-pool cases,
+  6 adapter proxy-rotation cases). These exercise policy under controlled inputs,
+  not live 429 quota exhaustion.
+- Real relay `GET /models` returned 200 through an authorized local HTTP CONNECT
+  proxy (847ms) and direct (2384ms), proving real relay traffic traversed the
+  tunnel. This does not prove completion availability or proxy authentication.
+- The Host re-mounted `0.4.0` with `application: applied`. In this Host,
+  `DSH_PROFILE_DIR` was unset: the default store base was `~/.dsh`. Writing a store
+  in the UI's format and reloading produced `egress pool ready` with
+  `source:settings-store` and the test proxy/direct entries, demonstrating real
+  store→reload→pool loading (not a browser-save test).
+- That test found UTF-8 BOM files silently falling back to config; loading now
+  strips BOM, covered by the store round-trip test. The test store was then
+  removed and the plugin reloaded: default remains **direct only**, with no
+  preconfigured local proxy or remaining test store.
+- Synthetic fixed `PROXY_OK` completions over both direct and proxy returned
+  **HTTP 503 / Endpoint is unavailable**, not PROXY_OK. No cross-model retries
+  or causal isolation were performed; end-to-end inference did not pass.
+- Real 429 failover was not deliberately triggered to avoid exhausting free
+  quota; its correctness is supported by offline tests, not an online 429 run.
+  Browser rendering remains unverified. Host authentication returns 401 even for
+  unknown `/api` paths, so external 401 probes do not verify RPC registration.
+
+### 0.3.0 verification record (2026-10-18)
+
+- Compilation succeeded; **49/49 offline tests** passed, including bridge,
+  cancellation, scope, logging and mock client activation coverage.
+- Plugin Manager re-mounted `0.3.0` with `application: applied`. A real
+  `opencode_bridge_audit({limit:8})` invocation succeeded: the observed agent had
+  41 caller tools, 3 aliases, 3 candidate mappings and 2 executable-decoy
+  rejections. These counts describe that sample, not a fixed inventory.
+- Pack dry-run exited 0 and included the new modules/comparison, not `research/`.
+- One synthetic `glm-5.3-flash-free` smoke read 10 live catalog entries, but the
+  inference POST returned **HTTP 503 / Endpoint is unavailable**, no `SMOKE_OK`,
+  and exit 1. No cross-model retries or policy-guidance A/B isolation were run;
+  this result does not establish the cause of the 503.
+- Therefore this round does **not** claim end-to-end inference or full
+  Desktop/UI acceptance; offline regressions and the real audit entry passed.
 
 An end-to-end acceptance run has two parts:
 
@@ -716,9 +919,9 @@ An end-to-end acceptance run has two parts:
 
 ## 12. Security, privacy, attribution
 
-- **No credentials.** The plugin reads no keychain, no env var, no config
-  secret. The only `Authorization` value it can send is `Bearer public` (or
-  whatever the operator sets explicitly).
+- **Keyless by default.** The plugin does not discover keychain/environment
+  credentials. It sends `Bearer public` by default, or the explicit configured
+  `apiKey`; such configured values must be treated as secrets.
 - **Attribution is preserved, not removed.** DSH's contract requires every
   provider request to identify the harness. The plugin satisfies it — product
   name and project URL are advertised — and strips only the version component,
@@ -728,7 +931,8 @@ An end-to-end acceptance run has two parts:
 - **No extra telemetry.** The plugin sends nothing beyond the request itself:
   no analytics, no phone-home, no logging of prompt content. `prompt_cache_key`
   is the session id with its prefix stripped — a stable per-conversation
-  cache token, not a user identifier.
+  cache token, not an intentionally embedded user identifier. Stable identifiers
+  and metadata can still enable correlation; this is not an anonymity guarantee.
 - **Content leaves the machine.** Prompts go to `opencode.ai`, subject to their
   terms and retention. Users should not send material they would not send to a
   third-party relay.
@@ -747,18 +951,14 @@ An end-to-end acceptance run has two parts:
 
 ## 13. Known gaps and roadmap
 
-1. **Protocol hermetic unit tests still missing.** `tests/logger.test.mjs`
-   covers the logging module (levels/redaction/rotation/read — all 8 pass), but
-   the protocol pure functions have no matching tests yet:
-   - id encoding: regex shape, the `ffe` low-12-bit invariant, counter clamping,
-     ascending vs descending
-   - `planTools`: passthrough, canonical-match (no decoy), cloaking, alias
-     collision (`_client2`), decoy set contents
-   - `normalizeToolCall`: alias restoration, each decoy translation, the
-     "declared tools are never re-mapped" safety property, malformed JSON
-   - `buildHeaders`: exact header set and the stripped-version UA
-   - `buildChatMessages`: assistant tool-call re-cloaking, `role:'tool'`
-     mapping, image/file placeholders, developer-message dropping
+1. **Conservative bridge, bounded evidence.** Tool planning/bridge/audit and
+   mock-stream regressions now exist, but there is no full model/Host/UI matrix
+   or complete protocol formal verification. Unknown schema constraints fail
+   closed, causing legitimate tools to be rejected; native full-schema and
+   permissions remain Host-owned. Tool calls wait for the whole response batch,
+   adding latency. The scoped audit is not necessarily the PTC/aux request set,
+   does not inspect actual call history, and grants no permission. Read/search
+   route names do not certify an arbitrary implementation is side-effect-free.
 2. **Text-only content path.** Images and files are placeholders. Some free
    models advertise `image` input in the registry; when the relay serves
    multimodal chat, `buildChatMessages` should emit real content parts. The
@@ -766,8 +966,12 @@ An end-to-end acceptance run has two parts:
    per model.
 3. **Response-side reasoning.** Only `reasoning_content` is recognised. Other
    providers' spellings (`reasoning`, `thinking`) are not parsed.
-4. **Retry/backoff is delegated.** The adapter surfaces `providerRetryAfterMs`
-   but implements no retry of its own, relying on `dsh-llm-retry`.
+4. **Narrow egress failover, not general retry.** The pool retries only 429 or
+   pre-stream transport failure within its attempt budget; 401/403/503 and body
+   failures do not rotate. Other Host retry policy remains separate. Only
+   HTTP(S) CONNECT is supported, not SOCKS. Selection is ordered healthy reuse,
+   not per-session binding; earlier recovered entries take priority. Credentials
+   are plaintext on disk; numeric Retry-After only, and quota may not be IP-only.
 5. **Single-tier default.** Only zero-cost models are offered; there is no
    switch to opt into paid console models.
 6. **Session cache is process-local.** A restarted host mints new `ses_` ids for
@@ -783,8 +987,14 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-18 | 0.4.0 | **Repository hygiene**: `research/` stays unpublished (third-party sources and binaries); the two original analysis notes were curated into `docs/research-notes/` and versioned; removed duplicate upstream tarballs and an unused `bun.exe` (~92 MiB). | Appendix A |
+| 2026-10-18 | 0.4.0 | **Runtime requirement**: declares `engines.node: ">=20.3"` (needed for `AbortSignal.any`); both READMEs' development sections state the Node version and that `lib/` is generated, so `pnpm build` comes first. | 9, Appendix A |
+| 2026-10-18 | 0.4.0 | **Release rule**: chapter 0 now requires a version bump to update the install command and tarball example in both READMEs, guarded by `tests/readme-version.test.mjs` (both must equal `package.json`); READMEs now use `dsh plugin --profile desktop add dsh-opencode-bridge@<version>`. | 0, 11, Appendix A |
+| 2026-10-18 | 0.4.0 | **Egress proxy rotation**: ordered healthy reuse, per-egress 429/transport cooldown, pre-stream-only failover, lazy undici CONNECT agents; proxy settings panel and plaintext URL store persistence with BOM-tolerant loading. Fixed absent `x-opencode-log-id` passing requestId:null to LlmError, so HTTP 429/401 retain RATE_LIMIT/AUTH instead of STREAM_FAILED. Added proxy pool/adapter regressions and opt-in live probe; no global HTTP patch. | 1–3, 6.8–6.9, 7–14, Appendix A |
+| 2026-10-18 | 0.3.0 | **Safe bridge**: reserve every caller name before aliasing; preserve caller tools when fingerprinting is off; always restore aliases; reject executable/unknown decoys and unsupported schemas; require native JSON objects; validate an entire completed tool batch before releasing any tool chunks, without execution rollback. | 0, 3, 6, 8, 10–13 |
+| 2026-10-18 | 0.3.0 | **Offline scope audit**: optional `opencode_bridge_audit` uses only `tools.schemas(exec.agent)` with bounded names/aliases/route decisions; no global fallback, chat/arguments/schema-description export, network or execution. Added bridge/audit regression suites and fixed-HEAD source comparison; narrowed privacy/rotation and Desktop verification claims. | 3, 6.4.1, 11–15, Appendix A |
 | 2026-10-18 | 0.2.1 | **Release prep**: npm package name set to `dsh-opencode-bridge` (unscoped `dsh-opencode-free` is taken by another author; the scoped name lacked distinction, so renamed to evoke the protocol bridge); `client.js` module id and `cordis.patch.yml` `name` follow the package name (row `id` unchanged); added LICENSE, `.gitignore`, `prepack` build hook; removed the settings log-viewer pitch from the plugin description. | 3, 14, Appendix A |
-| 2026-10-18 | 0.2.1 | **Fixed a DSH Desktop startup crash**: an uncaught exception in `client.js` `apply()` failed web-boot module activation, which the desktop shell treats as fatal. Hardened: `apply()` never throws (per-step try/catch), all service access optional-chained, locale registered before bound, `immediately: true` removed (avoids activating before the settings slot is declared); added 8 hostile-ctx regression tests. | 3, 15.6 |
+| 2026-10-18 | 0.2.1 | **Client activation hardening**: per-step try/catch, optional service access, locale registration before binding, no `immediately:true`; added hostile-ctx regression tests. These tests cover mocked activation, not proof of Desktop crash reproduction/root cause or live recovery. | 3, 15.6 |
 | 2026-10-18 | 0.2.0 | Added leveled logging (redaction + size-based rotation that cleans oldest first), a DSH Settings log view/copy UI, and the `opencode_free_log` agent tool; established the documentation maintenance policy. | 0, 3, 8, 11, 13, 14, 15 |
 | 2026-10-17 | 0.1.0 | First release: three-layer gate reproduction, `OpenCodeFreeAdapter`, free-model catalog, tool cloaking/translation. | 1–13 |
 
@@ -792,9 +1002,10 @@ line here (see the chapter 0 policy).
 
 ## 15. Logging and diagnostics
 
-Goals: **debuggable, zero sensitive information, bounded disk usage** — in that
-order of precedence. However useful a log line is, it may never contain
-credentials or user message content.
+Goals: useful metadata-only diagnostics, best-effort redaction and rotation.
+Call sites must not intentionally log credentials, user messages or arguments.
+These are engineering rules, not proof of zero sensitive information or a strict
+disk-byte cap; review logs before sharing, especially raw upstream errors.
 
 ### 15.1 Levels and output
 
@@ -815,8 +1026,7 @@ tool arguments, or full request bodies.
 
 ### 15.2 Redaction (three backstops against leaks)
 
-Even if a call site misbehaves, these catch sensitive material
-(`PluginLogger.redact()`):
+`PluginLogger.redact()` provides heuristic backstops, not exhaustive detection:
 
 1. **Literal secrets**: values injected at construction (`secrets`, currently
    `config.apiKey`) are replaced verbatim with `[redacted]`;
@@ -825,17 +1035,21 @@ Even if a call site misbehaves, these catch sensitive material
 3. **Truncation**: any string over 2000 characters is cut and marked
    `…[truncated]`.
 
-Every value inside `data` passes through `redact()` as well. The rules are unit
-tested (`tests/logger.test.mjs`, the two "redaction" cases).
+String/serialized values in `data` pass through `redact()`; known secrets
+shorter than four characters are not registered, and arbitrary sensitive text
+may not match the heuristics. Truncation is not redaction. The tested rules
+([logger tests](tests/logger.test.mjs)) are examples, not a universal privacy proof.
 
 ### 15.3 Rotation and automatic cleanup
 
-When a log file reaches `logMaxBytes` (default 512 KiB) it rotates:
-`dsh-opencode-free.log` → `.1` → `.2` …, **deleting the oldest first** on
-overflow, so the total file count stays ≤ `logMaxFiles` (default 5) and disk
-usage is bounded by `logMaxBytes × logMaxFiles`. Startup also prunes historical
-files beyond the retention. Write failures never throw (they degrade to a
-200-line memory ring that `read()` still serves).
+Before append, a threshold check against `logMaxBytes` (default 512 KiB)
+triggers `dsh-opencode-free.log` → `.1` → `.2` …, attempting oldest-first cleanup
+under `logMaxFiles` (default 5). This is best-effort retention, **not** the strict
+bound `logMaxBytes × logMaxFiles`: an oversized line may exceed the threshold,
+rotation/deletion may fail, and the one-file setting has a `.1` edge case.
+Startup prunes numbered siblings up to its fixed scan limit. Disk failures are
+swallowed; a 200-line memory ring remains available. Do not rely on this as a
+storage quota or secure erasure mechanism.
 
 ### 15.4 One implementation, two callers
 
@@ -851,7 +1065,7 @@ read/clear/set-level:
   shipped plugin uses (see `dsh-tool-antigravity`).
 - **Agent tool `opencode_free_log`**: `action: read|stat|clear|level`, backed
   by the same `LogService`, so the model can pull its own diagnostics. The log
-  is already redacted and safe to bring into context.
+  uses best-effort redaction; review it before sharing or putting it into context.
 
 The UI is browse/copy only (it changes no configuration), so no agent path
 mutates config — `level` changes runtime verbosity only and the configured
@@ -867,22 +1081,19 @@ dependency packages. **Note: `dsh.client` must NOT set `immediately: true`** —
 it forces module activation early in web-boot, before the `settings.section`
 slot may be declared (see 15.6).
 
-### 15.6 Client-module robustness rules (0.2.1 crash fix)
+### 15.6 Client-module robustness rules (0.2.1 activation hardening)
 
-**Incident**: installing 0.2.0 crashed DSH Desktop on startup. The crash log
-(`%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`) shows
-`web boot: 1 entry did not activate / dsh-opencode-free: failed` — **the
-desktop shell treats a failed client-module activation as fatal**; any
-uncaught exception thrown from `apply()` kills the whole application
-(`dsh-session-mover` on 10-15 died the same way).
+Activation exceptions can break client startup. The defensive changes below
+address missing/throwing services and activation ordering; mocked regression
+tests do **not** establish a particular Desktop crash root cause or prove a
+live Desktop restart/recovery. Obtain actual client logs and a controlled
+reproduction before making such claims.
 
-**Root cause** (two compounding defects):
+**Risks addressed:**
 
-1. `locale.bind(NS)` was called BEFORE `locale.register(NS, …)` — binding an
-   unregistered namespace can throw;
-2. `ctx.slots.inject('settings.section', …)` was called unguarded — with
-   `immediately: true`, the module activates before the settings slot is
-   declared, so the property access/call throws a TypeError.
+1. Binding an unregistered locale namespace may throw; register before binding.
+2. Unguarded slot/service access may fail when unavailable; early forced
+   activation can race slot declaration. Avoid `immediately:true`.
 
 **Defensive rules** (mandatory when editing `client.js`; enforced by
 `tests/client-boot.test.mjs`):
@@ -916,15 +1127,28 @@ cordis.patch.yml          bundle layer patch (insert row)
 .npmrc                    auto-install-peers=false
 src/index.ts              plugin entry (Config, apply, registrations, logging wiring)
 src/opencode-protocol.ts  gate constants, ids, headers, tools, messages
-src/adapter.ts            LlmAdapter implementation
+src/adapter.ts            LlmAdapter; atomic bridge-level release of completed tool batches
+src/tool-bridge.ts        conservative schema subset, read/search mapping, executable-decoy refusal
+src/bridge-audit.ts       offline current-agent scoped native-registry audit
+src/proxy-pool.ts         ordered egress/cooldown/store and lazy CONNECT dispatchers
+src/proxy-service.ts      live proxy edits, health, GET probes and RPC
 src/catalog.ts            free-model catalog
 src/logger.ts             leveled logger (redaction, rotation, memory fallback)
 src/log-service.ts        LogService + RPC routes + agent tool
-client.js                 Settings log viewer/copy panel (browser module)
+client.js                 Settings log and proxy-management panels (browser module)
 locale/en.json, zh.json   plugin title/description (display checklist)
 icon.svg                  original plugin icon
 lib/                      tsc output (published)
 tests/logger.test.mjs     logging module hermetic unit tests
+tests/tool-bridge.test.mjs planning, collision, flags, schema/JSON and decoy refusal tests
+tests/bridge-integration.test.mjs scoped audit and atomic mock-stream batch tests
+tests/bridge-cancellation.test.mjs preflight/buffered/yield cancellation regressions
+tests/proxy-pool.test.mjs  entry/health/ordered selection/store/cooldown tests
+tests/proxy-rotation.test.mjs adapter failover and no mid-stream replay tests
+tests/proxy-live.mjs      optional real CONNECT/direct metadata and synthetic inference probe
+tests/readme-version.test.mjs README install-command/tarball version guard
+docs/COMPARISON.zh.md     fixed-HEAD source comparison and evidence boundaries
+docs/research-notes/      publishable research notes (own analysis; no third-party sources)
 tests/smoke.mjs           live end-to-end probe
 tests/wire-dump.mjs       offline wire fingerprint dump
 research/                 reverse-engineering artifacts (not published)

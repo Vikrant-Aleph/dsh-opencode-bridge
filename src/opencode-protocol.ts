@@ -22,8 +22,9 @@
  *     descriptions/parameter schemas; older gates required the
  *     `bash`/`glob`/`grep`/`read` quartet. We send the verbatim `read`/`shell`
  *     definitions plus stub `bash`/`glob`/`grep`, cloak conflicting caller
- *     tools onto `*_client` aliases, and translate calls to the appended tools
- *     back to the caller's equivalents so they stay functional.
+ *     tools onto collision-free `*_client` aliases. Read/search decoys may be
+ *     mapped only after conservative schema validation; executable decoys are
+ *     rejected, never guessed into another runtime's shell.
  *
  * Request body: `stream: true` and a non-"none" `tool_choice` are part of the
  * fingerprint on some routes; we always stream and default `tool_choice` to
@@ -32,6 +33,7 @@
 
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, Message, ToolSchema } from '@deepseek-ai/dsh-llm'
+import { resolveToolCall } from './tool-bridge.js'
 
 // ---------------------------------------------------------------------------
 // Ids
@@ -178,6 +180,8 @@ export interface ToolsPlan {
   decoys: Set<string>
   /** Original caller tool names (execution targets). */
   callerNames: Set<string>
+  /** Exact caller contracts, never a process-wide registry snapshot. */
+  callerTools: Map<string, ToolSchema>
 }
 
 function canonicalMatch(tool: ToolSchema, key: string): boolean {
@@ -189,16 +193,20 @@ function canonicalMatch(tool: ToolSchema, key: string): boolean {
  * Cloak caller tools that collide with fingerprint names, append the canonical
  * fingerprint declarations, and report the maps needed to read the response.
  */
-export function planTools(callerTools: readonly ToolSchema[]): ToolsPlan {
+export function planTools(callerTools: readonly ToolSchema[], options: { fingerprint?: boolean } = {}): ToolsPlan {
   const tools: ChatTool[] = []
   const aliasToOriginal = new Map<string, string>()
   const decoys = new Set<string>()
-  const callerNames = new Set<string>()
-  const taken = new Set<string>(FINGERPRINT_NAMES)
+  const callerNames = new Set(callerTools.map((tool) => tool.name))
+  if (callerNames.size !== callerTools.length) throw new Error('Duplicate caller tool names cannot be bridged.')
+  const callerContracts = new Map(callerTools.map((tool) => [tool.name, tool]))
+  // Reserve ALL original names up front: alias allocation cannot collide with
+  // a caller tool that appears later in the array (e.g. read_client).
+  const taken = new Set<string>([...FINGERPRINT_NAMES, ...callerNames])
+  const fingerprint = options.fingerprint !== false
 
   for (const tool of callerTools) {
-    callerNames.add(tool.name)
-    const key = FINGERPRINT_NAMES.includes(tool.name as (typeof FINGERPRINT_NAMES)[number]) ? tool.name : ''
+    const key = fingerprint && FINGERPRINT_NAMES.includes(tool.name as (typeof FINGERPRINT_NAMES)[number]) ? tool.name : ''
     if (!key || canonicalMatch(tool, key)) {
       taken.add(tool.name)
       tools.push(chat(tool))
@@ -213,13 +221,13 @@ export function planTools(callerTools: readonly ToolSchema[]): ToolsPlan {
     tools.push(chat({ ...tool, name: alias }))
   }
 
-  for (const name of FINGERPRINT_NAMES) {
-    if (taken.has(name) && tools.some((t) => t.function.name === name)) continue
+  for (const name of fingerprint ? FINGERPRINT_NAMES : []) {
+    if (tools.some((t) => t.function.name === name)) continue
     const def = CANONICAL[name]
     tools.push({ type: 'function', function: { name, description: def.description, parameters: def.parameters } })
     decoys.add(name)
   }
-  return { tools, aliasToOriginal, decoys, callerNames }
+  return { tools, aliasToOriginal, decoys, callerNames, callerTools: callerContracts }
 }
 
 function chat(tool: ToolSchema): ChatTool {
@@ -227,51 +235,8 @@ function chat(tool: ToolSchema): ChatTool {
 }
 
 // ---------------------------------------------------------------------------
-// Decoy call translation: appended fingerprint tools stay callable by mapping
-// them onto the caller's equivalents.
-
-interface Translation {
-  name: string
-  map: (args: Record<string, unknown>) => Record<string, unknown>
-}
-
-function translations(callerNames: Set<string>): Map<string, Translation> {
-  const out = new Map<string, Translation>()
-  const pick = (...candidates: string[]) => candidates.find((name) => callerNames.has(name))
-
-  const readTarget = pick('read')
-  if (readTarget) {
-    out.set('read', {
-      name: readTarget,
-      map: (a) => ({ file_path: a.path, ...(a.offset !== undefined ? { offset: a.offset } : {}), ...(a.limit !== undefined ? { limit: a.limit } : {}) }),
-    })
-  }
-  const shellTarget = pick('pwsh', 'bash', 'shell')
-  if (shellTarget) {
-    out.set('shell', {
-      name: shellTarget,
-      map: (a) => ({
-        command: a.command,
-        description: typeof a.command === 'string' ? String(a.command).slice(0, 120) : 'shell command',
-        ...(a.workdir !== undefined ? { workdir: a.workdir } : {}),
-        ...(typeof a.timeout === 'number' && a.timeout > 0 ? { timeoutMs: a.timeout } : {}),
-      }),
-    })
-    out.set('bash', out.get('shell')!)
-  }
-  const globTarget = pick('glob')
-  if (globTarget) {
-    out.set('glob', { name: globTarget, map: (a) => ({ pattern: a.pattern, ...(a.path !== undefined ? { path: a.path } : {}) }) })
-  }
-  const grepTarget = pick('grep')
-  if (grepTarget) {
-    out.set('grep', {
-      name: grepTarget,
-      map: (a) => ({ pattern: a.pattern, ...(a.path !== undefined ? { path: a.path } : {}), ...(a.include !== undefined ? { include: a.include } : {}) }),
-    })
-  }
-  return out
-}
+// Conservative decoy translation lives in tool-bridge.ts. No executable
+// fingerprint decoy is guessed into a different runtime's tool.
 
 export interface WireCall {
   id: string
@@ -279,19 +244,9 @@ export interface WireCall {
   arguments: string
 }
 
-/** Restore caller tool spellings and translate decoy calls onto caller tools. */
-export function normalizeToolCall(call: WireCall, plan: ToolsPlan): WireCall {
-  const original = plan.aliasToOriginal.get(call.name)
-  if (original) return { ...call, name: original }
-
-  const translation = translations(plan.callerNames).get(call.name)
-  if (!translation || !plan.decoys.has(call.name)) return call
-  try {
-    const parsed = JSON.parse(call.arguments || '{}') as Record<string, unknown>
-    return { ...call, name: translation.name, arguments: JSON.stringify(translation.map(parsed)) }
-  } catch {
-    return { ...call, name: translation.name }
-  }
+/** Restore caller aliases; reject any unprovable or executable decoy mapping. */
+export function normalizeToolCall(call: WireCall, plan: ToolsPlan, options: { translateDecoys?: boolean } = {}): WireCall {
+  return resolveToolCall(call, plan, options)
 }
 
 // ---------------------------------------------------------------------------

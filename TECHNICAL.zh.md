@@ -22,7 +22,12 @@
 1. 增加或删除任何用户可见功能（含配置项、UI、工具、日志行为）；
 2. 修改任何技术原理（协议、闸门绕过方式、数据流、模块边界、错误分类）；
 3. 更换任何被文档化的常量（UA、指纹工具、端点、默认值、阈值）；
-4. 改变构建/打包/安装方式或 DSH 依赖版本。
+4. 改变构建/打包/安装方式或 DSH 依赖版本；
+5. **升级版本号**——必须同时把两份 README 的安装命令
+   （`dsh plugin ... add dsh-opencode-bridge@<版本>`）与本地 tarball 示例
+   （`./dsh-opencode-bridge-<版本>.tgz`）改成新的 `package.json` 版本。
+   两处版本必须与 `package.json` 的 `version` 完全一致；
+   `tests/readme-version.test.mjs` 会校验，不要绕过它。
 
 变更时同步维护第 14 章"变更记录"——先记后改，一行一变更。
 **不要留"代码已改、文档未改"的提交。**
@@ -32,19 +37,21 @@
 你是接手本仓库的 AI？按此顺序建立上下文，不要一上来就改代码：
 
 1. **读完本节与第 1、2 章**——知道插件做什么、挂在 DSH 哪里。
-2. **读第 3 章模块地图**——`opencode-protocol.ts` 是闸门常量唯一所在地，
-   **改协议行为只改它**；adapter/catalog/logger 各司其职，不要跨界塞逻辑。
+2. **读第 3 章模块地图**——`opencode-protocol.ts` 管闸门常量与规划，
+   `tool-bridge.ts` 管保守映射/校验，`bridge-audit.ts` 管作用域审计；
+   adapter/catalog/logger 仍各司其职。
 3. **动手前读第 4 章（闸门）与第 5 章（线上协议）**——这是本插件的核心风险区：
    改错任何一个常量都会让所有请求吃 403。
 4. **改动后必跑**：`node node_modules/typescript/bin/tsc -p tsconfig.json`（编译）、
-   `node --test tests/*.test.mjs`（单测）、`node tests/smoke.mjs`（实时探针，
-   需网络；429/403 的含义见第 10 章）。
+   `node --test tests/*.test.mjs`（单测）；仅当联网/额度使用明确适宜时运行
+   `node tests/smoke.mjs`（实时探针，429/403 含义见第 10 章）。
+   明确说明跳过的验证，不把离线测试当线上验收。
 5. **收尾前对照本节顶部的维护规约**，更新本文档与变更记录。
 6. 日志/诊断相关的问题先看第 15 章；设置界面 UI 在 `client.js`（非 TypeScript，
    是浏览器端 `__ModuleLoader__` 模块，见第 15.3 节）。
-7. **改 `client.js` 前必读 15.6**：`apply()` 抛未捕获异常会让 DSH Desktop
-   整个崩掉（web-boot 判定激活失败为致命错误）。改动后必跑
-   `node --test tests/client-boot.test.mjs`。
+7. **改 `client.js` 前必读 15.6**：激活异常可能破坏客户端启动；回归单测
+   不能证明 Desktop 崩溃已恢复。改后运行 `node --test tests/client-boot.test.mjs`，
+   并报告实际客户端验证的范围。
 
 ---
 
@@ -58,7 +65,8 @@
 | **凭据** | 无。relay 接受未登录哨兵值 `Bearer public`。 |
 | **分发** | npm bundle + `cordis.patch.yml` 层补丁。 |
 
-插件不做本地代理，是纯进程内适配器。
+插件是进程内适配器，不创建本地代理服务器；可将 relay 请求经用户配置的
+HTTP(S) CONNECT 代理发出（见6.9）。
 
 ---
 
@@ -82,13 +90,15 @@
                     https://opencode.ai/inference/v1
 ```
 
-插件只占用 DSH LLM 服务的两个接缝：
+主要的 DSH LLM 适配/发现接缝为：
 
 1. **`ctx.llm.registerAdapter(providers, adapter)`** —— 提供 provider 路由
    （`opencode-free`）与流式实现。
 2. **`ctx.llm.registerModelDiscovery(id, fn)`** —— 提供 GUI 的模型列表。
 
-它不触碰会话、工具或 agent loop。
+它不修改 agent loop、不执行工具。可选工具注册新增 `opencode_bridge_audit`
+（仅当前 agent schema）及既有日志工具。适配器会变换请求/响应工具声明，
+但不 patch 全局 HTTP 入口。
 
 ---
 
@@ -96,13 +106,26 @@
 
 | 文件 | 行数 | 职责 |
 |---|---:|---|
-| `src/index.ts` | 174 | Cordis 插件入口：`name`、`inject`、Schemastery `Config`、`apply()`、注册、清理器。 |
-| `src/opencode-protocol.ts` | 375 | **全部闸门敏感常量。** ID 生成、请求头配方、逐字指纹工具、工具遮蔽/翻译、消息投影。 |
-| `src/adapter.ts` | 361 | `OpenCodeFreeAdapter`：模型元数据、请求组装、SSE 解析、`StreamChunk` 发射、错误分类。 |
-| `src/catalog.ts` | 143 | `FreeModelCatalog`：models.dev ∪ 实时列表，缓存与降级。 |
+| `src/index.ts` | — | Cordis 插件入口：`name`、`inject`、Schemastery `Config`、`apply()`、注册、清理器。 |
+| `src/opencode-protocol.ts` | — | **全部闸门敏感常量。** ID 生成、请求头配方、逐字指纹工具、工具遮蔽/翻译、消息投影。 |
+| [src/adapter.ts](src/adapter.ts) | — | `OpenCodeFreeAdapter`：元数据、请求/SSE、工具整批校验后发块、错误分类。 |
+| [src/tool-bridge.ts](src/tool-bridge.ts) | — | 纯函数保守映射/schema 子集；拒绝可执行诱饵，不做 I/O/执行。 |
+| [src/bridge-audit.ts](src/bridge-audit.ts) | — | 当前 agent 注册表作用域审计，最小元数据输出、不联网不执行。 |
+| [src/proxy-pool.ts](src/proxy-pool.ts) | — | 顺序出口/冷却、代理store、pooled fetch和惰性undici CONNECT dispatcher。 |
+| [src/proxy-service.ts](src/proxy-service.ts) | — | 实时编辑/持久化、凭据脱敏health、relay GET探测与包私有RPC。 |
+| [tests/proxy-pool.test.mjs](tests/proxy-pool.test.mjs) | — | 规范化、顺序健康复用、冷却、脱敏、BOM/store与传输测试。 |
+| [tests/proxy-rotation.test.mjs](tests/proxy-rotation.test.mjs) | — | 适配器429/连接改道、池耗尽与流中途不重播。 |
+| [tests/proxy-live.mjs](tests/proxy-live.mjs) | — | 按需真实CONNECT/直连relay探测与固定标记合成补全。 |
+| [tests/readme-version.test.mjs](tests/readme-version.test.mjs) | — | 守卫：两份 README 的安装命令/tarball 版本必须等于 `package.json`。 |
+| [tests/tool-bridge.test.mjs](tests/tool-bridge.test.mjs) | — | 规划/碰撞、开关、schema 子集、原生/诱饵拒绝回归。 |
+| [tests/bridge-integration.test.mjs](tests/bridge-integration.test.mjs) | — | 审计执行作用域与 mock SSE 整批/结束/错误回归。 |
+| [tests/bridge-cancellation.test.mjs](tests/bridge-cancellation.test.mjs) | — | POST 前、缓存调用及逐块取消回归。 |
+| [docs/COMPARISON.zh.md](docs/COMPARISON.zh.md) | — | 六仓库固定 HEAD 源码比较及差异化边界。 |
+| [docs/research-notes/](docs/research-notes/README.md) | — | 可公开的调研笔记（自研分析），仓库不含第三方源码。 |
+| `src/catalog.ts` | — | `FreeModelCatalog`：元数据/实时列表筛选、缓存与降级。 |
 | `src/logger.ts` | 326 | `PluginLogger`：分级、脱敏、按大小轮转（最旧优先清理）、内存兜底。见第 15 章。 |
 | `src/log-service.ts` | 245 | `LogService` + RPC 路由 + `opencode_free_log` agent 工具（一套实现两个调用方）。 |
-| `client.js` | 321 | 设置界面日志查看/复制面板（浏览器端模块，非 tsc 产物）。见 15.3、15.6。 |
+| [client.js](client.js) | — | 日志页order30、代理增删/探测页order31；浏览器模块非tsc产物。见6.9、15.3、15.6。 |
 | `cordis.patch.yml` | 4 | 把插件行插入配置层的 bundle 补丁。 |
 | `tests/logger.test.mjs` | — | 日志模块密闭单测（分级/脱敏/轮转/读取）。 |
 | `tests/client-boot.test.mjs` | — | 客户端模块激活回归测试（apply 永不抛错，敌对 ctx 8 例）。 |
@@ -110,8 +133,8 @@
 | `tests/wire-dump.mjs` | — | 打印当前构建实际发出的请求头与指纹。 |
 
 **设计不变量：** 上游闸门可能考察的每个常量都只存在于
-`opencode-protocol.ts`。代码库其余部分不硬编码任何协议细节。闸门变化时，
-理论上只需要改这一个文件。
+`opencode-protocol.ts`。其余部分不重复硬编码指纹常量；规划改变时仍需同步
+复查 bridge、adapter、audit 与测试。新增上游声明绝不自动授予执行能力。
 
 ---
 
@@ -390,63 +413,74 @@ finish{reason}
 
 - **交错。** `reasoning_content` 与 `content` 会交错到达。适配器只保持一个打开块；
   类型切换时关闭当前块并打开下一个，因此块索引严格单调，且不会有块被发射两次。
-- **工具调用。** 增量按 `tool_calls[].index` 累积（id、name 以及拼接的参数片段），
-  在文本流结束后按 index 排序、作为完整块发射。`tool-call-delta` 携带完整参数字符串，
-  因为上游只发一次 id/name，其余都是片段。
-- **结束原因。** 有工具调用则为 `tool-calls`；`finish_reason === 'length'` 时为
-  `max-tokens`；否则 `stop`。中止呈现为 `aborted`；失败呈现为带稳定 `code` 的 `error`。
+- **工具调用。** 名字/参数按 `tool_calls[].index` 缓冲，不把片段流式交给执行端。
+  直至 `finish_reason:'tool_calls'`，全部调用通过桥接检查后才按 index 发出任何工具块，
+  此时 `tool-call-delta` 携带每条完整参数字符串。
+- **结束原因。** 整批通过并发出后为 `tool-calls`。存在工具调用但没有
+  `finish_reason:'tool_calls'`（EOF/length/stop）则为 `TOOL_BRIDGE_INCOMPLETE`，不能当可用批次。
+  无调用时 length 为 `max-tokens`，否则 `stop`；中止为 `aborted`，失败为 `error`。
+  拒绝工具不会回滚此前流出的文本/思考。
 
-### 6.4 工具遮蔽与翻译
+### 6.4 安全工具桥与无碰撞规划（0.3.0）
 
-这是插件最微妙的部分：请求体必须包含 OpenCode 的工具，同时又必须让 DSH 的工具保持可调用。
-
-`planTools(callerTools)` 产出四样东西：
+`planTools(callerTools, { fingerprint })` 返回：
 
 ```ts
-{ tools, aliasToOriginal, decoys, callerNames }
+{ tools, aliasToOriginal, decoys, callerNames, callerTools }
 ```
 
-算法：
+分配前先**预留全部调用方名字**，包括输入中较晚出现的名字，避免把原有
+`read_client` 当成另一个工具的别名。重复调用方名字会被拒绝。指纹开启时，
+非规范冲突使用 `<name>_client`、`_client2`……；完全规范的调用方定义仍是原生工具，
+只有缺少的指纹名才被注入并标为诱饵。`toolFingerprint:false` 原样保留调用方工具，
+不新增别名或诱饵，修正了旧开关路径丢弃调用方工具却仍注入声明的问题。
 
-1. 对每个调用方工具：
-   - 不在 `FINGERPRINT_NAMES` 中 → 原样发送；
-   - 在 `FINGERPRINT_NAMES` 中**且**完全规范 → 原样发送（它本身就充当指纹，
-     不再追加同名诱饵）；
-   - 在 `FINGERPRINT_NAMES` 中但定义不同 → **遮蔽**：以 `<name>_client`
-     发送（若被占用则 `_client2`、`_client3`……）并记录别名。
-     DSH 的 `read` 工具 schema 与 OpenCode 的不同，因此实践中 DSH 的 `read`
-     总是以 `read_client` 传输。
-2. 追加所有尚未满足的指纹名，标记为 `decoys`。
+真实请求按 `GenerateOptions.tools` 规划；有 `options.purpose` 的辅助调用使用空调用方集合，
+绝不从全局注册表扩权。指纹开启时仍可含准入声明，但没有当前调用方目标就不能执行；
+关闭时辅助集合保持为空。
 
-响应侧 `normalizeToolCall(call, plan)`：
+`normalizeToolCall` 始终执行，包括 `toolTranslation:false`：
 
-- **别名 → 原名**：`read_client` 恢复为 `read`，
-  于是 DSH 用自己的参数执行自己的工具，参数完全未被改动。
-- **诱饵 → 调用方工具**：模型若调用了追加的 `read`/`shell` 等，
-  会被改道到调用方的对应工具，并翻译参数：
+| 返回名字 | 策略 |
+|---|---|
+| 调用方别名 | 恢复原名；要求参数为 JSON 对象，保留原始参数字节。 |
+| 调用方原名（含规范 `bash`/`shell`） | 要求参数为 JSON 对象；其余交 DSH 自身 schema/权限检查。 |
+| 注入 `bash`/`shell` | 拒绝 `EXECUTABLE_DECOY`，不猜测 Bash→PowerShell 或其它运行时转换。 |
+| 注入 `read` | 仅当前调用方 `read`；`path`→`file_path`，可带 `offset`/`limit`。 |
+| 注入 `glob` / `grep` | 仅同名调用方目标；映射 `pattern`/`path`，grep 可带 `include`。 |
+| 未知名字 | 拒绝 `UNKNOWN_TOOL`。 |
 
-  | 诱饵 | 调用方目标（优先级顺序） | 参数映射 |
-  |---|---|---|
-  | `read` | `read` | `path`→`file_path`、`offset`、`limit` |
-  | `shell`、`bash` | `pwsh` → `bash` → `shell` | `command`、`description`（命令前 120 字符）、`workdir`、`timeout`→`timeoutMs` |
-  | `glob` | `glob` | `pattern`、`path` |
-  | `grep` | `grep` | `pattern`、`path`、`include` |
+只读/搜索映射要求目标是已知对象 schema、必填字段兼容。源参数必须是仅含已知键的对象，
+路径/模式为字符串，offset/limit 为非负安全整数；映射值必须满足目标的**保守 JSON Schema 子集**。
+支持类型、properties/required/additionalProperties、items、enum/const、oneOf/anyOf 及代码列出的
+数值/字符串/容器边界。`$ref`、`pattern`、`format`、`allOf` 等未知约束拒绝而非静默丢失。
+这不是完整 JSON Schema 校验器；调用方原生工具在此只检查 JSON 对象，完整 schema 与权限仍由 DSH 负责。
 
-**安全属性：** 仅当 `plan.decoys` 包含该名字时才做翻译。
-调用方自己声明的工具永远不会被重新映射——其参数本来就符合调用方的 schema。
-这避免了静默篡改与指纹工具同名的调用方工具的参数。
+`toolTranslation:false` 对只读/搜索诱饵返回 `TRANSLATION_DISABLED`，可执行诱饵仍拒绝，
+但**仍恢复调用方别名**。请求指导模型优先选调用方别名及 `pwsh` 等原生命令线上名字，
+不要选注入 shell 声明。
 
-**优先级说明：** shell 诱饵优先 `pwsh`，其次 `bash`，再次 `shell`。
-DSH 桌面 profile 提供 `pwsh`（并禁用 `bash`），
-因此 CLI 模型发出的 Linux 风格 `shell` 调用会落到 PowerShell 工具上。
+适配器缓冲整批 toolcalls，直至 `finish_reason:tool_calls`，先规范化所有调用，再发送**任何**工具块。
+一条桥接检查不通过，该响应整批工具块都不放行；有工具片段却以 EOF、`length` 或 `stop` 结束，
+返回 `TOOL_BRIDGE_INCOMPLETE`。已经流出的文本/思考不会回滚。这是桥接层原子放行，
+不是执行事务或副作用回滚；DSH 后续仍可能独立拒绝原生工具的 schema/权限约束。
 
-**辅助调用：** 当 `options.purpose` 有值（`compaction`、`session-title`）时，
-调用方工具被丢弃——`planTools([])`——只留 5 条指纹声明。
-既满足闸门，又不向辅助调用提供工具。
+全部执行仍在 DSH，插件不新增 exec/spawn 或全局 HTTP 补丁。
+“只读”指 read/search 桥接路线，不保证任意调用方同名实现没有副作用。
 
-若关闭 `config.toolTranslation`，`normalizeToolCall` 会被跳过：
-此时诱饵调用会带着 OpenCode 的参数名（`path`、`command`）到达 DSH 并因 schema 校验失败。
-这就是它默认为 `true` 的原因；该开关的存在是为了应对"未来闸门只需指纹即可"的情形。
+请求 POST 前、流缓存后与每个工具块前均检查取消，取消后不得释放缓存工具调用。
+
+### 6.4.1 离线当前 agent 作用域审计
+
+`opencode_bridge_audit` 接受 `{}` 或 `{ "limit": 12 }`；limit 为 1–200 整数，默认 80。
+它只调用 `tools.schemas(exec.agent)`；缺少 agent 返回 `AGENT_SCOPE_REQUIRED`，
+绝不使用 `schemas(undefined)` 退回全局。结果含名字、别名、路线决定/原因及计数/截断元数据，
+不含描述、default、工具入参或聊天；不联网、不执行工具。
+
+报告 basis 为 `current-agent-scoped-native-registry`。Code Mode/PTC 和辅助调用的工具集可能不同，
+真实请求始终按 `GenerateOptions.tools` 重新规划。审计不是会话调用历史、HTTP/模型健康测试、
+完整 schema 证书或权限授权。取消、非法 limit、注册表不可用均返回固定 status/code，
+不透出服务错误正文。替代实现与差异化声明的边界见[源码比较](docs/COMPARISON.zh.md)。
 
 ### 6.5 消息投影
 
@@ -496,7 +530,12 @@ HTTP 失败转成带稳定 `code` 的 `LlmError`（`httpError()`）：
 
 同时提取：上游的 `error.message`（原样透出——它会说明配额重置时间）、
 `retry-after` / `retry-after-ms`（作为 `providerRetryAfterMs`）、
-以及 `x-opencode-log-id`（作为 `requestId`，便于向上游提工单）。
+以及 `x-opencode-log-id`（仅非空时作为 `requestId`，便于向上游提工单）。
+0.4.0 修正缺头时向 `LlmError` 传 `requestId:null`，此前会将真实429/401 HTTP错误
+掩盖成 `STREAM_FAILED`。池 health/attempt 的 lastCode 可为 `RATE_LIMIT`、
+底层传输码（如 `ECONNREFUSED`）、`TIMEOUT` 或兜底 `TRANSPORT_ERROR`。
+这些是出口状态码，不是新增外层 LlmError 类型；传输耗尽仍映射 `TIMEOUT`
+（TimeoutError）或 `STREAM_FAILED`，HTTP503仍为 `PROVIDER_HTTP_ERROR` 且不触发池改道。
 
 流级失败：
 
@@ -504,11 +543,76 @@ HTTP 失败转成带稳定 `code` 的 `LlmError`（`httpError()`）：
 |---|---|
 | `options.signal` 已中止 | `finish{kind:'aborted', failure:{code:'ABORTED'}}` |
 | `DOMException.name === 'TimeoutError'` | code `TIMEOUT` |
+| 桥接检查拒绝 | `TOOL_BRIDGE_REJECTED`，仅固定原因，不含入参 |
+| 工具片段未以 `tool_calls` 完成 | `TOOL_BRIDGE_INCOMPLETE`，不发工具块 |
 | 其他抛出 | code `STREAM_FAILED` |
 | 流中 `{"error":…}` 帧 | `LlmError`，code `PROVIDER_STREAM_ERROR` |
 
+桥接原因码为 `UNKNOWN_TOOL`、`TRANSLATION_DISABLED`、`EXECUTABLE_DECOY`、
+`NO_CALLER_TARGET`、`UNSUPPORTED_TARGET_SCHEMA`、`INVALID_ARGUMENTS`。
+错误正文固定为 `Tool bridge rejected call: <reason>`，不拼入名字、schema 值或入参。
+原生调用的畸形/非对象 JSON 同样为 `INVALID_ARGUMENTS`，合法原生 JSON 不重新序列化。
+
 超时通过 `AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)])`
 实现，因此调用方取消与请求截止时间都生效，且调用方的 signal 永不被忽略。
+
+### 6.9 出口代理池（0.4.0）
+
+[ProxyPool](src/proxy-pool.ts) 负责顺序选择、逐出口冷却与存储辅助，
+[ProxyService](src/proxy-service.ts) 负责编辑和探测。推理 POST 与 relay
+`GET /models` 共用池，models.dev 公共元数据仍直连；插件不创建本地代理服务器。
+仅实际使用代理时惰性加载 `undici`，每个 URL 缓存一个 CONNECT `ProxyAgent`，
+不 patch 全局 fetch/dispatcher，也不新增全局 HTTP 钩子。
+
+**条目与选择。** `proxies:[]` 默认直连；空串、`direct`、`none` 表示本机出口。
+HTTP(S) URL 或裸 `host:port` 规范化、去重并保序，其它 scheme（含 SOCKS）明确拒绝并给原因。
+每次请求选配置中首个就绪出口，**不是 round-robin**；健康出口持续复用，利于额度/缓存亲和。
+这不是逐会话绑定，靠前出口冷却结束会重新优先；不同代理也可能共享公网 IP。
+显式仅代理列表不偷偷添加 direct，但池为空/删除最后条目时恢复直连；向仅直连池添加会保留直连。
+
+| 事件 | 状态/动作 |
+|---|---|
+| HTTP 429 | failures递增、lastCode=RATE_LIMIT、冷却当前出口，在流开始前尝试下一出口。 |
+| 流前 fetch/CONNECT/DNS/reset 失败 | failures递增、记传输码、短期冷却并尝试下一出口。 |
+| 其它 HTTP（含401/403/503） | 立即返回、不改道；pooled fetch 此时清零出口冷却/失败状态，仅代表有传输响应，不证明推理成功。 |
+| 冷却到期 | 可再次选择；失败数仅在非429池响应/探测成功时清零。 |
+| 全部冷却 | 取最早恢复者尽力尝试，不在本地立即硬失败。 |
+
+一次 pooled 请求最多以池大小为尝试预算，不等待冷却到期。全部限流时返回最后429，
+只有传输失败时透出最后异常；不保证新额度、不同公网 IP 或最终成功。
+
+429 优先用正数 `retry-after-ms`，其次数值 `retry-after` 秒，不解析 HTTP-date；
+否则冷却为 `base * 2^(failures-1)`，上限 `max(base,30分钟)`。
+base 默认60秒、最小钳到1秒；传输冷却为 `min(15秒,base)`。
+探测与普通池请求共用头解析。冷却/失败计数仅在进程内，重启持久化的是 URL 而非健康历史。
+
+**安全重试边界。** 只在 fetch/响应状态阶段、将响应体交给 SSE reader 前改道。
+429 已有 HTTP 响应，但尚未暴露成功的流响应体；一旦响应交回适配器，响应体/流中途失败
+直接报错，不由池重播，因而池不会重复已流出的文字。这不证明超时 POST 从未在上游计算，
+也不约束宿主其它重试层。
+
+**持久化与凭据。** 启动时有效设置 JSON store 优先于 config，包括已保存空列表（解析为直连）；
+文件缺失/不可读/非法才退 config；解析JSON前剥UTF-8 BOM以兼容PowerShell/编辑器。
+默认位置为
+`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-free/proxies.json`，可设 `proxyStorePath`。
+编辑先作用于内存池再保存；保存失败会报告，内存变更不保证重启后保留。
+文件含原始 URL 与**明文未加密代理密码**，用户账户可读；代码不构成专用安全 ACL 或秘密库。
+
+health/日志/UI display 去掉 userinfo；稳定 id 形如 `proxy:host:port#<8位hex摘要>`，
+不含字面密码。短摘要是标识，不是加密或普适匿名保证。UI 用 `{add}`、`{remove:id}`、
+`{reset:true}` 操作，而非读取/回传已有凭据；添加必然把新输入 URL 发给 Host，输入框也非密码掩码。
+不要截图敏感输入或发布 store；Host service 另接受持有原值者用 `{proxies}` 整体替换。
+
+**管理与探测。** 两处 settings.section 并存：日志 order30、
+“OpenCode Free — 代理” order31。代理页可添加/删除、测试全部、刷新，显示脱敏地址、
+就绪/冷却剩余秒与 lastCode。包私有 RPC 为 `/api/opencode-free-proxies/{read,write,test}`。
+测试全部逐条 GET relay `/models`（默认每条8秒超时），不发提示词或补全请求；但会改变健康状态：
+429冷却、传输失败短冷却、成功清零。它是可达性/状态检查，不是模型/工具/剩余额度验证，
+仍有受上游规则约束的网络流量。UI 渲染和真实 RPC 需另验；任意 `/api` 路径都可返回
+未授权401，不能据此证明注册或 handler 成功。
+
+仅支持 HTTP(S) CONNECT，不支持 SOCKS、自动发现代理、逐会话亲和或付费/其它模型回退。
+上游额度也可能由非 IP 信号决定；只使用获授权出口并遵守服务限制。
 
 ---
 
@@ -567,8 +671,11 @@ provider.api             → api             → 按请求覆盖对话端点
 | `includeDeprecated` | boolean | `false` | 是否提供已弃用但在线的模型。 |
 | `extraModels` | string[] | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
-| `toolFingerprint` | boolean | `true` | 是否发送 OpenCode 工具声明。 |
-| `toolTranslation` | boolean | `true` | 是否把指纹工具调用翻译到 DSH 工具。 |
+| `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S) CONNECT/直连条目；启动时已保存 store 优先。 |
+| `proxyCooldownMs` | number | `60000` | 429 基础冷却，最小钳到1秒，指数递增。 |
+| `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-free/proxies.json`，URL/凭据明文存储。 |
+| `toolFingerprint` | boolean | `true` | 注入指纹并遮蔽冲突；false 保留调用方工具且不加诱饵。 |
+| `toolTranslation` | boolean | `true` | 允许保守校验的只读/搜索诱饵；false 拒绝诱饵但仍恢复别名。注入 shell 始终拒绝。 |
 | `logLevel` | string | `info` | 写盘最低级别：`debug`\|`info`\|`warn`\|`error`\|`off`（`off` 关闭文件日志）。 |
 | `logDir` | string | `''` | 日志目录；空 = `<DSH_PROFILE_DIR 或 ~/.dsh>/logs/dsh-opencode-free`（实测 Host 进程通常没有 `DSH_PROFILE_DIR`，因此多为 `~/.dsh/logs/dsh-opencode-free`）。 |
 | `logMaxBytes` | number | `524288` | 单个日志文件大小上限（字节），超出即轮转。 |
@@ -592,6 +699,10 @@ provider.api             → api             → 按请求覆盖对话端点
 peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 使 bundle 能装入 profile 而不会提升出第二份框架副本。
 
+运行时要求 **Node ≥ 20.3**（`package.json` 的 `engines` 已声明）：适配器用
+`AbortSignal.any` 合并调用方取消与请求截止时间，该 API 到 Node 20.3 才有。
+更旧的运行时不保证可运行，也不会被安装器拦下。
+
 本插件已经踩到过的 API 差异——框架升级时值得复查：
 
 1. **`CallId` → `ToolCallId`。** 品牌类型改名；`ToolCallId(v)` 是构造函数。
@@ -612,9 +723,13 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 |---|---|---|
 | 重新出现 `403 FREE_TIER_GATE` | 闸门变了（UA 下限、id 方案、schema 比对） | 更新 `src/opencode-protocol.ts` 中的常量（见下），再重新构建与打包。 |
 | `401 AUTH` | `Bearer public` 哨兵值改变 | 检查客户端的未登录路径；更新 `apiKey`。 |
-| `429 RATE_LIMIT` | 按 IP 的免费层配额，或上游容量（`Upstream request failed: Endpoint is unavailable.`） | 等待重置；上游消息会说明。这不是插件缺陷。 |
+| `429 RATE_LIMIT` | 当前出口限流，也可能有其它配额维度 | 池冷却并在预算内尝试其它出口；耗尽则等待/检查Retry-After及获授权出口配置。 |
+| HTTP503 / Endpoint is unavailable | 推理端点不可用，根因未隔离 | 503不触发池轮换，不当作IP配额或承诺换代理能修好。 |
+| 池lastCode ECONNREFUSED/TIMEOUT/TRANSPORT_ERROR | 流前连接/传输故障 | 检查代理可达性，短冷却后可用其它出口；响应体故障不重播。 |
 | 模型未出现在选择器中 | 注册表/实时列表不匹配 | 把 id 加入 `extraModels`，或开启 `includeDeprecated: true`。 |
-| 工具调用 schema 校验失败 | 关闭了 `toolTranslation`，或映射漂移 | 重新开启；对照当前 DSH 工具 schema 复查 `translations()`。 |
+| `TOOL_BRIDGE_REJECTED` | 未知/可执行诱饵、翻译关闭、schema 不支持、目标缺失或 JSON/值非法 | 看固定原因，运行作用域 `opencode_bridge_audit`，优先调用方别名/原生 pwsh；不要猜另一种 shell 绕过拒绝。 |
+| `TOOL_BRIDGE_INCOMPLETE` | 工具片段以 EOF/length/stop 而非 tool_calls 结束 | 未放行工具块，排查上游截断/结束处理。 |
+| DSH 拒绝恢复后的原生调用 | 参数不满足宿主 schema/权限 | 核对实际调用方契约；桥的对象检查不替代宿主策略。 |
 
 ### 如何重新推导闸门
 
@@ -636,13 +751,47 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 |---|---|
 | `pnpm build` | `tsc -p tsconfig.json` → `lib/`（ESM + `.d.ts`）。 |
 | `pnpm typecheck` | 同一编译器，`--noEmit`。 |
-| `pnpm test` | `node --test tests/*.test.mjs` —— 密闭单测。目前覆盖日志模块 8 例（分级/脱敏/轮转/读取）。 |
+| `pnpm test` | `node --test tests/*.test.mjs` —— 离线桥/审计/整批/取消、代理池/轮换、日志和mock客户端激活回归。 |
+| `node tests/proxy-live.mjs [代理URL] [模型id]` | 真实CONNECT/直连relay GET探测与固定标记合成补全，需网络与补全额度；不故意压满额度触发429。 |
 | `node tests/wire-dump.mjs` | 打印 `attributionSuffix()`、`buildHeaders()`、`SESSION_ID_RE` 与规划出的工具名——不产生网络 I/O 即可确认线上指纹的最快方式。 |
 | `node tests/smoke.mjs [模型id]` | 完整实时链路：id 正则 + 低 12 位不变量、工具规划/别名/翻译、实时目录、真实流式补全。 |
 
-**当前状态：** `tests/logger.test.mjs` 是密闭单测；`tests/smoke.mjs` 与
-`tests/wire-dump.mjs` 是实时探针。协议纯函数的密闭单测仍在路线图（第 13 章），
-在补齐之前请把 smoke 探针当作线上验收测试——4.6 节的配方正是由它验证的。
+**验证范围：** [工具桥测试](tests/tool-bridge.test.mjs)与[桥集成测试](tests/bridge-integration.test.mjs)
+覆盖调用方名字预留、配置开关、schema 拒绝、原生 JSON 对象检查、agent 作用域审计及
+mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-cancellation.test.mjs)
+覆盖 POST 前、已缓存调用与工具发块期间取消。日志/客户端测试也属离线。
+`tests/wire-dump.mjs` 是离线转储，`tests/smoke.mjs` 才是消耗网络/额度的实时探针。
+存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
+发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
+
+### 0.4.0 本轮验证记录（2026-10-18）
+
+- 编译通过，离线 **66/66**（proxy-pool 11例、适配器proxy-rotation 6例）。
+  它们验证受控输入下的策略，不是线上429额度耗尽实验。
+- 经获授权本机HTTP CONNECT代理访问真实relay `GET /models` 为200、847ms，
+  直连亦为200、2384ms，证明隧道真实承载relay流量；不证明补全可用或代理认证已实测。
+- 真实Host重挂`0.4.0`返回`application: applied`。该Host未设置`DSH_PROFILE_DIR`，
+  默认store基目录为`~/.dsh`。按UI相同格式写store并重载，日志`egress pool ready`
+  出现`source:settings-store`与测试代理/直连条目，证明真实store→重载→池加载，
+  不是浏览器保存操作测试。
+- 此测试发现UTF-8 BOM曾导致静默退回config；现加载先剥BOM，往返测试覆盖。
+  验证后已删除store并重载，默认仍**仅直连**，没有预置本机代理或残留测试store。
+- 直连和代理的固定`PROXY_OK`合成补全均返回 **HTTP503 / Endpoint is unavailable**，
+  未得到PROXY_OK；未跨模型重试、未隔离根因，不能称端到端推理通过。
+- 未为验证刻意触发真实429以免耗尽免费额度；轮换正确性由离线测试支持，非线上429实测。
+  浏览器实际渲染未验证；Host对未知`/api`路径也先返回401，外部401探测不能证明RPC注册。
+
+### 0.3.0 本轮验证记录（2026-10-18）
+
+- 编译成功；离线测试 **49/49** 通过，包含桥接、取消、作用域、日志和 mock 客户端激活。
+- 本机通过插件管理器重新挂载 `0.3.0`，返回 `application: applied`；真实执行
+  `opencode_bridge_audit({limit:8})` 成功。该 Agent 当时为 41 个调用方工具、3 个别名、
+  3 条候选映射、2 条可执行诱饵拒绝；这是观测样本，不是所有 Agent 的固定数量。
+- 打包干跑退出码 0，包含新增模块与比较报告，不含 `research/`。
+- 一次仅含固定测试文本的 `glm-5.3-flash-free` smoke：实时目录读到 10 个模型，
+  推理 POST 返回 **HTTP 503 / Endpoint is unavailable**，未得到 `SMOKE_OK`，脚本退出码 1。
+  未跨模型重试，也未做有/无策略指导的隔离对照，不能据此确认 503 的根因。
+- 因而本轮**不声称端到端推理或完整 Desktop/UI 验收通过**；离线回归与真实审计入口已验证。
 
 端到端验收分两部分：
 
@@ -656,8 +805,8 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 
 ## 12. 安全、隐私与归属
 
-- **无凭据。** 插件不读取钥匙串、环境变量或配置密钥。
-  它唯一能发送的 `Authorization` 是 `Bearer public`（或运维方显式设置的值）。
+- **默认无密钥。** 插件不从钥匙串/环境变量发现凭据。默认发送 `Bearer public`，
+  也可发送显式配置的 `apiKey`；这类配置值仍必须视作秘密。
 - **归属是被保留而非移除的。** DSH 契约要求每个 provider 请求都标识本 harness。
   插件满足该要求——产品名与项目 URL 都已公开——只剥离版本段，
   因为带版本的第三方产品令牌会被闸门拒绝。
@@ -665,7 +814,8 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
   被**导入并变换**而不是被绕过的原因。
 - **无额外遥测。** 插件除请求本身外不发送任何东西：无埋点、无回传、
   不记录提示内容。`prompt_cache_key` 是去掉前缀的会话 id
-  ——一个稳定的按会话缓存令牌，而非用户标识。
+  ——稳定的按会话缓存令牌，不主动嵌入用户标识；稳定 ID 与元数据仍可被关联，
+  不构成匿名性保证。
 - **内容会离开本机。** 提示会发往 `opencode.ai`，受其条款与保留策略约束。
   用户不应发送不愿交给第三方 relay 的材料。
 - **服务条款。** 本插件有意把自己呈现为官方客户端，以使用一个被限定给该客户端的层级。
@@ -680,23 +830,20 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 
 ## 13. 已知缺口与路线图
 
-1. **协议层密闭单测仍缺。** `tests/logger.test.mjs` 覆盖了日志模块
-   （分级/脱敏/轮转/读取，8 例全过），但协议纯函数还没有对应单测：
-   - id 编码：正则形态、`ffe` 低 12 位不变量、计数器封顶、升序 vs 降序
-   - `planTools`：原样透传、规范匹配（不追加诱饵）、遮蔽、
-     别名冲突（`_client2`）、诱饵集合内容
-   - `normalizeToolCall`：别名恢复、各诱饵翻译、
-     "已声明工具永不被重映射"这一安全属性、畸形 JSON
-   - `buildHeaders`：精确请求头集合与剥离版本后的 UA
-   - `buildChatMessages`：assistant 工具调用重新遮蔽、`role:'tool'` 映射、
-     图片/文件占位、developer 消息丢弃
+1. **保守工具桥、有限证据。** 已有规划/桥/审计与 mock 流回归，但没有完整
+   模型/Host/UI 验证矩阵或全协议形式验证。未知 schema 约束 fail-closed，会误拒绝
+   合法工具；原生完整 schema/权限仍由宿主负责。工具需等整批响应，增加延迟。
+   作用域审计不一定等于 PTC/辅助请求工具集，不查看实际调用历史，也不授予权限。
+   read/search 路线名不证明任意同名实现无副作用。
 2. **纯文本内容通路。** 图片与文件是占位符。部分免费模型在注册表中声明
    `image` 输入；当 relay 提供多模态对话时，`buildChatMessages`
    应发出真实内容分片。注册表已发布 `inputModalities`，适配器可按模型决策。
 3. **响应侧推理内容。** 目前只识别 `reasoning_content`。
    其他提供方的写法（`reasoning`、`thinking`）未解析。
-4. **重试/退避已委托出去。** 适配器透出 `providerRetryAfterMs`，
-   但自身不实现重试，依赖 `dsh-llm-retry`。
+4. **窄边界出口改道，不是通用重试。** 池只在预算内对429/流前传输失败重试，
+   401/403/503、响应体失败不轮换，宿主其它重试另计。仅 HTTP(S) CONNECT、无SOCKS；
+   按顺序健康复用，不逐会话绑定；靠前出口恢复后重新优先。凭据磁盘明文，
+   Retry-After只解析数值，上游额度不一定仅由IP决定。
 5. **单一层级默认。** 只提供零成本模型；没有切换到付费 console 模型的开关。
 6. **会话缓存是进程内的。** 宿主重启后，既有对话会获得新的 `ses_` id，
    因此跨重启会失去上游 prompt 缓存亲和。
@@ -709,8 +856,14 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-18 | 0.4.0 | **仓库整理**：`research/` 确认不上传（第三方源码/二进制）；把两份自研调研笔记整理到 `docs/research-notes/` 并加入版本库；删除重复的上游 tarball 与未使用的 `bun.exe`（约 92 MiB）。 | 附录 A |
+| 2026-10-18 | 0.4.0 | **运行时要求**：声明 `engines.node: ">=20.3"`（`AbortSignal.any` 所需），两份 README 的开发段写明 Node 版本与 `lib/` 未提交、需先 `pnpm build`。 | 9、附录 A |
+| 2026-10-18 | 0.4.0 | **发布规约**：第 0 章新增“升版本必须同步两份 README 的安装命令与 tarball 示例版本”，并加 `tests/readme-version.test.mjs` 守卫（命令/tarball 版本必须等于 `package.json`）。同时把 README 安装命令改为 `dsh plugin --profile desktop add dsh-opencode-bridge@<版本>`。 | 0、11、附录 A |
+| 2026-10-18 | 0.4.0 | **出口代理轮换**：顺序健康复用、逐出口429/传输冷却、仅流前改道、惰性undici CONNECT；代理设置页与URL明文store持久化，加载容忍UTF-8 BOM。修复缺少x-opencode-log-id时传requestId:null给LlmError，429/401不再被误报STREAM_FAILED而保留RATE_LIMIT/AUTH。新增池/适配器回归与按需实测脚本，不patch全局HTTP。 | 1–3、6.8–6.9、7–14、附录A |
+| 2026-10-18 | 0.3.0 | **安全工具桥**：先预留全部调用方名；关闭指纹仍保留调用方工具；始终恢复别名；拒绝可执行/未知诱饵与不支持 schema；原生参数要求 JSON 对象；完整响应整批校验后才发工具块，不提供执行回滚。 | 0、3、6、8、10–13 |
+| 2026-10-18 | 0.3.0 | **离线作用域审计**：可选 `opencode_bridge_audit` 只用 `tools.schemas(exec.agent)`，有界输出名字/别名/路线决定；不退全局，不导出聊天/入参/schema 描述，不联网不执行。新增桥/审计回归及固定 HEAD 比较；收窄隐私/轮转与 Desktop 验证声明。 | 3、6.4.1、11–15、附录 A |
 | 2026-10-18 | 0.2.1 | **发布准备**：npm 包名定为 `dsh-opencode-bridge`（无 scope 的 `dsh-opencode-free` 已被他人占用；scoped 名辨识度不足，改为桥接寓意的独立名字）；`client.js` 模块 id 与 `cordis.patch.yml` 的 `name` 同步包名（行 `id` 不变）；新增 LICENSE、`.gitignore`、`prepack` 构建钩子；插件介绍移除设置日志查看器的宣传文案。 | 3、14、附录 A |
-| 2026-10-18 | 0.2.1 | **修复 DSH Desktop 启动崩溃**：`client.js` 的 `apply()` 抛未捕获异常 → web-boot 模块激活失败 → 桌面壳判为致命错误退出。加固：`apply()` 永不抛错（每步独立 try/catch）、全部服务可选链访问、locale 先注册后绑定、移除 `immediately: true`（避免在设置插槽声明前强制激活）；新增敌对 ctx 回归测试 8 例。 | 3、15.6 |
+| 2026-10-18 | 0.2.1 | **客户端激活加固**：每步 try/catch、可选服务访问、locale 先注册后绑定、不设 `immediately:true`，新增敌对 ctx 回归测试。测试仅覆盖 mock 激活，不证明 Desktop 崩溃已复现、根因已确认或真实恢复已通过。 | 3、15.6 |
 | 2026-10-18 | 0.2.0 | 新增分级日志（脱敏 + 按大小轮转自动清理最旧）、DSH 设置界面日志查看/复制 UI、`opencode_free_log` agent 工具；建立文档维护规约。 | 0、3、8、11、13、14、15 |
 | 2026-10-17 | 0.1.0 | 首版：三层闸门复刻、`OpenCodeFreeAdapter`、免费模型目录、工具遮蔽/翻译。 | 1–13 |
 
@@ -718,8 +871,9 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 
 ## 15. 日志与诊断
 
-目标：**debug 可观测、零敏感信息、磁盘占用有界**。三者按此优先级取舍——
-日志再有用，也不允许包含凭据或用户消息内容。
+目标：有用的元数据诊断、best-effort 脱敏与轮转。调用点不得主动记录凭据、
+用户消息或工具入参。这是工程约束，不证明零敏感信息或严格磁盘字节上限；
+分享前请复核日志，尤其是上游错误正文。
 
 ### 15.1 分级与输出
 
@@ -739,7 +893,7 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 
 ### 15.2 脱敏（防泄漏三道闸）
 
-即使调用点失误，以下兜底也会拦截敏感材料（`PluginLogger.redact()`）：
+`PluginLogger.redact()` 提供以下启发式兜底，但不是穷尽敏感信息检测：
 
 1. **字面秘密**：构造时注入的 `secrets`（当前为 `config.apiKey`）逐字替换为
    `[redacted]`；
@@ -747,15 +901,17 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
    长字面量替换为 `[redacted]`；
 3. **截断**：单个字符串超 2000 字符截断并标记 `…[truncated]`。
 
-数据字段（`data` 参数）的每个值同样过 `redact()`。这套规则有单测覆盖
-（`tests/logger.test.mjs` "redaction" 两例）。
+`data` 中字符串/序列化值经过 `redact()`；少于四字符的已知秘密不注册，
+任意敏感文字也可能不匹配规则。截断不是脱敏。[日志测试](tests/logger.test.mjs)
+覆盖规则示例，不是普适隐私证明。
 
 ### 15.3 轮转与自动清理
 
-单个日志文件达到 `logMaxBytes`（默认 512 KiB）即轮转：`dsh-opencode-free.log`
-→ `.1` → `.2` …，**溢出时先删除最旧的**，总文件数恒 ≤ `logMaxFiles`（默认 5），
-磁盘占用上界为 `logMaxBytes × logMaxFiles`。启动时清理超出保留数的历史文件。
-写盘失败不抛错（降级到 200 行内存环，`read()` 仍可服务）。
+追加前按 `logMaxBytes`（默认 512 KiB）检查阈值并触发轮转：`dsh-opencode-free.log`
+→ `.1` → `.2` …，按 `logMaxFiles`（默认 5）尝试最旧优先清理。这是 best-effort 保留，
+**不是** `logMaxBytes × logMaxFiles` 的严格上限：超大行可越过阈值，轮转/删除可能失败，
+单文件配置还有 `.1` 边界问题。启动仅在固定扫描范围内清理数字后缀。
+写盘异常被吞，仍可读取 200 行内存环；不要将其当存储配额或安全擦除机制。
 
 ### 15.4 一套实现，两个调用方
 
@@ -768,7 +924,7 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
   `connection.fetch.register` / `connection.rpc.call` 通道同款（见
   `dsh-tool-antigravity` 的实现）。
 - **agent 工具 `opencode_free_log`**：`action: read|stat|clear|level`，
-  走同一 `LogService`。模型可自行拉取诊断日志；日志已被脱敏，可安全回传上下文。
+  走同一 `LogService`。模型可自行拉取诊断日志；仅 best-effort 脱敏，分享/回传上下文前仍需复核。
 
 UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改配置"路径——
 `level` 只改运行时级别，重启后由配置恢复。
@@ -782,20 +938,17 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 `immediately: true`**——它会让模块在 web-boot 早期强制激活，此时
 `settings.section` 插槽可能尚未声明（见 15.6）。
 
-### 15.6 客户端模块健壮性规则（0.2.1 崩溃修复）
+### 15.6 客户端模块健壮性规则（0.2.1 激活加固）
 
-**事故**：0.2.0 安装后 DSH Desktop 启动即崩溃。崩溃日志
-（`%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`）显示
-`web boot: 1 entry did not activate / dsh-opencode-free: failed`——
-**桌面壳把客户端模块激活失败视为致命错误**，`apply()` 抛出的任何未捕获
-异常都会杀死整个应用（10-15 的 `dsh-session-mover` 是同款死法）。
+激活异常可能破坏客户端启动。以下防御针对服务缺失/抛错与激活时序；mock 回归
+**不能**确定某次 Desktop 崩溃根因，也不能证明真实 Desktop 重启/恢复已通过。
+此类结论需要真实客户端日志与受控复现。
 
-**根因**（两个叠加）：
+**已防御的风险：**
 
-1. `locale.bind(NS)` 在 `locale.register(NS, …)` 之前调用——对未注册的
-   命名空间，`bind` 可能抛异常；
-2. `ctx.slots.inject('settings.section', …)` 无保护直调——`immediately: true`
-   使模块在设置插槽声明前激活，服务属性访问/调用直接抛 TypeError。
+1. 对未注册 locale 命名空间 bind 可能抛错，因此先注册再绑定。
+2. 插槽/服务不可用时无保护访问可能失败；强制早期激活可能与插槽声明竞争，
+   因此不使用 `immediately:true`。
 
 **防御规则**（修改 `client.js` 时必须遵守，`tests/client-boot.test.mjs` 强制）：
 
@@ -823,15 +976,28 @@ cordis.patch.yml          bundle 层补丁（插入插件行）
 .npmrc                    auto-install-peers=false
 src/index.ts              插件入口（Config、apply、注册、日志装配）
 src/opencode-protocol.ts  闸门常量、id、请求头、工具、消息
-src/adapter.ts            LlmAdapter 实现
+src/adapter.ts            LlmAdapter；完整工具批次的桥接层原子放行
+src/tool-bridge.ts        保守 schema 子集、只读/搜索映射、可执行诱饵拒绝
+src/bridge-audit.ts       离线当前 agent 原生注册表作用域审计
+src/proxy-pool.ts         顺序出口/冷却/store与惰性CONNECT dispatcher
+src/proxy-service.ts      实时代理编辑、health、GET探测与RPC
 src/catalog.ts            免费模型目录
 src/logger.ts             分级日志（脱敏、轮转、内存兜底）
 src/log-service.ts        LogService + RPC 路由 + agent 工具
-client.js                 设置界面日志查看/复制面板（浏览器端模块）
+client.js                 设置界面日志与代理管理面板（浏览器端模块）
 locale/en.json, zh.json   插件标题/描述（显示清单）
 icon.svg                  原创插件图标
 lib/                      tsc 产物（发布内容）
 tests/logger.test.mjs     日志模块密闭单测
+tests/tool-bridge.test.mjs 规划、碰撞、开关、schema/JSON 与诱饵拒绝测试
+tests/bridge-integration.test.mjs 作用域审计与 mock 流原子整批测试
+tests/bridge-cancellation.test.mjs 请求前/缓存批次/发块时取消回归
+tests/proxy-pool.test.mjs  条目/health/顺序选择/store/冷却测试
+tests/proxy-rotation.test.mjs 适配器改道与流中途不重播测试
+tests/proxy-live.mjs      按需真实CONNECT/直连元数据与合成推理探针
+tests/readme-version.test.mjs README 安装命令/tarball 版本一致性守卫
+docs/COMPARISON.zh.md     固定 HEAD 源码比较及证据边界
+docs/research-notes/      可公开的调研笔记（自研分析；不含第三方源码）
 tests/smoke.mjs           实时端到端探针
 tests/wire-dump.mjs       离线线上指纹转储
 research/                 逆向工程资料（不发布）

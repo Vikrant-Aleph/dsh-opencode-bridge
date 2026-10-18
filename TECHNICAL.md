@@ -37,6 +37,17 @@ update this file (`TECHNICAL.md`) and its Chinese counterpart
    the new `package.json` version. Both must match `version` exactly;
    `tests/readme-version.test.mjs` enforces this — do not bypass it.
 
+**Separate documentation by audience.** The READMEs serve project visitors:
+keep a short overview, user-facing features, copyable installation/first-use
+steps, optional proxy setup, essential limitations and privacy warnings, common
+troubleshooting, and a compact development entry point. Keep wire fingerprints,
+full configuration, schema/stream internals, test evidence, historical results
+and maintenance procedures in this technical document rather than duplicating
+them on the project homepage. Link here for details; do not tell ordinary users
+to patch protocol constants in source code as routine troubleshooting. Keep both
+language versions aligned and all installation examples pinned to the package
+version, including those in the collapsed source-development section.
+
 Record every such change in chapter 14 "Change log" — one line per change,
 written as part of the same commit. **Never leave a "code changed, docs stale"
 commit.**
@@ -811,10 +822,12 @@ Peer dependencies are declared with `peerDependenciesMeta.optional = true` so
 the bundle installs into a profile without hoisting a second copy of the
 framework.
 
-The runtime requires **Node ≥ 20.3** (declared as `engines.node`): the adapter
-merges caller cancellation with the request deadline via `AbortSignal.any`,
-which only exists from Node 20.3. Older runtimes are unsupported and are not
-blocked by the installer.
+The runtime requires **Node ≥ 20.18.1** (declared as `engines.node`), matching
+`undici` 7.30.1's declared minimum. `AbortSignal.any` alone needs only Node 20.3,
+but that lower bound does not cover the proxy dependency. Node.js 22 or 24 LTS
+is recommended for source development. Installers may warn or reject unsupported
+Node versions depending on their engine policy; this metadata is not a substitute
+for testing a supported runtime.
 
 API differences that already bit this plugin — worth checking on any framework
 upgrade:
@@ -1005,6 +1018,7 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-18 | 0.4.1 | **Visitor-focused documentation**: rewrite both READMEs around features, install/first use, optional proxies, essential risks and troubleshooting; replace wire/config/schema/validation detail with links to this document, and collapse source-development steps. Add an audience-separation maintenance rule and correct `engines.node` to `>=20.18.1`, matching the current undici dependency. Installation and tarball examples remain pinned to 0.4.1. | 0, 9, 14, READMEs |
 | 2026-10-18 | 0.4.1 | **Patch release preparation**: bump the package version and synchronize the pinned installation command and local tarball example in both READMEs; preserve historical feature versions and verification records. | 0, 14, READMEs |
 | 2026-10-18 | 0.4.0 | **Settings merged and renamed**: the former log and proxy `settings.section` entries became one `opencode-bridge` page with two tabs, and the display name changed from “OpenCode Free” to “OpenCode Bridge” (`locale` title, `providerInfo`, `displayName`, settings nav). | 3, 6.2, 6.9, 15.4 |
 | 2026-10-18 | 0.4.0 | **Route and identifier rename**: provider route `opencode-free` → `opencode-bridge` (default `providers`, model discovery, `settingsNs`), plugin row id and exported name → `dsh-opencode-bridge`, RPC namespaces → `/api/opencode-bridge-{logs,proxies}/*`, tool `opencode_free_log` → `opencode_bridge_log`, log directory/file and proxy store → `dsh-opencode-bridge`. Sessions that already selected an `opencode-free/*` model must re-pick it; no profile configuration needed migrating (see chapter 8). | 0, 3, 6.2, 6.9, 8, 11, 15 |

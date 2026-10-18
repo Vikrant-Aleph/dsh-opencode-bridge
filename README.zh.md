@@ -1,175 +1,91 @@
-# dsh-opencode-bridge
+# OpenCode Bridge
 
 [English](README.md) | 中文
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）里直接使用
-[OpenCode](https://opencode.ai) 的**免费模型**——无需账号、无需 API Key。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中使用
+[OpenCode](https://opencode.ai) 免费模型的插件，默认无需 OpenCode 账号或 API Key。
 
-插件是一个 DSH **LLM 适配器** bundle，通过模拟官方 OpenCode 客户端的请求协议通过
-opencode.ai 免费层（"Zen" relay）的客户端识别：`big-pickle`、`mimo-v2.6-flash-free`、
-`glm-5.3-flash-free`、`deepseek-v4.1-flash-free`、`nemotron-3.5-lightning-free`、
-`space-bunny-free` 等模型即可在 DSH 的模型选择器中使用。
+## 主要功能
 
-## 工作原理
+- **模型接入**：自动更新免费模型列表，在 DSH 模型选择器中直接使用。
+- **流式对话与工具调用**：适配 DSH 原生工具，拒绝无法验证的工具转换，避免将 Bash 命令直接当作 PowerShell 执行。
+- **可选代理轮换**：配置多个 HTTP(S) 代理，在出口被限流或连接失败时尝试下一个。
 
-免费层对非 OpenCode 客户端返回 `403 FreeTierError`。本插件完整复刻官方客户端的请求指纹
-（2026-10 实测验证）：
+## 安装与开始使用
 
-| 闸门层 | 插件发送的内容 |
-|---|---|
-| User-Agent | `opencode/<版本> ai-sdk/provider-utils/... runtime/bun/...`，并附加 DSH 归属信息（剥掉 `/<版本>`，带版本的第三方产品令牌会被拒绝） |
-| 会话标识 | `x-opencode-session` / `x-opencode-session-id` / `x-session-affinity` / `x-session-id` 使用同一会话内稳定的 `ses_` id，`x-opencode-request` 用每次调用的 `msg_` id；两者都按 CLI 的 `~(ms*0x1000+counter)` 48 位降序/升序编码 + 14 位 base62 随机后缀生成，上游会解码校验计数器 |
-| 客户端头 | `x-opencode-client: cli`、`x-opencode-project: global` |
-| 工具指纹 | 声明规范 `read`/`shell` 及 `bash`/`glob`/`grep`；先预留全部调用方名字再分配无碰撞别名。新增 shell 工具不可执行；仅经保守验证的只读/搜索映射可到达调用方已提供的工具。 |
-| 流式 | `stream: true`、`tool_choice: "auto"` |
-
-模型清单来自公共 [models.dev](https://models.dev) 注册表（零成本条目）与 relay 实时
-`GET /models` 列表的交集，含上下文窗口、输出上限和推理档位元数据。
-
-## 安装
-
-**从 npm 安装**（发布后），建议像 `dshmarket@1.66.35` 那样带上版本号，便于复现：
+从 npm 安装到你的 DSH profile：
 
 ```sh
 dsh plugin --profile desktop add dsh-opencode-bridge@0.4.1
 ```
 
-`dsh` 来自你的 DSH 安装；如果它不在 `PATH` 里，同一条命令换成
-`npx @deepseek-ai/dsh plugin ...` 即可。
-
-**从源码安装**（本目录）：
+`desktop` 是示例 profile 名称，请按实际使用的名称替换。如果终端找不到 `dsh`，可使用：
 
 ```sh
-pnpm install && pnpm build && pnpm pack
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.4.1
+```
 
-# 把 tarball 装入你的 profile（以 "desktop" 为例）
+安装后重启对应的 DSH profile，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话。
+日常使用无需手动填写 API Key 或修改配置文件；模型列表会随上游调整。
+
+## 可选代理配置
+
+不配置代理时，插件默认使用本机直连。
+
+1. 打开 **设置 → OpenCode Bridge → 出口代理轮换（可选）**。
+2. 逐个添加已有的代理地址，例如 `http://127.0.0.1:7890`。可保留 `direct`（本机直连）作为一个出口。
+3. 点击 **测试全部** 检查连通性；新增、删除操作会自动保存并应用。
+
+插件按列表顺序优先使用可用出口。遇到 HTTP 429 限流或连接失败时，会暂时冷却该出口并尝试下一个；已经开始输出的回复不会因切换出口而重新发送。
+
+目前仅支持 **HTTP(S) 代理，不支持 SOCKS**。连通性测试不代表模型推理一定可用，切换代理也不保证获得新的额度。请仅使用获授权的代理并遵守上游服务限制。
+
+## 注意事项
+
+- **非官方项目**：与 OpenCode、DeepSeek 无隶属关系。上游协议、模型和免费额度可能变化，不保证服务持续可用。
+- **第三方数据处理**：模型请求会发送给 OpenCode 服务；使用代理时，请求还会经过所配置的代理。不要发送不愿交给第三方处理的内容。
+- **输入限制**：当前以文本对话和工具调用为主，图片与附件内容不会完整发送给模型。
+- **凭据与日志**：代理密码在本地配置文件中以明文保存。不要公开该文件，分享日志或截图前请检查并移除敏感信息。
+
+## 常见问题
+
+| 问题 | 建议 |
+|---|---|
+| 安装后没有看到模型 | 确认安装到了正在使用的 profile，插件已启用，然后重启 DSH 并检查网络连接。 |
+| 出现 HTTP 429 | 稍后重试；如已配置代理，可在设置中查看出口状态。代理不保证能解除服务端额度限制。 |
+| 出现 HTTP 403 或 503 | 检查插件更新与上游服务状态，稍后重试；这类错误不会触发代理轮换。仍有问题时请反馈。 |
+| 工具调用失败 | 在“诊断日志”标签查看错误，也可让 Agent 调用 `opencode_bridge_audit` 检查工具兼容性。 |
+
+问题反馈请提交 [Issue](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues)，附上插件版本、错误文字和必要的脱敏日志；请勿提交 API Key、代理密码或私人聊天内容。
+
+## 开发与技术文档
+
+<details>
+<summary>从源码开发与安装</summary>
+
+需要 **Node.js ≥ 20.18.1** 和 pnpm，建议使用 Node.js 22 或 24 LTS。
+
+```sh
+git clone https://github.com/Vikrant-Aleph/dsh-opencode-bridge.git
+cd dsh-opencode-bridge
+pnpm install
+pnpm build
+pnpm test
+```
+
+构建产物不会提交到 Git。要在 DSH 中安装本地构建：
+
+```sh
+pnpm pack
 dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.1.tgz
 ```
 
-重启 profile 后，在模型选择器里选任意 `opencode-bridge/*` 模型即可，无需任何配置。
+</details>
 
-## 配置（可选）
+实现原理、完整配置、测试方法与维护规约见[技术文档](TECHNICAL.zh.md)（[English](TECHNICAL.md)）。
 
-所有配置项均有可用默认值，可在 `cordis.patch.yml` 中覆盖（覆盖行需写在顶层并重述全部键）：
+## 致谢与许可
 
-```yaml
-- id: dsh-opencode-bridge
-  config:
-    baseUrl: https://opencode.ai/inference/v1   # relay 地址
-    apiKey: public                              # 未登录哨兵值
-    userAgent: opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14
-    client: cli                                 # x-opencode-client
-    project: global                             # x-opencode-project
-    providers: [opencode-bridge]                  # 提供方路由
-    includeDeprecated: false                    # 是否提供仍在线的 deprecated 模型
-    extraModels: []                             # 强制附加的模型 id
-    requestTimeoutMs: 600000
-    proxies: []                                 # 仅直连；如 [direct, 'http://127.0.0.1:7890']
-    proxyCooldownMs: 60000                       # HTTP 429 后的基础冷却
-    proxyStorePath: ''                           # 空 = $DSH_PROFILE_DIR（未设置则 ~/.dsh）+ /data/dsh-opencode-bridge/proxies.json
-    toolFingerprint: true                       # 发送工具指纹
-    toolTranslation: true                       # 允许已验证的只读/搜索诱饵；不映射 shell
-    logLevel: warn                              # debug|info|warn|error|off
-    logDir: ''                                  # 空 = ~/.dsh/logs/dsh-opencode-bridge
-    logMaxBytes: 524288                         # 单文件大小上限，超出即轮转
-    logMaxFiles: 5                              # 保留文件总数，最旧的先删
-```
+协议研究参考 OpenCode 官方源码，以及 sub2api、9router、hermes-oc-free-provider、cpa-plugin-opencodezen 等开源项目；来源与对照记录见技术文档。
 
-`toolFingerprint: false` 原样保留调用方工具且不注入诱饵。
-`toolTranslation: false` 仍恢复调用方别名，但拒绝注入工具，
-不会再把未验证的 OpenCode 参数直接交给 DSH。
-
-## 安全工具桥与离线当前作用域审计（0.3.0）
-
-工具桥按**实际请求的调用方工具**规划，而不是从全局注册表扩权。
-它恢复调用方别名，拒绝新增 `bash`/`shell` 诱饵，不猜测 Bash→PowerShell；
-新增 `read`/`glob`/`grep` 仅在当前调用方有目标且 schema 属于可保守验证的子集时映射。
-`$ref`、`pattern` 等未知约束默认拒绝。调用方原有 `pwsh`、规范 shell 等工具仍由
-DSH 自身校验并执行。原生/别名调用也要求参数是 JSON 对象（保留原始字节），
-完整原生 schema/权限仍归宿主。“只读”指桥接路线，不保证任意同名工具实现无副作用。
-
-响应中**全部工具调用通过校验后才发出任何 tool-call 块**，一个拒绝则整批不放行。
-工具片段若以 EOF、`length` 或 `stop` 而非 `tool_calls` 结束，返回
-`TOOL_BRIDGE_INCOMPLETE`；策略拒绝返回 `TOOL_BRIDGE_REJECTED` 与固定原因，不含入参。
-这是桥接层原子放行，不是执行事务/副作用回滚；已流出的文本/思考保留，
-宿主后续仍执行自身原生 schema 与权限检查。
-
-可让 agent 调用 `opencode_bridge_audit`：
-
-```json
-{ "limit": 12 }
-```
-
-也可传 `{}`，默认 limit=80，范围 1–200。它仅读取当前 agent 的原生工具 schema，
-输出名字、别名、路线决定和原因码，不输出 schema 描述/default、工具入参或聊天历史。
-不联网、不执行工具；缺少 agent 作用域时拒绝，绝不退回全局注册表。
-报告 basis 为 `current-agent-scoped-native-registry`，Code Mode/PTC 或辅助请求的工具集
-可能不同。它**不是**会话调用历史、HTTP/模型健康测试或权限授权；每次真实请求仍按
-`GenerateOptions.tools` 重新规划。既有替代方案与证据边界见[源码比较](docs/COMPARISON.zh.md)。
-
-## 出口代理轮换（0.4.0）
-
-`proxies: []` 表示仅直连；`direct`（也接受 `none` 或空条目）表示本机 IP，
-其它条目可用 HTTP(S) 代理 URL 或裸 `host:port`。去重后保留顺序，SOCKS/其它协议拒绝。
-HTTP 代理凭据可写 `http://user:password@host:port`，特殊字符需 URL 编码。
-
-设置 → **OpenCode Bridge** → **出口代理轮换（可选）**标签可添加/删除、刷新状态、**测试全部**。
-每行显示去掉凭据的地址、就绪/冷却（剩余秒）及 lastCode。测试逐条访问 relay
-`GET /models`，不发提示词或补全请求，但仍产生受上游规则约束的网络流量；429 会冷却该条。
-离线测试本身不证明浏览器渲染或真实 RPC 已验收。
-
-每次请求按**配置顺序优先复用健康出口**，不为每个会话独立绑定；该出口冷却才顺延，
-靠前出口恢复后重新优先。单次请求仅 HTTP 429 或流开始前传输失败触发改道，
-401、FreeTierError/403、503 不轮换。优先用数值 Retry-After 提示，否则 429 从
-`proxyCooldownMs`（默认60秒）指数冷却，通常上限30分钟；传输失败短期冷却（最多15秒）。
-全池冷却时仍尽力尝试最早恢复者，不在本地直接硬失败；流响应体中途失败直接报错，不重试。
-
-UI 保存列表在启动时优先于 config，默认存于
-`(DSH_PROFILE_DIR || ~/.dsh)/data/dsh-opencode-bridge/proxies.json`，可由 `proxyStorePath` 覆盖。
-health/UI 读取去掉 userinfo；删除/重置不回传已有密码，但添加必然将新输入 URL 发给 Host。
-**代理密码在本地 JSON 中明文保存，未加密。**仅支持 HTTP(S) CONNECT，不 patch 全局 fetch/dispatcher。
-不同代理不一定有不同公网 IP，上游配额也未证实只由 IP 决定。只使用获授权代理并遵守服务限制。
-
-## 日志与诊断
-
-`opencode_bridge_log` 支持 `action: read|stat|clear|level`。调用点力求只记元数据，
-并提供 best-effort 秘密脱敏、最旧优先轮转；这不是完美隐私或严格字节上限保证。
-错误正文与元数据仍可能敏感，单次写入可能超出轮转阈值，清理也可能失败。分享前请复核日志。
-
-## 说明与限制
-
-- **限流**：HTTP 429（`FreeUsageLimitError`）冷却当前出口，其它已配置出口可能有用但
-  不保证新配额。全池耗尽仍报告限流；服务端也可能使用非 IP 配额信号。
-- **文本 + 工具优先**：此通道的图片/文件以占位文本发送；多数免费模型本身也是纯文本输入。
-  会输出 `reasoning_content` 的模型，其思考内容会以 thinking 块呈现。
-- **随 relay 演进**：上游闸门变化很快（2026-10 数天内连续增加了会话计数器和工具校验）。若重新出现
-  `403 FreeTierError`，请更新 `src/opencode-protocol.ts` 中的 `userAgent`/工具指纹。
-- 仅提供零成本模型。OpenCode 的付费模型需要 OpenCode Console 账号，不在本插件范围内。
-
-## 开发
-
-需要 **Node ≥ 20.3**（适配器用到 `AbortSignal.any`）和 pnpm：
-
-```sh
-pnpm install
-pnpm build       # tsc -> lib/（lib/ 是构建产物，未提交到仓库）
-pnpm test        # node --test tests/*.test.mjs
-node tests/smoke.mjs [模型id]   # 实测端到端探针
-```
-
-离线测试覆盖工具规划、桥/schema 拒绝、作用域审计、响应整批校验、客户端激活与日志；
-`tests/wire-dump.mjs` 是离线指纹转储。`tests/smoke.mjs` 验证 ID/规划/目录并发起真实流式对话，
-会消耗网络/额度；它不验证所有模型、Desktop 启动或全部工具执行路径。
-
-关于协议内部细节——三层闸门、标识符位布局、工具遮蔽/翻译，以及上游变化时的更新手册
-——见 [TECHNICAL.zh.md](TECHNICAL.zh.md)（[English](TECHNICAL.md)）。
-
-## 致谢
-
-协议细节来自官方客户端源码（`sst/opencode`）的逆向分析，并与社区报告交叉验证
-（sub2api、9router、hermes-oc-free-provider、cpa-plugin-opencodezen）。本项目与
-OpenCode、DeepSeek 均无关联。
-
-## 许可
-
-MIT
+本项目采用 [MIT 许可证](LICENSE)。

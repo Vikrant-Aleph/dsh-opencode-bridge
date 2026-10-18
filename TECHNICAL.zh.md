@@ -29,6 +29,13 @@
    两处版本必须与 `package.json` 的 `version` 完全一致；
    `tests/readme-version.test.mjs` 会校验，不要绕过它。
 
+**按读者分层。** 两份 README 面向项目访问者，保留简短简介、用户能理解的功能、
+可直接复制的安装/首次使用步骤、可选代理配置、必要限制与隐私风险、常见问题，
+以及简短的开发入口。协议指纹、完整配置、schema/流处理原理、测试证据、
+历史验证与维护流程放在技术文档中，不在项目首页重复展开；需要细节时提供链接。
+不要让普通用户通过修改源码里的协议常量来进行常规排障。中英文结构与含义保持一致，
+折叠的源码开发区同样遵守安装版本与包版本同步的规则。
+
 变更时同步维护第 14 章"变更记录"——先记后改，一行一变更。
 **不要留"代码已改、文档未改"的提交。**
 
@@ -712,9 +719,10 @@ provider.api             → api             → 按请求覆盖对话端点
 peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 使 bundle 能装入 profile 而不会提升出第二份框架副本。
 
-运行时要求 **Node ≥ 20.3**（`package.json` 的 `engines` 已声明）：适配器用
-`AbortSignal.any` 合并调用方取消与请求截止时间，该 API 到 Node 20.3 才有。
-更旧的运行时不保证可运行，也不会被安装器拦下。
+运行时要求 **Node ≥ 20.18.1**（由 `package.json` 的 `engines.node` 声明），
+与代理依赖 `undici` 7.30.1 的最低要求一致。`AbortSignal.any` 单独只要求 Node 20.3，
+但这个下限不足以覆盖代理依赖。源码开发建议使用 Node.js 22 或 24 LTS。
+安装器可能按自身 engine 策略警告或拒绝不满足要求的运行时，不能以版本声明代替实测。
 
 本插件已经踩到过的 API 差异——框架升级时值得复查：
 
@@ -869,6 +877,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-18 | 0.4.1 | **面向访问者的文档整理**：两份 README 改为功能、安装/首次使用、可选代理、必要风险与常见问题；协议/完整配置/schema/验证细节保留在技术文档，以链接替代首页长篇说明，源码开发步骤折叠。新增读者分层维护规约；`engines.node` 修正为 `>=20.18.1`，与当前 undici 依赖一致。安装命令与 tarball 示例仍固定 0.4.1。 | 0、9、14、README |
 | 2026-10-18 | 0.4.1 | **补丁版本发布准备**：升级包版本，同步两份 README 的固定版本安装命令与本地 tarball 示例；保留历史功能版本及验证记录。 | 0、14、README |
 | 2026-10-18 | 0.4.0 | **设置界面合并与改名**：原“日志/代理”两处 settings.section 合成一个 `opencode-bridge` 页（页内两个标签），插件显示名由 “OpenCode Free” 改为 “OpenCode Bridge”（`locale` 标题、`providerInfo`、`displayName`、设置导航）。 | 3、6.2、6.9、15.4 |
 | 2026-10-18 | 0.4.0 | **路由与标识统一改名**：provider 路由 `opencode-free` → `opencode-bridge`（默认 `providers`、model discovery、`settingsNs`），插件行 id 与导出名 → `dsh-opencode-bridge`，RPC 命名空间 → `/api/opencode-bridge-{logs,proxies}/*`，工具 `opencode_free_log` → `opencode_bridge_log`，日志目录/文件名与代理 store → `dsh-opencode-bridge`。旧会话里已选的 `opencode-free/*` 模型需重新选择；磁盘上没有需要迁移的 profile 配置（迁移说明见第 8 章）。 | 0、3、6.2、6.9、8、11、15 |

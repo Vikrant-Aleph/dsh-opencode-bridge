@@ -32,7 +32,7 @@ the relay's live `GET /models` listing.
 **From npm** (after publishing), pinning a version for reproducibility:
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.4.0
+dsh plugin --profile desktop add dsh-opencode-bridge@0.4.1
 ```
 
 `dsh` resolves from your DSH installation; if it is not on `PATH`, the same
@@ -44,7 +44,7 @@ command works as `npx @deepseek-ai/dsh plugin ...`.
 pnpm install && pnpm build && pnpm pack
 
 # install the tarball into your profile (example: "desktop")
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.0.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.1.tgz
 ```
 
 Restart the profile, then pick any `opencode-bridge/*` model in the model

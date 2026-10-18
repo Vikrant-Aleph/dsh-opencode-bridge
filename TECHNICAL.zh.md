@@ -869,6 +869,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-18 | 0.4.1 | **补丁版本发布准备**：升级包版本，同步两份 README 的固定版本安装命令与本地 tarball 示例；保留历史功能版本及验证记录。 | 0、14、README |
 | 2026-10-18 | 0.4.0 | **设置界面合并与改名**：原“日志/代理”两处 settings.section 合成一个 `opencode-bridge` 页（页内两个标签），插件显示名由 “OpenCode Free” 改为 “OpenCode Bridge”（`locale` 标题、`providerInfo`、`displayName`、设置导航）。 | 3、6.2、6.9、15.4 |
 | 2026-10-18 | 0.4.0 | **路由与标识统一改名**：provider 路由 `opencode-free` → `opencode-bridge`（默认 `providers`、model discovery、`settingsNs`），插件行 id 与导出名 → `dsh-opencode-bridge`，RPC 命名空间 → `/api/opencode-bridge-{logs,proxies}/*`，工具 `opencode_free_log` → `opencode_bridge_log`，日志目录/文件名与代理 store → `dsh-opencode-bridge`。旧会话里已选的 `opencode-free/*` 模型需重新选择；磁盘上没有需要迁移的 profile 配置（迁移说明见第 8 章）。 | 0、3、6.2、6.9、8、11、15 |
 | 2026-10-18 | 0.4.0 | **默认日志级别改为 `warn`**（原 `info`）：`Config.logLevel` 默认值与非法值兜底同步改为 `warn`，设置页下拉默认也显示 `warn`，减少默认写盘量。 | 8、15 |

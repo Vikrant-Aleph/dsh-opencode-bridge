@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "OpenCode free models for DSH with egress-proxy rotation, a fail-closed tool bridge and an offline, agent-scoped compatibility audit.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

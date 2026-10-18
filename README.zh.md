@@ -31,7 +31,7 @@ opencode.ai 免费层（"Zen" relay）的客户端识别：`big-pickle`、`mimo-
 **从 npm 安装**（发布后），建议像 `dshmarket@1.66.35` 那样带上版本号，便于复现：
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.4.0
+dsh plugin --profile desktop add dsh-opencode-bridge@0.4.1
 ```
 
 `dsh` 来自你的 DSH 安装；如果它不在 `PATH` 里，同一条命令换成
@@ -43,7 +43,7 @@ dsh plugin --profile desktop add dsh-opencode-bridge@0.4.0
 pnpm install && pnpm build && pnpm pack
 
 # 把 tarball 装入你的 profile（以 "desktop" 为例）
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.0.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.4.1.tgz
 ```
 
 重启 profile 后，在模型选择器里选任意 `opencode-bridge/*` 模型即可，无需任何配置。

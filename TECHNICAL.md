@@ -1005,6 +1005,7 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-18 | 0.4.1 | **Patch release preparation**: bump the package version and synchronize the pinned installation command and local tarball example in both READMEs; preserve historical feature versions and verification records. | 0, 14, READMEs |
 | 2026-10-18 | 0.4.0 | **Settings merged and renamed**: the former log and proxy `settings.section` entries became one `opencode-bridge` page with two tabs, and the display name changed from “OpenCode Free” to “OpenCode Bridge” (`locale` title, `providerInfo`, `displayName`, settings nav). | 3, 6.2, 6.9, 15.4 |
 | 2026-10-18 | 0.4.0 | **Route and identifier rename**: provider route `opencode-free` → `opencode-bridge` (default `providers`, model discovery, `settingsNs`), plugin row id and exported name → `dsh-opencode-bridge`, RPC namespaces → `/api/opencode-bridge-{logs,proxies}/*`, tool `opencode_free_log` → `opencode_bridge_log`, log directory/file and proxy store → `dsh-opencode-bridge`. Sessions that already selected an `opencode-free/*` model must re-pick it; no profile configuration needed migrating (see chapter 8). | 0, 3, 6.2, 6.9, 8, 11, 15 |
 | 2026-10-18 | 0.4.0 | **Default log level is now `warn`** (was `info`): both the `Config.logLevel` default and the invalid-value fallback became `warn`, and the Settings dropdown starts on `warn`, so less is written by default. | 8, 15 |

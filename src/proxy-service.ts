@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { noopLogger, type LoggerLike } from './logger.js'
 import {
   ProxyPool,
+  normalizeEntry,
   loadProxyStore,
   saveProxyStore,
   redactProxyUrl,
@@ -90,7 +91,7 @@ export class ProxyService {
       const accepted = new Set(this.pool.rawEntries().map((entry) => entry.url).filter(Boolean))
       for (const raw of urls) {
         const trimmed = raw.trim()
-        if (!trimmed || trimmed.toLowerCase() === 'direct') continue
+        if (!trimmed || ['direct', 'none'].includes(trimmed.toLowerCase())) continue
         const normalized = normalizeQuiet(trimmed)
         if (!normalized || !accepted.has(normalized)) rejected.push({ raw: redactProxyUrl(trimmed), reason: 'unsupported or duplicate proxy' })
       }
@@ -157,14 +158,8 @@ export class ProxyService {
 }
 
 function normalizeQuiet(raw: string): string | undefined {
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`
-  try {
-    const url = new URL(withScheme)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
-    return url.toString().replace(/\/$/, '')
-  } catch {
-    return undefined
-  }
+  const result = normalizeEntry(raw)
+  return result.ok ? result.entry.url : undefined
 }
 
 function transportCode(error: unknown): string {

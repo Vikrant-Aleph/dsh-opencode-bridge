@@ -73,7 +73,7 @@
 | **分发** | npm bundle + `cordis.patch.yml` 层补丁。 |
 
 插件是进程内适配器，不创建本地代理服务器；可将 relay 请求经用户配置的
-HTTP(S) CONNECT 代理发出（见6.9）。
+HTTP(S) CONNECT 或 SOCKS 代理发出（见6.9）。
 
 ---
 
@@ -118,7 +118,13 @@ HTTP(S) CONNECT 代理发出（见6.9）。
 | [src/adapter.ts](src/adapter.ts) | — | `OpenCodeFreeAdapter`：元数据、请求/SSE、工具整批校验后发块、错误分类。 |
 | [src/tool-bridge.ts](src/tool-bridge.ts) | — | 纯函数保守映射/schema 子集；拒绝可执行诱饵，不做 I/O/执行。 |
 | [src/bridge-audit.ts](src/bridge-audit.ts) | — | 当前 agent 注册表作用域审计，最小元数据输出、不联网不执行。 |
-| [src/proxy-pool.ts](src/proxy-pool.ts) | — | 顺序出口/冷却、代理store、pooled fetch和惰性undici CONNECT dispatcher。 |
+| [src/proxy-pool.ts](src/proxy-pool.ts) | — | 顺序出口/冷却、代理 store、pooled fetch 与 HTTP/SOCKS dispatcher 缓存。 |
+| [src/socks-dispatcher.ts](src/socks-dispatcher.ts) | — | SOCKS4/4a/5/5h 隧道、DNS 模式、认证、TLS 校验与连接清理。 |
+| [tests/socks-network.test.mjs](tests/socks-network.test.mjs) | — | 真实 loopback SOCKS/TLS、认证、轮换与 socket 生命周期测试。 |
+| [tests/socks-config.test.mjs](tests/socks-config.test.mjs) | — | SOCKS URL、凭据边界、存储及禁止静默直连回归。 |
+| [.github/workflows/release.yml](.github/workflows/release.yml) | — | tag 触发、构建与最小权限 Release 发布。 |
+| [scripts/release-check.mjs](scripts/release-check.mjs) / [校验和脚本](scripts/release-checksum.mjs) | — | 版本、归档资源与 SHA256SUMS 校验；测试见 release-check.test.mjs。 |
+| [tests/github-config.test.mjs](tests/github-config.test.mjs) | — | Issue Forms、工作流权限/触发器与 YAML/锁配置检查。 |
 | [src/proxy-service.ts](src/proxy-service.ts) | — | 实时编辑/持久化、凭据脱敏health、relay GET探测与包私有RPC。 |
 | [tests/proxy-pool.test.mjs](tests/proxy-pool.test.mjs) | — | 规范化、顺序健康复用、冷却、脱敏、BOM/store与传输测试。 |
 | [tests/proxy-rotation.test.mjs](tests/proxy-rotation.test.mjs) | — | 适配器429/连接改道、池耗尽与流中途不重播。 |
@@ -132,7 +138,7 @@ HTTP(S) CONNECT 代理发出（见6.9）。
 | `src/catalog.ts` | — | `FreeModelCatalog`：元数据/实时列表筛选、缓存与降级。 |
 | `src/logger.ts` | 326 | `PluginLogger`：分级、脱敏、按大小轮转（最旧优先清理）、内存兜底。见第 15 章。 |
 | `src/log-service.ts` | 245 | `LogService` + RPC 路由 + `opencode_bridge_log` agent 工具（一套实现两个调用方）。 |
-| [client.js](client.js) | — | 日志页order30、代理增删/探测页order31；浏览器模块非tsc产物。见6.9、15.3、15.6。 |
+| [client.js](client.js) | — | 单个 OpenCode Bridge 设置页（order30），页内日志与代理轮换标签；浏览器模块非 tsc 产物。见6.9、15.4、15.6。 |
 | `cordis.patch.yml` | 4 | 把插件行插入配置层的 bundle 补丁。 |
 | `tests/logger.test.mjs` | — | 日志模块密闭单测（分级/脱敏/轮转/读取）。 |
 | `tests/client-boot.test.mjs` | — | 客户端模块激活回归测试（apply 永不抛错，敌对 ctx 8 例）。 |
@@ -568,11 +574,16 @@ HTTP 失败转成带稳定 `code` 的 `LlmError`（`httpError()`）：
 [ProxyPool](src/proxy-pool.ts) 负责顺序选择、逐出口冷却与存储辅助，
 [ProxyService](src/proxy-service.ts) 负责编辑和探测。推理 POST 与 relay
 `GET /models` 共用池，models.dev 公共元数据仍直连；插件不创建本地代理服务器。
-仅实际使用代理时惰性加载 `undici`，每个 URL 缓存一个 CONNECT `ProxyAgent`，
+HTTP(S) 代理惰性加载 `undici.ProxyAgent`；SOCKS 代理由
+[src/socks-dispatcher.ts](src/socks-dispatcher.ts) 使用 `socks.SocksClient` 建立隧道，
+再交给独立的 `undici.Agent`。每个规范化 URL 缓存一次初始化 Promise，
+并发请求复用同一个 agent；插件卸载时销毁缓存连接与未完成的 SOCKS 协商。
 不 patch 全局 fetch/dispatcher，也不新增全局 HTTP 钩子。
 
 **条目与选择。** `proxies:[]` 默认直连；空串、`direct`、`none` 表示本机出口。
-HTTP(S) URL 或裸 `host:port` 规范化、去重并保序，其它 scheme（含 SOCKS）明确拒绝并给原因。
+HTTP(S)、SOCKS4/4a、SOCKS5/5h URL 或裸 `host:port` 规范化、去重并保序；
+裸地址按 HTTP 解释，SOCKS 未填端口时默认 1080，`socks://` 规范化为 `socks5h://`。
+其它协议、有路径/查询/片段的代理 URL、非法凭据明确拒绝，原因不回显原始密码。
 每次请求选配置中首个就绪出口，**不是 round-robin**；健康出口持续复用，利于额度/缓存亲和。
 这不是逐会话绑定，靠前出口冷却结束会重新优先；不同代理也可能共享公网 IP。
 显式仅代理列表不偷偷添加 direct，但池为空/删除最后条目时恢复直连；向仅直连池添加会保留直连。
@@ -619,7 +630,34 @@ health/日志/UI display 去掉 userinfo；稳定 id 形如 `proxy:host:port#<8�
 仍有受上游规则约束的网络流量。UI 渲染和真实 RPC 需另验；任意 `/api` 路径都可返回
 未授权401，不能据此证明注册或 handler 成功。
 
-仅支持 HTTP(S) CONNECT，不支持 SOCKS、自动发现代理、逐会话亲和或付费/其它模型回退。
+### 6.9.1 SOCKS 传输与 DNS
+
+| URL 协议 | SOCKS 版本 | 目标域名解析 |
+|---|---|---|
+| `socks4://` | 4 | 本机解析为 IPv4 |
+| `socks4a://` | 4a | 原始域名交给代理 |
+| `socks5://` | 5 | 本机解析为 IP |
+| `socks5h://` | 5 | 原始域名交给代理 |
+| `socks://` | 5，规范化为 socks5h | 原始域名交给代理 |
+
+代理自身的域名仍需本机解析。SOCKS4 不支持 IPv6 目标或密码认证，可填写 user ID；
+SOCKS5 支持用户名/密码认证，先对 URL userinfo 做百分号解码，再按协议传送。
+凭据禁止 NUL，SOCKS5 每个字段最多 255 字节，密码不能在缺少用户名时单独使用。
+SOCKS 认证本身不加密；目标 HTTPS 的 TLS 并不保护此前的 SOCKS 认证握手，应使用可信代理与网络。
+
+SOCKS connector 覆盖 DNS、TCP、SOCKS 协商、TLS 的总连接期限为 10 秒。
+HTTPS 在隧道上建立 TLS，按原始目标主机名校验证书和发送 SNI；
+不关闭 `rejectUnauthorized`，不把代理 IP 或本地 DNS 结果当作证书身份。
+测试可以显式信任测试 CA，生产配置没有“关闭 TLS 校验”开关。
+请求取消信号仍交给 fetch，插件卸载还会关闭未完成的协商及已建立的池连接。
+
+协商/认证失败、DNS、TLS 或连接超时返回固定 `SOCKS_*` 错误码，不回传第三方错误对象或凭据。
+这些属于出口状态，适配器外层仍按现有超时/流错误分类。
+选中了代理但 dispatcher 初始化失败或缺失时，不会静默以直连发送该请求；
+只有代理池明确配置了后续直连条目，才可能按正常顺序尝试直连。
+同一套适配器 POST、目录 GET 与设置页探测均使用该 dispatcher。
+
+不支持自动发现代理、UDP/BIND、逐会话亲和或付费/其它模型回退。
 上游额度也可能由非 IP 信号决定；只使用获授权出口并遵守服务限制。
 
 ---
@@ -679,7 +717,7 @@ provider.api             → api             → 按请求覆盖对话端点
 | `includeDeprecated` | boolean | `false` | 是否提供已弃用但在线的模型。 |
 | `extraModels` | string[] | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
-| `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S) CONNECT/直连条目；启动时已保存 store 优先。 |
+| `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S)/SOCKS/直连条目；启动时已保存 store 优先。 |
 | `proxyCooldownMs` | number | `60000` | 429 基础冷却，最小钳到1秒，指数递增。 |
 | `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-bridge/proxies.json`，URL/凭据明文存储。 |
 | `toolFingerprint` | boolean | `true` | 注入指纹并遮蔽冲突；false 保留调用方工具且不加诱饵。 |
@@ -785,6 +823,21 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
 发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
 
+### 0.4.1 SOCKS 与发布准备验证（2026-10-19）
+
+- 编译及客户端语法检查通过；完整回归 **138/138 通过，无跳过**。其中包含 14 个真实
+  loopback SOCKS/TLS 测试、10 个 SOCKS 配置测试、33 个发布脚本测试与 6 个 GitHub YAML/策略测试。
+- 本地网络测试实际走 SOCKS4/4a/5/5h 协商，覆盖百分号解码认证、正确/错误密码、
+  本机/远端 DNS、HTTPS 信任链及主机名校验、超时/关闭清理和两个 SOCKS 出口的 429 切换。
+  使用公开的测试证书与密钥，不修改全局 TLS 策略，不连接用户代理或上游模型服务。
+- 设置 `RELEASE_TEST_PNPM` 指向本机 pnpm.mjs 后，真实 pnpm 打包 fixture 也通过；
+  CI 的正常 `pnpm test` 可跳过该可选 fixture，随后必须对实际插件执行打包与归档校验。
+- `pnpm install --frozen-lockfile`、`release-check --tag v0.4.1` 均通过。
+  实际构建插件归档为 34 个文件，通过资源/版本检查及 `SHA256SUMS` 生成与复核；
+  临时归档验证后已删除，研究目录、测试证书/密钥、工作流与开发脚本不进入插件包。
+- 未推送 commit/tag、未运行远端 GitHub Actions、未创建 Release、未发布 npm。
+  本轮不声称公网 SOCKS、实际浏览器保存流程、所有 Node 版本或上游推理已验收。
+
 ### 0.4.0 本轮验证记录（2026-10-18）
 
 - 编译通过，离线 **66/66**（proxy-pool 11例、适配器proxy-rotation 6例）。
@@ -862,7 +915,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 3. **响应侧推理内容。** 目前只识别 `reasoning_content`。
    其他提供方的写法（`reasoning`、`thinking`）未解析。
 4. **窄边界出口改道，不是通用重试。** 池只在预算内对429/流前传输失败重试，
-   401/403/503、响应体失败不轮换，宿主其它重试另计。仅 HTTP(S) CONNECT、无SOCKS；
+   401/403/503、响应体失败不轮换，宿主其它重试另计。支持 HTTP(S) CONNECT 与 SOCKS4/4a/5/5h；
    按顺序健康复用，不逐会话绑定；靠前出口恢复后重新优先。凭据磁盘明文，
    Retry-After只解析数值，上游额度不一定仅由IP决定。
 5. **单一层级默认。** 只提供零成本模型；没有切换到付费 console 模型的开关。
@@ -877,6 +930,9 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-19 | 0.5.0 | **发布版本准备**：包版本由 0.4.1 升至 0.5.0，同步两份 README 的安装命令/tarball 版本及当前 tag 发布操作示例。保留历史变更与验证记录；此次文件编辑不创建 tag、提交或执行发布。 | 0、14、16、README |
+| 2026-10-19 | 0.4.1 | **SOCKS 支持**：新增 SOCKS4/4a/5/5h 与 socks 别名、DNS 模式及用户名/密码校验；HTTPS 保留证书/主机名校验；并发共享初始化、卸载销毁连接，代理 dispatcher 缺失不静默直连。同步设置页提示与双语 README，删除指定的连通性/额度提示句。新增本地真实 SOCKS/TLS 和配置回归。 | 3、6.9、8、11、13、README |
+| 2026-10-19 | 0.4.1 | **贡献与发布自动化**：新增问题/功能 Issue Forms、固定 SHA 的 tag 触发 Release 工作流、版本/归档/校验和脚本与回归测试；构建只读、发布 job 才有 contents:write，不自动发布 npm。增加项目 pnpm 11 配置并同步锁文件，使冻结安装可用。 | 0、3、11、16、附录 A |
 | 2026-10-18 | 0.4.1 | **面向访问者的文档整理**：两份 README 改为功能、安装/首次使用、可选代理、必要风险与常见问题；协议/完整配置/schema/验证细节保留在技术文档，以链接替代首页长篇说明，源码开发步骤折叠。新增读者分层维护规约；`engines.node` 修正为 `>=20.18.1`，与当前 undici 依赖一致。安装命令与 tarball 示例仍固定 0.4.1。 | 0、9、14、README |
 | 2026-10-18 | 0.4.1 | **补丁版本发布准备**：升级包版本，同步两份 README 的固定版本安装命令与本地 tarball 示例；保留历史功能版本及验证记录。 | 0、14、README |
 | 2026-10-18 | 0.4.0 | **设置界面合并与改名**：原“日志/代理”两处 settings.section 合成一个 `opencode-bridge` 页（页内两个标签），插件显示名由 “OpenCode Free” 改为 “OpenCode Bridge”（`locale` 标题、`providerInfo`、`displayName`、设置导航）。 | 3、6.2、6.9、15.4 |
@@ -993,19 +1049,81 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 
 ---
 
+## 16. Issue 规范与按 tag 发布 Release
+
+### 16.1 Issue Forms
+
+[.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) 定义问题反馈与功能建议两种表单。
+问题反馈必填 DSH/插件版本、系统、复现步骤、预期与实际行为，日志可选且须脱敏；
+功能建议必填问题目标与建议方案。两者均要求确认未包含 API Key、带密码的代理 URL 或私人聊天。
+`config.yml` 禁止网页新建空白 Issue，并提供文档入口；表单提交后由 GitHub 生成 Markdown。
+这是网页提交规范，不是限制所有 API 客户端的服务端规则。文件需提交到仓库默认分支才会在新建 Issue 页面生效。
+
+### 16.2 自动发布条件与权限
+
+[.github/workflows/release.yml](.github/workflows/release.yml) 仅由推送 `v*` tag 触发，
+随后要求 tag **严格等于 `v` + `package.json.version`**，并验证两份 README 安装命令和 tarball 版本。
+例如包版本 `0.5.0` 对应 `v0.5.0`；`v0.5.1-rc.1` 这类预发行 tag 对应同名预发行包版本。
+错误 tag 会失败，不会自动修改源码版本，也不会发布 npm。
+
+工作流使用 Node 24、pnpm 11.28.5；按固定 SHA 引用 Actions。
+当前 pnpm 的项目配置由 [pnpm-workspace.yaml](pnpm-workspace.yaml) 声明 `autoInstallPeers:false`，
+与旧 [.npmrc](.npmrc) 及锁文件一致，保证 `pnpm install --frozen-lockfile` 可复现；不要通过关闭冻结安装绕过漂移。
+
+流水线分两步：
+
+1. **构建 job（contents:read）**：检查 tag/README/锁配置 → 冻结安装 → 编译 → 离线测试
+   （含本地 TCP/SOCKS/TLS，不发送上游模型请求）→ `pnpm pack`。
+   [scripts/release-check.mjs](scripts/release-check.mjs) 检查只有一个 `.tgz`、包版本/入口/资源齐全、
+   文件与构建工作树一致，拒绝研究资料、开发源码、测试、凭据文件等非发布内容，
+   并做有限的凭据模式扫描（仅放行少量明确的公开占位示例）；此扫描不能证明包内绝无秘密。
+   [scripts/release-checksum.mjs](scripts/release-checksum.mjs) 生成并复核 `SHA256SUMS`，再传递构建产物。
+2. **发布 job（contents:write）**：固定到构建 commit，复核校验和、确认远端完整 tag ref 未移动，
+   再用 `GITHUB_TOKEN` 创建公开 Release，上传 `.tgz` 与 `SHA256SUMS`，自动生成更新说明。
+   预发行版本自动标记 prerelease，且不设为 latest；已有同名 Release 时拒绝覆盖，需人工处理。
+
+不需要 PAT、npm token 或额外的 npm 发布凭据。仓库必须允许 GitHub Actions 及这些固定版本 Actions，
+组织策略须允许发布 job 的 `contents:write`。建议保护版本 tag，不强制移动已经发布的 tag。
+
+### 16.3 维护者操作
+
+先选**未使用**的版本号，同步包版本与两份 README；提交所有源码、工作流、模板、测试与锁文件。
+以当前 `0.5.0` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test
+node scripts/release-check.mjs --tag v0.5.0
+# 通过后自行提交并推送 main，再创建并推送该提交的 tag：
+git tag -a v0.5.0 -m "Release v0.5.0"
+git push origin v0.5.0
+```
+
+到 GitHub **Actions → Tagged plugin release** 看结果，再到 **Releases** 下载资产。
+普通分支 push、只改版本文件、只在本地创建 tag 都不会发布；必须把 tag 推到 GitHub。
+这是 GitHub Release 自动化，npm 仍需单独发布；不要把 GitHub 自动生成的 Source code 压缩包当作已构建插件。
+构建或发布失败时先看日志修正原因，勿用强推 tag/覆盖资产掩盖问题。
+
 ## 附录 A —— 仓库清单
 
 ```
 package.json              清单；dsh.bundle.patch → cordis.patch.yml；dsh.client → client.js
 tsconfig.json             ES2022 / Node16 / strict，src → lib
 cordis.patch.yml          bundle 层补丁（插入插件行）
-.npmrc                    auto-install-peers=false
+.npmrc                    旧版 pnpm 配置，auto-install-peers=false
+pnpm-workspace.yaml       pnpm 11 项目配置，autoInstallPeers=false（需与锁文件一致）
+.github/ISSUE_TEMPLATE/   问题反馈/功能建议表单及空白 Issue 策略
+.github/workflows/release.yml tag 触发的构建与 Release 资产发布
+scripts/release-check.mjs 版本/归档资源检查
+scripts/release-checksum.mjs SHA256SUMS 生成与验证
 src/index.ts              插件入口（Config、apply、注册、日志装配）
 src/opencode-protocol.ts  闸门常量、id、请求头、工具、消息
 src/adapter.ts            LlmAdapter；完整工具批次的桥接层原子放行
 src/tool-bridge.ts        保守 schema 子集、只读/搜索映射、可执行诱饵拒绝
 src/bridge-audit.ts       离线当前 agent 原生注册表作用域审计
-src/proxy-pool.ts         顺序出口/冷却/store与惰性CONNECT dispatcher
+src/proxy-pool.ts         顺序出口/冷却/store与HTTP/SOCKS dispatcher缓存
+src/socks-dispatcher.ts   SOCKS握手、DNS/认证、TLS与连接清理
 src/proxy-service.ts      实时代理编辑、health、GET探测与RPC
 src/catalog.ts            免费模型目录
 src/logger.ts             分级日志（脱敏、轮转、内存兜底）
@@ -1019,6 +1137,12 @@ tests/tool-bridge.test.mjs 规划、碰撞、开关、schema/JSON 与诱饵拒�
 tests/bridge-integration.test.mjs 作用域审计与 mock 流原子整批测试
 tests/bridge-cancellation.test.mjs 请求前/缓存批次/发块时取消回归
 tests/proxy-pool.test.mjs  条目/health/顺序选择/store/冷却测试
+tests/socks-config.test.mjs SOCKS URL/凭据/存储与取消边界
+tests/socks-network.test.mjs 真实loopback SOCKS/TLS/认证/轮换/关闭测试
+tests/helpers/socks-server.mjs 仅loopback测试服务器
+tests/fixtures/socks-tls-* 公开测试证书/密钥（不可用于生产，不进入插件包）
+tests/release-check.test.mjs tag/归档/校验和与打包回归
+tests/github-config.test.mjs Issue/工作流YAML、权限及锁配置校验
 tests/proxy-rotation.test.mjs 适配器改道与流中途不重播测试
 tests/proxy-live.mjs      按需真实CONNECT/直连元数据与合成推理探针
 tests/readme-version.test.mjs README 安装命令/tarball 版本一致性守卫

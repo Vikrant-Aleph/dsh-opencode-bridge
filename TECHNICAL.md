@@ -92,7 +92,7 @@ touching code:
 | **Distribution** | npm bundle with a `cordis.patch.yml` layer patch. |
 
 The plugin is an in-process adapter and creates no local proxy server. It may
-route relay traffic through user-configured HTTP(S) CONNECT proxies (section 6.9).
+route relay traffic through user-configured HTTP(S) CONNECT or SOCKS proxies (section 6.9).
 
 ---
 
@@ -138,7 +138,13 @@ patch global HTTP entry points.
 | [src/adapter.ts](src/adapter.ts) | — | `OpenCodeFreeAdapter`: model metadata, request/SSE handling, whole-batch tool validation before chunk release, errors. |
 | [src/tool-bridge.ts](src/tool-bridge.ts) | — | Pure fail-closed mapping/schema subset; reject executable decoys; no I/O or execution. |
 | [src/bridge-audit.ts](src/bridge-audit.ts) | — | Current-agent scoped registry audit tool; metadata-only results, no network/execution. |
-| [src/proxy-pool.ts](src/proxy-pool.ts) | — | Ordered egress/cooldown state, proxy store, pooled fetch and lazy undici CONNECT dispatchers. |
+| [src/proxy-pool.ts](src/proxy-pool.ts) | — | Ordered egress/cooldown, proxy store, pooled fetch and HTTP/SOCKS dispatcher cache. |
+| [src/socks-dispatcher.ts](src/socks-dispatcher.ts) | — | SOCKS4/4a/5/5h tunnels, DNS modes, authentication, TLS validation and cleanup. |
+| [tests/socks-network.test.mjs](tests/socks-network.test.mjs) | — | Real loopback SOCKS/TLS, authentication, rotation and socket-lifetime tests. |
+| [tests/socks-config.test.mjs](tests/socks-config.test.mjs) | — | SOCKS URL/auth bounds, persistence and no-silent-direct-fallback regression tests. |
+| [.github/workflows/release.yml](.github/workflows/release.yml) | — | Tag-triggered build and least-privilege Release publishing. |
+| [scripts/release-check.mjs](scripts/release-check.mjs) / [checksum helper](scripts/release-checksum.mjs) | — | Version, archive-resource and SHA256SUMS checks; covered by release-check.test.mjs. |
+| [tests/github-config.test.mjs](tests/github-config.test.mjs) | — | Issue Forms, workflow trigger/permissions, YAML and lock-settings checks. |
 | [src/proxy-service.ts](src/proxy-service.ts) | — | Live edits/persistence, credential-redacted health, relay GET probes and package-private RPC. |
 | [tests/proxy-pool.test.mjs](tests/proxy-pool.test.mjs) | — | Entry normalization, ordered healthy reuse, cooldown, redaction, BOM/store and transport tests. |
 | [tests/proxy-rotation.test.mjs](tests/proxy-rotation.test.mjs) | — | Adapter 429/connection failover, exhausted pool and no mid-stream replay. |
@@ -152,7 +158,7 @@ patch global HTTP entry points.
 | `src/catalog.ts` | — | `FreeModelCatalog`: metadata/live-list filtering, caching and degradation. |
 | `src/logger.ts` | 326 | `PluginLogger`: levels, redaction, size-based rotation (oldest-first cleanup), memory fallback. See chapter 15. |
 | `src/log-service.ts` | 245 | `LogService` + RPC routes + the `opencode_bridge_log` agent tool (one implementation, two callers). |
-| [client.js](client.js) | — | Log panel (order30) and proxy add/remove/probe panel (order31); browser module, not a tsc product. See 6.9, 15.3, 15.6. |
+| [client.js](client.js) | — | One OpenCode Bridge settings page (order30) with log/proxy-rotation tabs; browser module, not a tsc product. See 6.9, 15.4, 15.6. |
 | `cordis.patch.yml` | 4 | Bundle layer patch that inserts the plugin row. |
 | `tests/logger.test.mjs` | — | Hermetic unit tests for the logging module (levels/redaction/rotation/read). |
 | `tests/client-boot.test.mjs` | — | Client-module activation regression tests (apply never throws; 8 hostile-ctx cases). |
@@ -640,13 +646,19 @@ is never ignored.
 store helpers; [ProxyService](src/proxy-service.ts) owns edits and probes.
 The adapter's inference POST and relay catalog `GET /models` share this pool;
 public models.dev metadata remains direct. No local proxy server is created.
-`undici` is lazily imported only for proxy use; one CONNECT `ProxyAgent` is
-cached per URL. No global fetch/dispatcher or HTTP hook is patched.
+HTTP(S) proxies lazily use `undici.ProxyAgent`. SOCKS tunnels are established
+by `socks.SocksClient` in [src/socks-dispatcher.ts](src/socks-dispatcher.ts) and
+handed to a separate `undici.Agent`. Initialization Promises are cached per
+normalized URL, so concurrent requests share one agent. Plugin unload destroys
+cached connections and pending SOCKS negotiations. No global fetch/dispatcher
+or HTTP hook is patched.
 
 **Entries and selection.** `proxies:[]` defaults to direct. Empty strings,
-`direct` and `none` select the machine's local egress. HTTP(S) URLs or bare
-`host:port` are normalized/deduplicated, preserving order; other schemes,
-including SOCKS, are rejected with a reason. Every request selects the first
+`direct` and `none` select the machine's local egress. HTTP(S), SOCKS4/4a and
+SOCKS5/5h URLs or bare `host:port` are normalized/deduplicated, preserving order.
+Bare addresses mean HTTP; SOCKS defaults to port 1080 and `socks://` normalizes
+to `socks5h://`. Other protocols, proxy paths/query/fragments and invalid
+credentials are rejected without echoing the original password. Every request selects the first
 ready configured entry, **not round-robin**, reusing a healthy egress for quota/
 cache affinity. This is not a per-session binding; earlier entries regain
 priority when cooldown expires. Different proxies may share a public IP.
@@ -712,9 +724,42 @@ traffic is still subject to provider rules. UI rendering and real RPC require
 separate verification; an unauthenticated 401 on arbitrary `/api` paths proves
 neither route registration nor handler success.
 
-Only HTTP(S) CONNECT is supported, not SOCKS, automatic proxy discovery,
-per-session affinity or a paid/alternate-model fallback. Upstream quota may
-also depend on non-IP signals. Use authorized egresses and respect service limits.
+### 6.9.1 SOCKS transport and DNS
+
+| URL scheme | SOCKS version | Destination DNS |
+|---|---|---|
+| `socks4://` | 4 | Locally resolved IPv4 |
+| `socks4a://` | 4a | Original hostname sent to the proxy |
+| `socks5://` | 5 | Locally resolved IP |
+| `socks5h://` | 5 | Original hostname sent to the proxy |
+| `socks://` | 5, normalized to socks5h | Original hostname sent to the proxy |
+
+The proxy's own hostname still requires local DNS. SOCKS4 supports a user ID,
+not password authentication or IPv6 destinations. SOCKS5 supports username/password
+authentication; URL userinfo is percent-decoded before the handshake. NUL is
+rejected; SOCKS5 fields are limited to 255 bytes each and a password needs a username.
+SOCKS authentication is not encrypted; the destination's HTTPS TLS does not protect
+that earlier authentication exchange. Use trusted proxies and networks.
+
+The SOCKS connector has a 10-second total DNS/TCP/negotiation/TLS connection
+deadline. HTTPS uses TLS over the tunnel with certificate verification and SNI
+for the ORIGINAL destination hostname, not the proxy IP or local DNS result.
+`rejectUnauthorized` is not disabled. Tests may explicitly trust a test CA;
+production configuration has no TLS-verification bypass. Fetch still receives
+the request cancellation signal; plugin unload also destroys pending negotiations
+and established pooled sockets.
+
+Negotiation/authentication, DNS, TLS and connect-timeout failures use fixed
+`SOCKS_*` codes, without forwarding third-party error objects or credentials.
+These are egress-state codes; outer adapter errors retain the existing taxonomy.
+A selected proxy whose dispatcher cannot initialize or is absent never silently
+sends that request directly. Direct fallback is possible only through an explicit
+later direct entry in the pool. Inference POSTs, catalog GETs and Settings probes
+share this dispatcher.
+
+Automatic proxy discovery, UDP/BIND, per-session affinity and paid/alternate-model
+fallback are not supported. Upstream quota may also depend on non-IP signals.
+Use authorized egresses and respect service limits.
 
 ---
 
@@ -777,7 +822,7 @@ keyless and config-free out of the box.
 | `includeDeprecated` | boolean | `false` | Offer deprecated-but-still-live models. |
 | `extraModels` | string[] | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
-| `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S) CONNECT proxy/direct entries; saved store wins at startup. |
+| `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S)/SOCKS/direct entries; saved store wins at startup. |
 | `proxyCooldownMs` | number | `60000` | Base 429 cooldown, clamped to at least 1s; exponential escalation. |
 | `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-bridge/proxies.json`; plaintext URL/credential store. |
 | `toolFingerprint` | boolean | `true` | Add fingerprint declarations and cloak conflicts; false preserves caller tools and adds no decoys. |
@@ -897,6 +942,25 @@ offline pass is not proof of every model, real tool dispatch, or Desktop startup
 Final release verification results should be recorded separately, without
 recasting the historical gate observations as a fresh full acceptance run.
 
+### 0.4.1 SOCKS and release-preparation verification (2026-10-19)
+
+- Build and client syntax checks passed; **138/138 regressions passed, none skipped**,
+  including 14 real loopback SOCKS/TLS, 10 SOCKS configuration, 33 release-helper
+  and 6 GitHub YAML/policy tests.
+- Network tests performed actual SOCKS4/4a/5/5h negotiation, percent-decoded authentication,
+  correct/incorrect passwords, local/remote DNS, HTTPS trust/hostname checks, timeout/close
+  cleanup and 429 failover between two SOCKS tunnels. They use public test certificates/keys,
+  no global TLS changes, user proxies or upstream model requests.
+- With `RELEASE_TEST_PNPM` pointing to local pnpm.mjs, the real pnpm-pack fixture also passed.
+  Normal CI tests may skip that opt-in fixture; the subsequent real plugin pack/archive check
+  remains mandatory.
+- Frozen installation and `release-check --tag v0.4.1` passed. The freshly built actual
+  plugin archive had 34 files and passed resource/version checks plus SHA256SUMS generation
+  and verification. Temporary assets were removed afterward; research, test certs/keys,
+  workflows and development scripts are excluded from the plugin package.
+- No commit/tag push, remote Actions run, Release creation or npm publication was performed.
+  This does not establish public SOCKS, browser-save, all-Node-version or upstream-inference acceptance.
+
 ### 0.4.0 verification record (2026-10-18)
 
 - Compilation succeeded; **66/66 offline tests** passed (11 proxy-pool cases,
@@ -1000,7 +1064,7 @@ An end-to-end acceptance run has two parts:
 4. **Narrow egress failover, not general retry.** The pool retries only 429 or
    pre-stream transport failure within its attempt budget; 401/403/503 and body
    failures do not rotate. Other Host retry policy remains separate. Only
-   HTTP(S) CONNECT is supported, not SOCKS. Selection is ordered healthy reuse,
+   HTTP(S) CONNECT and SOCKS4/4a/5/5h are supported. Selection is ordered healthy reuse,
    not per-session binding; earlier recovered entries take priority. Credentials
    are plaintext on disk; numeric Retry-After only, and quota may not be IP-only.
 5. **Single-tier default.** Only zero-cost models are offered; there is no
@@ -1018,6 +1082,9 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-19 | 0.5.0 | **Release version preparation**: change package version from 0.4.1 to 0.5.0 and synchronize both READMEs' installation/tarball versions and the current tag-release instructions. Historical change and verification records remain unchanged; no tag, commit or publication is created by this edit. | 0, 14, 16, READMEs |
+| 2026-10-19 | 0.4.1 | **SOCKS support**: add SOCKS4/4a/5/5h and socks alias, DNS modes and credential validation; retain HTTPS certificate/hostname verification, share concurrent agent initialization and destroy sockets on unload; absent proxy dispatchers never silently use direct fetch. Update Settings hints and bilingual READMEs, remove the requested connectivity/quota sentence, and add real loopback SOCKS/TLS plus configuration regression tests. | 3, 6.9, 8, 11, 13, READMEs |
+| 2026-10-19 | 0.4.1 | **Contribution/release automation**: add bug/feature Issue Forms, SHA-pinned tag-triggered Release workflow, version/archive/checksum helpers and regression tests; read-only build and publish-job-only contents:write, without npm publishing. Add pnpm 11 project settings and align the lockfile for frozen installs. | 0, 3, 11, 16, Appendix A |
 | 2026-10-18 | 0.4.1 | **Visitor-focused documentation**: rewrite both READMEs around features, install/first use, optional proxies, essential risks and troubleshooting; replace wire/config/schema/validation detail with links to this document, and collapse source-development steps. Add an audience-separation maintenance rule and correct `engines.node` to `>=20.18.1`, matching the current undici dependency. Installation and tarball examples remain pinned to 0.4.1. | 0, 9, 14, READMEs |
 | 2026-10-18 | 0.4.1 | **Patch release preparation**: bump the package version and synchronize the pinned installation command and local tarball example in both READMEs; preserve historical feature versions and verification records. | 0, 14, READMEs |
 | 2026-10-18 | 0.4.0 | **Settings merged and renamed**: the former log and proxy `settings.section` entries became one `opencode-bridge` page with two tabs, and the display name changed from “OpenCode Free” to “OpenCode Bridge” (`locale` title, `providerInfo`, `displayName`, settings nav). | 3, 6.2, 6.9, 15.4 |
@@ -1154,19 +1221,91 @@ throws while the settings page still registers when possible. **After any
 
 ---
 
+## 16. Issue conventions and tag-triggered Releases
+
+### 16.1 Issue Forms
+
+[.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) defines bug and feature-request forms.
+Bugs require DSH/plugin versions, OS, reproduction steps, and expected/actual behavior;
+redacted logs are optional. Features require a problem/goal and a proposed solution.
+Both require confirmation that no API keys, password-bearing proxy URLs or private chats are included.
+`config.yml` disables blank issues in the web UI and links documentation; GitHub generates the submitted Markdown.
+This is a web-form convention, not server-side enforcement for all API clients.
+Commit these files to the default branch for them to appear on the new-issue page.
+
+### 16.2 Release conditions and permissions
+
+[.github/workflows/release.yml](.github/workflows/release.yml) triggers only on pushed `v*` tags,
+then requires the tag to **equal `v` + `package.json.version` exactly** and verifies both READMEs'
+installation/tarball versions. Package `0.5.0` needs `v0.5.0`; prerelease tags such as
+`v0.5.1-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
+never rewrites versions or publishes to npm.
+
+It uses Node 24, pnpm 11.28.5 and SHA-pinned Actions. Current pnpm project configuration
+is declared in [pnpm-workspace.yaml](pnpm-workspace.yaml) with `autoInstallPeers:false`,
+aligned with the legacy [.npmrc](.npmrc) and lockfile for reproducible frozen installs.
+Do not bypass drift by disabling `--frozen-lockfile`.
+
+The pipeline separates two jobs:
+
+1. **Build (contents:read)**: validate tag/README/lock settings → frozen install → build → offline
+   tests (including loopback TCP/SOCKS/TLS, not upstream model requests) → `pnpm pack`.
+   [scripts/release-check.mjs](scripts/release-check.mjs) requires one `.tgz`, checks its version,
+   entry points and resources against the built worktree, and rejects research, development source,
+   tests, credential files and other non-release content. Its limited credential-pattern scan
+   allows only narrowly specified public placeholders and is not proof that an archive contains no secrets.
+   [scripts/release-checksum.mjs](scripts/release-checksum.mjs) creates/verifies `SHA256SUMS` before artifact transfer.
+2. **Publish (contents:write)**: check out the built commit, verify transferred checksums and that
+   the fully qualified remote tag ref has not moved, then create a public GitHub Release using
+   `GITHUB_TOKEN`, attach the `.tgz` and `SHA256SUMS`, and generate release notes.
+   Prerelease versions are marked prerelease and not latest. Existing releases are not overwritten;
+   resolve collisions manually.
+
+No PAT, npm token or npm publishing credentials are needed. The repository must allow GitHub Actions
+and these pinned actions; organization policy must permit the publishing job's `contents:write`.
+Protect release tags and do not force-move tags that have already shipped.
+
+### 16.3 Maintainer steps
+
+Choose an **unused** version and synchronize the package and both READMEs, then commit all code,
+workflow/templates, tests and lockfile. For current `0.5.0` (if already tagged, bump to a fresh version
+and substitute it below):
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test
+node scripts/release-check.mjs --tag v0.5.0
+# After passing, commit and push main yourself, then tag that commit:
+git tag -a v0.5.0 -m "Release v0.5.0"
+git push origin v0.5.0
+```
+
+Inspect **Actions → Tagged plugin release**, then download assets from **Releases**.
+A branch push, version edit, or local-only tag does not release: the tag must be pushed to GitHub.
+This automates GitHub Releases only; npm publishing remains separate. GitHub's auto-generated
+Source code archives are not the built plugin archive. Inspect failures rather than hiding them
+with forced tags or replacement assets.
+
 ## Appendix A — repository inventory
 
 ```
 package.json              manifest; dsh.bundle.patch → cordis.patch.yml; dsh.client → client.js
 tsconfig.json             ES2022 / Node16 / strict, src → lib
 cordis.patch.yml          bundle layer patch (insert row)
-.npmrc                    auto-install-peers=false
+.npmrc                    legacy pnpm setting, auto-install-peers=false
+pnpm-workspace.yaml       pnpm 11 project setting, autoInstallPeers=false (must match lock)
+.github/ISSUE_TEMPLATE/   bug/feature forms and blank-issue policy
+.github/workflows/release.yml tag-triggered build and Release assets
+scripts/release-check.mjs version/archive resource checks
+scripts/release-checksum.mjs SHA256SUMS generation/verification
 src/index.ts              plugin entry (Config, apply, registrations, logging wiring)
 src/opencode-protocol.ts  gate constants, ids, headers, tools, messages
 src/adapter.ts            LlmAdapter; atomic bridge-level release of completed tool batches
 src/tool-bridge.ts        conservative schema subset, read/search mapping, executable-decoy refusal
 src/bridge-audit.ts       offline current-agent scoped native-registry audit
-src/proxy-pool.ts         ordered egress/cooldown/store and lazy CONNECT dispatchers
+src/proxy-pool.ts         ordered egress/cooldown/store and HTTP/SOCKS dispatcher cache
+src/socks-dispatcher.ts   SOCKS handshake, DNS/authentication, TLS and cleanup
 src/proxy-service.ts      live proxy edits, health, GET probes and RPC
 src/catalog.ts            free-model catalog
 src/logger.ts             leveled logger (redaction, rotation, memory fallback)
@@ -1180,6 +1319,12 @@ tests/tool-bridge.test.mjs planning, collision, flags, schema/JSON and decoy ref
 tests/bridge-integration.test.mjs scoped audit and atomic mock-stream batch tests
 tests/bridge-cancellation.test.mjs preflight/buffered/yield cancellation regressions
 tests/proxy-pool.test.mjs  entry/health/ordered selection/store/cooldown tests
+tests/socks-config.test.mjs SOCKS URL/auth/store and cancellation boundaries
+tests/socks-network.test.mjs real loopback SOCKS/TLS/auth/failover/close tests
+tests/helpers/socks-server.mjs loopback-only test peers
+tests/fixtures/socks-tls-* public test certs/keys (not production, excluded from package)
+tests/release-check.test.mjs tag/archive/checksum and packaging regressions
+tests/github-config.test.mjs Issue/workflow YAML, permissions and lock checks
 tests/proxy-rotation.test.mjs adapter failover and no mid-stream replay tests
 tests/proxy-live.mjs      optional real CONNECT/direct metadata and synthetic inference probe
 tests/readme-version.test.mjs README install-command/tarball version guard

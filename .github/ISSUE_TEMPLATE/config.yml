@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation / 使用与排障文档
+    url: https://github.com/Vikrant-Aleph/dsh-opencode-bridge#troubleshooting
+    about: Read the repository documentation first; never share credentials or private chats. / 请先阅读仓库文档，勿分享凭据或私人聊天。

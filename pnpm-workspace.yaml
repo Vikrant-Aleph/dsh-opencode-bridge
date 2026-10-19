@@ -1,0 +1,4 @@
+# Keep pnpm 11's settings aligned with the project's legacy .npmrc and lockfile.
+packages:
+  - '.'
+autoInstallPeers: false

@@ -1,0 +1,125 @@
+name: Tagged plugin release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# No manual arbitrary-tag input, npm publishing, PAT or live smoke tests.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      # SHAs resolved from GitHub's commits/<version> API; version comments aid updates.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Validate exact tag, README versions and lock settings before install
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node scripts/release-check.mjs --tag "$RELEASE_TAG"
+          test -z "$(git status --porcelain)"
+      - id: commit
+        name: Record verified source commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: '11.28.5'
+          run_install: false
+      - name: Install only from committed lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          test -z "$(git status --porcelain)"
+      - name: Build and run offline tests (not live smoke)
+        run: |
+          pnpm build
+          pnpm test
+      - name: Pack exactly one validated plugin archive and checksum
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir "$RUNNER_TEMP/release-assets"
+          pnpm pack --pack-destination "$RUNNER_TEMP/release-assets"
+          node scripts/release-check.mjs --tag "$RELEASE_TAG" --archive-dir "$RUNNER_TEMP/release-assets"
+          node scripts/release-checksum.mjs "$RUNNER_TEMP/release-assets"
+          node scripts/release-checksum.mjs "$RUNNER_TEMP/release-assets" --verify
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validated-release-assets
+          path: |
+            ${{ runner.temp }}/release-assets/*.tgz
+            ${{ runner.temp }}/release-assets/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: validated-release-assets
+          path: ${{ runner.temp }}/release-assets
+      - id: metadata
+        name: Revalidate release identity and transferred checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node scripts/release-check.mjs --tag "$RELEASE_TAG"
+          node scripts/release-checksum.mjs "$RUNNER_TEMP/release-assets" --verify
+          tar -tzf "$RUNNER_TEMP/release-assets/"*.tgz
+      - name: Create public GitHub Release (never overwrite existing releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+          VERIFIED_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          remote_commit=$(gh api "repos/$GH_REPO/commits/refs/tags/$RELEASE_TAG" --jq .sha)
+          if [[ "$remote_commit" != "$VERIFIED_COMMIT" ]]; then
+            echo 'Remote tag moved since build; refusing to release.' >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to replace assets. Inspect and resolve manually.' >&2
+            exit 1
+          fi
+          args=()
+          if [[ "$PRERELEASE" == true ]]; then
+            args+=(--prerelease --latest=false)
+          fi
+          # gh create also fails if a release appeared after the existence check.
+          gh release create "$RELEASE_TAG" \
+            "$RUNNER_TEMP/release-assets/"*.tgz \
+            "$RUNNER_TEMP/release-assets/SHA256SUMS" \
+            --verify-tag --generate-notes "${args[@]}"

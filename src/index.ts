@@ -15,7 +15,7 @@ import type { HeaderRecipe } from './opencode-protocol.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
 import { registerBridgeAudit } from './bridge-audit.js'
-import { ProxyPool, defaultProxyStorePath, dispatcherFor, loadProxyStore } from './proxy-pool.js'
+import { ProxyPool, defaultProxyStorePath, dispatcherFor, clearDispatchers, loadProxyStore } from './proxy-pool.js'
 import { ProxyService, registerProxyAccess } from './proxy-service.js'
 
 export { FreeModelCatalog } from './catalog.js'
@@ -59,7 +59,7 @@ export interface Config {
   logMaxBytes: number
   /** Total log files kept (active + rotated); oldest is deleted first on overflow. */
   logMaxFiles: number
-  /** Egress pool: `direct` (this machine) or http(s) proxy URLs, tried in order. */
+  /** Egress pool: `direct`, HTTP(S) or SOCKS proxy URLs, tried in order. */
   proxies: string[]
   /** Base cooldown in ms for an egress that answered 429. */
   proxyCooldownMs: number
@@ -103,7 +103,7 @@ export function apply(ctx: Context, config: Config): void {
     dir: config.logDir || defaultLogDir(),
     maxBytes: config.logMaxBytes,
     maxFiles: config.logMaxFiles,
-    // The only literal secret the plugin handles; scrubbed from every line.
+    // Scrub the configured API key; proxy URLs/errors are redacted by the proxy layer.
     secrets: [config.apiKey],
     mirror: (line) => console.log(`[dsh-opencode-bridge] ${line}`),
   })
@@ -120,6 +120,7 @@ export function apply(ctx: Context, config: Config): void {
   const proxyStorePath = config.proxyStorePath || defaultProxyStorePath()
   const storedProxies = loadProxyStore(proxyStorePath)
   const pool = new ProxyPool(storedProxies.urls ?? config.proxies, { cooldownMs: config.proxyCooldownMs })
+  ctx.effect(() => () => clearDispatchers())
   const proxyService = new ProxyService(pool, { storePath: proxyStorePath, baseUrl: config.baseUrl, logger, dispatcherFor })
   ctx.effect(() => registerProxyAccess(ctx, proxyService))
   logger.info('proxy', 'egress pool ready', {

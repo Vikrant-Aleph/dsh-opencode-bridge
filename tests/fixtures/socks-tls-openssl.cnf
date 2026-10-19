@@ -1,0 +1,18 @@
+# TEST ONLY: public, non-production loopback TLS fixture configuration.
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = SOCKS TEST ONLY Loopback Origin
+[ca_ext]
+basicConstraints = critical,CA:true
+keyUsage = critical,keyCertSign,cRLSign
+[origin_ext]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @names
+[names]
+DNS.1 = localhost
+DNS.2 = origin.socks.test
+IP.1 = 127.0.0.1

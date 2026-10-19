@@ -1,0 +1,59 @@
+name: Bug report / 问题反馈
+description: Report a reproducible problem / 反馈可复现的问题
+body:
+  - type: markdown
+    attributes:
+      value: "Please redact all sensitive data. 请先脱敏，不要上传完整 profile 或私人聊天。"
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version / DSH 版本
+      placeholder: e.g. 0.x.y
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version / 插件版本
+      placeholder: e.g. 0.x.y
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system / 操作系统
+      placeholder: Windows 11 / macOS / Linux; version and architecture
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: Include relevant settings without credentials / 相关设置请勿包含凭据。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted error logs / 脱敏错误日志（可选）
+      description: Remove API keys, proxy URL credentials, private chats and personal paths.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy checklist / 隐私检查
+      options:
+        - label: I have not included API keys, proxy URLs containing passwords, or private conversations (including logs/screenshots). / 未提交 API Key、含密码的代理 URL 或私人聊天（含日志/截图）。
+          required: true

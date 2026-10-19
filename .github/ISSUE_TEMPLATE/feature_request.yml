@@ -1,0 +1,27 @@
+name: Feature request / 功能建议
+description: Describe a problem and a proposed solution / 描述问题与建议方案
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and goal / 问题与目标
+      description: What are you trying to achieve? / 你希望解决什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution / 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / 替代方案（可选）
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy checklist / 隐私检查
+      options:
+        - label: I have not included API keys, proxy URLs containing passwords, or private conversations. / 未提交 API Key、含密码的代理 URL 或私人聊天。
+          required: true

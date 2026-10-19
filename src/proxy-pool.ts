@@ -4,10 +4,10 @@
  * The free tier throttles per egress IP. A pool lets one profile rotate a
  * rate-limited IP out of rotation and try the next entry instead of failing the
  * whole request. Entries are either the machine's own IP ("direct") or an
- * HTTP(S) proxy reached through a CONNECT tunnel.
+ * HTTP(S) CONNECT or SOCKS proxy.
  *
- * This module is pure state plus small filesystem helpers: it never performs a
- * network request itself, so rotation policy is testable offline.
+ * Selection/state are testable independently of I/O; fetch and per-proxy
+ * dispatcher helpers below are shared by inference and connectivity tests.
  */
 
 import fs from 'node:fs'
@@ -52,7 +52,7 @@ interface Slot {
 }
 
 /**
- * Normalize one user-provided entry. Accepts a bare `host:port`, an HTTP(S)
+ * Normalize one user-provided entry: bare `host:port` (HTTP), HTTP(S)/SOCKS
  * proxy URL, or the literal `direct`/empty string for the local IP.
  */
 export function normalizeEntry(raw: string): { ok: true; entry: ProxyEntry } | { ok: false; reason: string } {
@@ -67,16 +67,34 @@ export function normalizeEntry(raw: string): { ok: true; entry: ProxyEntry } | {
   } catch {
     return { ok: false, reason: 'not a valid URL' }
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, reason: `${url.protocol.replace(':', '')} is unsupported; use an http:// or https:// proxy` }
+  const supported = ['http:', 'https:', 'socks:', 'socks4:', 'socks4a:', 'socks5:', 'socks5h:']
+  if (!supported.includes(url.protocol)) {
+    return { ok: false, reason: 'unsupported proxy protocol; use HTTP(S), SOCKS4/4a or SOCKS5/5h' }
   }
-  if (!url.hostname || !url.port) return { ok: false, reason: 'a proxy needs a host and a port' }
-  // Keep credentials in the url (undici needs them) but give the entry a stable
-  // id that does not embed a secret.
-  const auth = url.username ? `${url.username}:${url.password}@` : ''
-  const secretFree = url.toString().replace(/\/$/, '')
-  const digest = createHash('sha256').update(`${auth}${secretFree}`).digest('hex').slice(0, 8)
-  return { ok: true, entry: { id: `proxy:${url.hostname}:${url.port}#${digest}`, url: secretFree } }
+  if (!url.hostname) return { ok: false, reason: 'a proxy needs a host' }
+  if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
+    return { ok: false, reason: 'proxy URLs must not contain a path, query or fragment' }
+  }
+  if (url.protocol === 'socks:') url.protocol = 'socks5h:'
+  if (url.protocol.startsWith('socks')) {
+    if (!url.port) url.port = '1080'
+    try {
+      const user = decodeURIComponent(url.username)
+      const password = decodeURIComponent(url.password)
+      if (user.includes('\0') || password.includes('\0')) return { ok: false, reason: 'proxy credentials cannot contain NUL' }
+      if (url.protocol.startsWith('socks4') && password) return { ok: false, reason: 'SOCKS4 supports a user ID, not password authentication; use SOCKS5' }
+      if (url.protocol.startsWith('socks5') && (Buffer.byteLength(user) > 255 || Buffer.byteLength(password) > 255 || (!user && password))) {
+        return { ok: false, reason: 'SOCKS5 credentials require a username and at most 255 bytes per field' }
+      }
+    } catch {
+      return { ok: false, reason: 'proxy credentials contain invalid URL encoding' }
+    }
+  }
+  // Credentials stay in the private URL, never in the outward-facing id/display.
+  const canonicalUrl = url.toString().replace(/\/$/, '')
+  const digest = createHash('sha256').update(canonicalUrl).digest('hex').slice(0, 8)
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80')
+  return { ok: true, entry: { id: `proxy:${url.hostname}:${port}#${digest}`, url: canonicalUrl } }
 }
 
 /** Remove userinfo so a URL can be logged or displayed. */
@@ -336,8 +354,11 @@ function transportCode(error: unknown): string {
  */
 export async function fetchWithPool(input: PooledFetchInput): Promise<Response> {
   const { pool } = input
+  const signal = input.signal ?? input.init.signal
+  signal?.throwIfAborted()
+  const init = { ...input.init, ...(signal ? { signal } : {}) }
   const doFetch = input.fetchImpl ?? ((url: string, init: RequestInit) => fetch(url, init))
-  if (!pool || pool.size === 0) return doFetch(input.url, input.init as RequestInit)
+  if (!pool || pool.size === 0) return doFetch(input.url, init as RequestInit)
   const throttled = input.throttledStatuses ?? [429]
   const attempts = pool.size
   let lastResponse: Response | undefined
@@ -349,8 +370,12 @@ export async function fetchWithPool(input: PooledFetchInput): Promise<Response> 
     if (!entry) break
     const egress = redactProxyUrl(entry.url)
     try {
-      const dispatcher = entry.url && input.dispatcherFor ? await input.dispatcherFor(entry.url) : undefined
-      const response = await doFetch(input.url, { ...input.init, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
+      signal?.throwIfAborted()
+      const dispatcher = entry.url ? await (input.dispatcherFor ?? dispatcherFor)(entry.url) : undefined
+      // A configured proxy must never silently become a direct connection.
+      if (entry.url && !dispatcher) throw new Error('Proxy dispatcher unavailable')
+      signal?.throwIfAborted()
+      const response = await doFetch(input.url, { ...init, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
       if (throttled.includes(response.status)) {
         pool.rateLimited(lease.index, retryAfterMs(response))
         lastResponse = response
@@ -361,7 +386,7 @@ export async function fetchWithPool(input: PooledFetchInput): Promise<Response> 
       input.onAttempt?.({ egress, status: response.status, rotated: false })
       return response
     } catch (error) {
-      if (input.signal?.aborted) throw error
+      if (signal?.aborted) throw error
       const code = transportCode(error)
       pool.failed(lease.index, code)
       lastError = error
@@ -376,19 +401,43 @@ export async function fetchWithPool(input: PooledFetchInput): Promise<Response> 
 // ---------------------------------------------------------------------------
 // Dispatcher (lazy: undici is loaded only once a proxy is actually used)
 
-const dispatchers = new Map<string, unknown>()
+interface ProxyDispatcher {
+  dispatcher: unknown
+  close(): Promise<void>
+}
+const dispatchers = new Map<string, Promise<ProxyDispatcher>>()
 
-/** One cached CONNECT agent per proxy URL. */
-export async function dispatcherFor(url: string): Promise<unknown> {
+/** Cache initialization too: parallel requests must share one agent per URL. */
+export async function dispatcherFor(raw: string): Promise<unknown> {
+  if (!raw) return undefined
+  const parsed = normalizeEntry(raw)
+  if (!parsed.ok) throw new Error(`Invalid proxy configuration: ${parsed.reason}`)
+  const url = parsed.entry.url
   if (!url) return undefined
-  const cached = dispatchers.get(url)
-  if (cached) return cached
-  const { ProxyAgent } = (await import('undici')) as { ProxyAgent: new (url: string) => unknown }
-  const agent = new ProxyAgent(url)
-  dispatchers.set(url, agent)
-  return agent
+  let creating = dispatchers.get(url)
+  if (!creating) {
+    creating = (async (): Promise<ProxyDispatcher> => {
+      if (new URL(url).protocol.startsWith('socks')) {
+        const { createSocksDispatcher } = await import('./socks-dispatcher.js')
+        return createSocksDispatcher(url)
+      }
+      const { ProxyAgent } = await import('undici')
+      const agent = new ProxyAgent(url)
+      return { dispatcher: agent, close: async () => { await agent.destroy() } }
+    })()
+    dispatchers.set(url, creating)
+  }
+  try {
+    return (await creating).dispatcher
+  } catch {
+    if (dispatchers.get(url) === creating) dispatchers.delete(url)
+    throw new Error('Proxy dispatcher initialization failed')
+  }
 }
 
-export function clearDispatchers(): void {
+/** Release pooled sockets and in-progress SOCKS negotiations on plugin unload. */
+export async function clearDispatchers(): Promise<void> {
+  const entries = [...dispatchers.values()]
   dispatchers.clear()
+  await Promise.allSettled(entries.map(async creating => { await (await creating).close() }))
 }

@@ -18,8 +18,11 @@ test('normalize: bare host:port, direct, unsupported scheme, credentials redacte
   assert.equal(normalizeEntry('127.0.0.1:7890').entry.url, 'http://127.0.0.1:7890')
   assert.equal(normalizeEntry('https://proxy.example:8443/').entry.url, 'https://proxy.example:8443')
   const socks = normalizeEntry('socks5://127.0.0.1:7891')
-  assert.equal(socks.ok, false)
-  assert.match(socks.reason, /unsupported/)
+  assert.equal(socks.ok, true)
+  assert.equal(socks.entry.url, 'socks5://127.0.0.1:7891')
+  const unsupported = normalizeEntry('ftp://127.0.0.1:7891')
+  assert.equal(unsupported.ok, false)
+  assert.match(unsupported.reason, /unsupported/)
   assert.equal(normalizeEntry('not a url').ok, false)
   const auth = normalizeEntry('http://user:secret@10.0.0.2:8080')
   assert.ok(auth.entry.url.includes('secret'))
@@ -29,8 +32,8 @@ test('normalize: bare host:port, direct, unsupported scheme, credentials redacte
 })
 
 test('normalizeList dedupes but keeps order and reports unusable entries', () => {
-  const { entries, rejected } = normalizeList(['direct', '127.0.0.1:7890', 'http://127.0.0.1:7890/', 'socks5://x:1'])
-  assert.deepEqual(entries.map((e) => e.display ?? e.url), ['', 'http://127.0.0.1:7890'])
+  const { entries, rejected } = normalizeList(['direct', '127.0.0.1:7890', 'http://127.0.0.1:7890/', 'socks5://x:1', 'ftp://x:1'])
+  assert.deepEqual(entries.map((e) => e.display ?? e.url), ['', 'http://127.0.0.1:7890', 'socks5://x:1'])
   assert.equal(rejected.length, 1)
 })
 

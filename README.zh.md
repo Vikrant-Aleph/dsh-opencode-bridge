@@ -13,6 +13,20 @@
 
 ## 安装与开始使用
 
+### DSH Desktop 界面安装
+
+1. 打开左侧 **插件** 页面，点击右上角 **添加插件**。
+2. 在输入框中填写：
+
+   ```text
+   dsh-opencode-bridge@0.5.0
+   ```
+
+3. **安装源**建议选择 npm 官方源；如果使用镜像源，新版本可能需要等待同步。
+4. 点击 **安装**，等待安装完成。
+
+### 命令行安装
+
 从 npm 安装到你的 DSH profile：
 
 ```sh
@@ -25,7 +39,7 @@ dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
 npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
 ```
 
-安装后重启对应的 DSH profile，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话。
+安装完成后，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话；如果未显示，请重启对应的 DSH profile。
 日常使用无需手动填写 API Key 或修改配置文件；模型列表会随上游调整。
 
 ## 可选代理配置

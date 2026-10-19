@@ -11,7 +11,7 @@ function yaml(file) {
   return document.toJS()
 }
 
-test('bug form requires reproducible diagnostics without making logs mandatory', () => {
+test('bug form requires redacted logs and explains how to obtain them', () => {
   const form = yaml('.github/ISSUE_TEMPLATE/bug_report.yml')
   assert.equal(typeof form.name, 'string')
   assert.equal(typeof form.description, 'string')
@@ -20,7 +20,15 @@ test('bug form requires reproducible diagnostics without making logs mandatory',
   for (const id of ['dsh-version', 'plugin-version', 'system', 'reproduction', 'expected', 'actual']) {
     assert.equal(fields.get(id)?.validations?.required, true, `${id} must be required`)
   }
-  assert.notEqual(fields.get('logs').validations?.required, true)
+  const logs = fields.get('logs')
+  assert.equal(logs.validations?.required, true)
+  assert.doesNotMatch(logs.attributes.label, /optional|可选/i)
+  assert.match(logs.attributes.description, /Settings → OpenCode Bridge → Diagnostic log/)
+  assert.match(logs.attributes.description, /设置 → OpenCode Bridge → 诊断日志/)
+  assert.match(logs.attributes.description, /Copy all/)
+  assert.match(logs.attributes.description, /复制全部/)
+  assert.match(logs.attributes.description, /API Key|API keys/)
+  assert.equal(logs.attributes.render, 'text')
   assert.equal(fields.get('privacy').attributes.options[0].required, true)
   assert.equal(form.labels, undefined, 'do not depend on labels that may not exist in the repository')
 })

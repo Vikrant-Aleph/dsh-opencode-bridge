@@ -1082,6 +1082,8 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-19 | 0.5.0 | **Required bug logs**: make redacted error logs mandatory in the bug form, add bilingual Settings diagnostic-log refresh/copy and manual-redaction instructions, and update form tests. | 16.1 |
+| 2026-10-19 | 0.5.0 | **Desktop installation guide**: put the Plugins → Add plugin UI steps before CLI instructions in both READMEs, including the version-pinned package name and registry mirror-sync note; retain CLI installation and suggest restarting the profile only if models do not appear. | READMEs |
 | 2026-10-19 | 0.5.0 | **Release version preparation**: change package version from 0.4.1 to 0.5.0 and synchronize both READMEs' installation/tarball versions and the current tag-release instructions. Historical change and verification records remain unchanged; no tag, commit or publication is created by this edit. | 0, 14, 16, READMEs |
 | 2026-10-19 | 0.4.1 | **SOCKS support**: add SOCKS4/4a/5/5h and socks alias, DNS modes and credential validation; retain HTTPS certificate/hostname verification, share concurrent agent initialization and destroy sockets on unload; absent proxy dispatchers never silently use direct fetch. Update Settings hints and bilingual READMEs, remove the requested connectivity/quota sentence, and add real loopback SOCKS/TLS plus configuration regression tests. | 3, 6.9, 8, 11, 13, READMEs |
 | 2026-10-19 | 0.4.1 | **Contribution/release automation**: add bug/feature Issue Forms, SHA-pinned tag-triggered Release workflow, version/archive/checksum helpers and regression tests; read-only build and publish-job-only contents:write, without npm publishing. Add pnpm 11 project settings and align the lockfile for frozen installs. | 0, 3, 11, 16, Appendix A |
@@ -1227,7 +1229,9 @@ throws while the settings page still registers when possible. **After any
 
 [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) defines bug and feature-request forms.
 Bugs require DSH/plugin versions, OS, reproduction steps, and expected/actual behavior;
-redacted logs are optional. Features require a problem/goal and a proposed solution.
+redacted error logs are also required. The field explains how to reproduce the problem,
+open Settings → OpenCode Bridge → Diagnostic log, refresh and copy all, then remove sensitive data before pasting.
+Features require a problem/goal and a proposed solution.
 Both require confirmation that no API keys, password-bearing proxy URLs or private chats are included.
 `config.yml` disables blank issues in the web UI and links documentation; GitHub generates the submitted Markdown.
 This is a web-form convention, not server-side enforcement for all API clients.

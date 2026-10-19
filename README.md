@@ -14,6 +14,20 @@ No OpenCode account or API key is required by default.
 
 ## Install and get started
 
+### Install in DSH Desktop
+
+1. Open **Plugins** in the sidebar, then click **Add plugin** in the top-right corner.
+2. Enter:
+
+   ```text
+   dsh-opencode-bridge@0.5.0
+   ```
+
+3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
+4. Click **Install** and wait for completion.
+
+### Install from the command line
+
 Install from npm into your DSH profile:
 
 ```sh
@@ -26,7 +40,7 @@ Replace `desktop` with the profile you use. If `dsh` is not available in your te
 npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
 ```
 
-Restart that DSH profile, then select a model under **OpenCode Bridge** in the model picker.
+After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
 Normal use requires no API key or manual configuration-file edits. The model list follows upstream changes.
 
 ## Optional proxy setup

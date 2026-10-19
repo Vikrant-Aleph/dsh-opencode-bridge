@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import type { AdapterRegistrationHandle, LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
-import { FreeModelCatalog } from './catalog.js'
+import { FreeModelCatalog, DEFAULT_MODEL_REFRESH_INTERVAL_MS, MAX_MODEL_REFRESH_INTERVAL_MS } from './catalog.js'
 import { OpenCodeFreeAdapter } from './adapter.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
@@ -47,6 +47,8 @@ export interface Config {
   extraModels: string[]
   /** Per-request timeout in milliseconds. */
   requestTimeoutMs: number
+  /** Periodic catalog refresh; 0 disables background refresh, positive values clamp to at least 60s. */
+  modelRefreshIntervalMs: number
   /** Send the OpenCode tool fingerprint the free-tier gate requires. */
   toolFingerprint: boolean
   /** Allow schema-checked read/search decoy mapping. Executable decoys are always rejected. */
@@ -77,6 +79,7 @@ export const Config: Schema<Config> = Schema.object({
   includeDeprecated: Schema.boolean().default(false),
   extraModels: Schema.array(Schema.string()).default([]),
   requestTimeoutMs: Schema.number().default(600_000),
+  modelRefreshIntervalMs: Schema.number().min(0).max(MAX_MODEL_REFRESH_INTERVAL_MS).step(1).default(DEFAULT_MODEL_REFRESH_INTERVAL_MS),
   toolFingerprint: Schema.boolean().default(true),
   toolTranslation: Schema.boolean().default(true),
   logLevel: Schema.string().default('warn'),
@@ -136,9 +139,27 @@ export function apply(ctx: Context, config: Config): void {
     project: config.project,
     extraHeaders: {},
   }
+  let registration: AdapterRegistrationHandle | undefined
+  const providers = config.providers.length ? [...config.providers] : ['opencode-bridge']
+  let refreshNotificationUnavailable = false
   const catalog = new FreeModelCatalog(
     config.baseUrl,
-    { includeDeprecated: config.includeDeprecated, extraModels: config.extraModels, pool, dispatcherFor },
+    {
+      includeDeprecated: config.includeDeprecated, extraModels: config.extraModels, pool, dispatcherFor,
+      refreshIntervalMs: config.modelRefreshIntervalMs,
+      onUpdated: () => {
+        if (typeof registration?.replace === 'function') {
+          // Public atomic route replacement announces a genuine registration
+          // update to DSH's model directory. Keep the SAME adapter and routes:
+          // already prepared calls and session selections are not disposed.
+          // This recaptures provider metadata/policy and may move route order.
+          registration.replace(providers)
+        } else if (!refreshNotificationUnavailable) {
+          refreshNotificationUnavailable = true
+          logger.warn('catalog', 'model cache updated; this DSH version needs a page reload to refresh its model picker')
+        }
+      },
+    },
     logger,
   )
   registerBridgeAudit(ctx, { fingerprint: config.toolFingerprint, translateDecoys: config.toolTranslation })
@@ -153,9 +174,8 @@ export function apply(ctx: Context, config: Config): void {
     dispatcherFor,
   })
 
-  let registration: AdapterRegistrationHandle | undefined
   try {
-    registration = ctx.llm.registerAdapter(config.providers.length ? config.providers : ['opencode-bridge'], adapter)
+    registration = ctx.llm.registerAdapter(providers, adapter)
     logger.info('plugin', 'LLM adapter registered', { providers: config.providers.join(',') })
   } catch (error) {
     logger.error('plugin', 'failed to register LLM adapter', { error: String(error) })
@@ -197,9 +217,5 @@ export function apply(ctx: Context, config: Config): void {
     registration?.()
   })
 
-  void catalog.list().then((models) => {
-    logger.info('plugin', 'free models available', {
-      ids: models.map((m) => m.id).join(',') || '(catalog not reachable yet)',
-    })
-  })
+  ctx.effect(() => catalog.start())
 }

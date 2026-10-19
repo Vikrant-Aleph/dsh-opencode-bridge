@@ -14,7 +14,7 @@ No OpenCode account or API key is required by default.
 
 ## Features
 
-- **Model integration**: automatically updates the free-model list and makes models available in DSH's model picker.
+- **Automatic model refresh**: fetches the free-model list at startup and every 10 minutes by default, adds/removes models as the upstream catalog changes, and retains the last successful list if a refresh fails.
 - **Streaming and tool calls**: adapts DSH's native tools and rejects unverified conversions rather than treating Bash commands as PowerShell.
 - **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies and try another egress when one is rate-limited or a connection fails.
 
@@ -26,7 +26,7 @@ No OpenCode account or API key is required by default.
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@0.5.0
+   dsh-opencode-bridge@0.5.1
    ```
 
 3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
@@ -37,17 +37,17 @@ No OpenCode account or API key is required by default.
 Install from npm into your DSH profile:
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
 ```
 
 Replace `desktop` with the profile you use. If `dsh` is not available in your terminal, use:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
 ```
 
 After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
-Normal use requires no API key or manual configuration-file edits. The model list follows upstream changes.
+Normal use requires no API key or manual configuration-file edits. List changes are announced to DSH's model picker without restarting the plugin. Advanced refresh-interval configuration is documented in the [configuration reference](TECHNICAL.md#8-configuration-reference).
 
 ## Optional proxy setup
 
@@ -98,7 +98,7 @@ Build output is not committed to Git. To install a local build in DSH:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.0.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.1.tgz
 ```
 
 </details>

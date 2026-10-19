@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "OpenCode Bridge",
-    "description": "Use OpenCode free models in DSH with a fail-closed tool bridge and offline, agent-scoped compatibility audit."
+    "description": "Use OpenCode free models in DSH, with automatic model-list refresh and optional egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing."
   }
 }

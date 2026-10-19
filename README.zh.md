@@ -13,7 +13,7 @@
 
 ## 主要功能
 
-- **模型接入**：自动更新免费模型列表，在 DSH 模型选择器中直接使用。
+- **模型列表自动刷新**：启动时获取免费模型列表，默认每 10 分钟重新获取一次，跟随上游增删模型；刷新失败时保留上次成功的列表。
 - **流式对话与工具调用**：适配 DSH 原生工具，拒绝无法验证的工具转换，避免将 Bash 命令直接当作 PowerShell 执行。
 - **可选代理轮换**：配置多个 HTTP(S) 或 SOCKS 代理，在出口被限流或连接失败时尝试下一个。
 
@@ -25,7 +25,7 @@
 2. 在输入框中填写：
 
    ```text
-   dsh-opencode-bridge@0.5.0
+   dsh-opencode-bridge@0.5.1
    ```
 
 3. **安装源**建议选择 npm 官方源；如果使用镜像源，新版本可能需要等待同步。
@@ -36,17 +36,17 @@
 从 npm 安装到你的 DSH profile：
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
 ```
 
 `desktop` 是示例 profile 名称，请按实际使用的名称替换。如果终端找不到 `dsh`，可使用：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.0
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
 ```
 
 安装完成后，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话；如果未显示，请重启对应的 DSH profile。
-日常使用无需手动填写 API Key 或修改配置文件；模型列表会随上游调整。
+日常使用无需手动填写 API Key 或修改配置文件；列表变化会通知 DSH 模型选择器重新读取，无需重启插件。刷新间隔的高级配置见[配置参考](TECHNICAL.zh.md#8-配置参考)。
 
 ## 可选代理配置
 
@@ -97,7 +97,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.0.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.1.tgz
 ```
 
 </details>

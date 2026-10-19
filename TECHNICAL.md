@@ -155,7 +155,9 @@ patch global HTTP entry points.
 | [tests/bridge-cancellation.test.mjs](tests/bridge-cancellation.test.mjs) | — | Pre-POST, buffered-call and per-chunk cancellation regression tests. |
 | [docs/COMPARISON.zh.md](docs/COMPARISON.zh.md) | — | Six fixed-HEAD source comparison and differentiation limits. |
 | [docs/research-notes/](docs/research-notes/README.md) | — | Publishable research notes (own analysis); the repo ships no third-party sources. |
-| `src/catalog.ts` | — | `FreeModelCatalog`: metadata/live-list filtering, caching and degradation. |
+| [src/catalog.ts](src/catalog.ts) | — | `FreeModelCatalog`: atomic snapshots, periodic refresh, single-flight requests, cancellation, stale-cache fallback and free-model filtering. |
+| [tests/catalog-refresh.test.mjs](tests/catalog-refresh.test.mjs) | — | Fake-clock/source fixtures covering scheduling, failure, empty snapshots, concurrency and filtering. |
+| [tests/catalog-lifecycle.test.mjs](tests/catalog-lifecycle.test.mjs) | — | Plugin effects, model discovery, same-adapter route replacement and unload cleanup. |
 | `src/logger.ts` | 326 | `PluginLogger`: levels, redaction, size-based rotation (oldest-first cleanup), memory fallback. See chapter 15. |
 | `src/log-service.ts` | 245 | `LogService` + RPC routes + the `opencode_bridge_log` agent tool (one implementation, two callers). |
 | [client.js](client.js) | — | One OpenCode Bridge settings page (order30) with log/proxy-rotation tabs; browser module, not a tsc product. See 6.9, 15.4, 15.6. |
@@ -442,8 +444,11 @@ Cleanup is Cordis-managed:
 ctx.effect(() => () => { registration?.() })
 ```
 
-The catalog's first load is kicked off fire-and-forget so plugin activation
-never blocks on network I/O.
+Catalog startup and its timer are owned by `ctx.effect(() => catalog.start())`.
+Activation does not await network I/O. Content changes use the existing adapter
+registration's public atomic `replace(providers)` handle; unchanged snapshots do
+not notify. Unload cancels metadata fetches and timers as well as the registration
+and proxy resources. See section 7 for concurrency and Client-cache semantics.
 
 ### 6.3 Stream chunk protocol mapping
 
@@ -770,29 +775,68 @@ independent sources:
 
 | Source | Provides | Cache |
 |---|---|---|
-| `https://models.dev/api.json` → `.opencode.models` | limits, modalities, reasoning efforts, per-model API base, deprecation status | 10 min in memory |
+| `https://models.dev/api.json` → `.opencode.models` | limits, modalities, reasoning efforts, per-model API base, deprecation status | shared snapshot; 10 min default |
 | `GET {baseUrl}/models` (anonymous) | live availability | same refresh cycle |
 
-Both sources are fetched together and share one 10-minute in-memory cache
-(`fetchedAt`). There is no on-disk cache: a host restart re-fetches. The
-registry's own upstream refresh cadence is irrelevant here, because this
-plugin only reads its published snapshot.
+Both sources are fetched concurrently and committed as **one complete in-memory
+snapshot**. Startup prefetch and a completion-relative background timer refresh it
+by default every 10 minutes (`modelRefreshIntervalMs: 600000`). There is no disk
+cache: plugin reload fetches again. Upstream registry publication cadence remains
+outside this plugin's control.
 
-Merge rule — a model is offered when **all** hold:
+### 7.1 Refresh lifecycle, concurrency and failures
 
-1. `cost.input === 0` (zero-cost in the registry), and
-2. `status !== 'deprecated'` (unless `includeDeprecated`), and
-3. it is present in the live listing (when that listing was reachable).
+- `start()` starts one immediate prefetch and one non-overlapping timer chain;
+  repeated starts are idempotent. The owning `ctx.effect` disposes it on unload.
+- Positive intervals are clamped to 60 seconds minimum and 2147483647 ms maximum.
+  `0` disables background polling but retains startup prefetch and a 10-minute
+  on-demand TTL. With a positive interval, the same interval is the on-demand TTL.
+- `list()` returns a fresh snapshot; `refresh()` bypasses TTL. Concurrent callers,
+  discovery and timer ticks share one in-flight operation rather than racing writes.
+- Both sources and their JSON bodies share a 30-second deadline. Any HTTP/network
+  error, timeout or invalid response shape retains the last good snapshot; first
+  failure returns an empty list. Failed on-demand queries back off for 60 seconds;
+  enabled background refresh retries after one minute rather than the full interval.
+- Successful **empty** snapshots are cached too, so removing all models does not
+  cause a fetch storm. A failure is not converted into a successful empty snapshot.
+- Caller cancellation rejects that caller's wait without cancelling a refresh used
+  by other callers. Disposal cancels the owned refresh and timer, rejects waiting
+  operations with AbortError, and prevents late responses from publishing a snapshot.
+  Thus `list()` degrades on source failure but is not literally a never-throw API.
+- `onUpdated` runs only when the snapshot actually changes (including metadata),
+  or on the first successful snapshot. Observer failure cannot discard committed data.
 
-Then two escape hatches:
+### 7.2 Free-model selection
 
-- `config.extraModels` ids are always force-added.
-- Unknown ids present live and matching `/(-free$|^big-pickle$)/` are surfaced,
-  so a model that ships before the registry catches up is still usable.
+For known registry models, **all** conditions must hold:
 
-`list()` **never throws**. On a failed refresh it logs and serves the cache; if
-the cache is empty it backdates its timestamp by 5 minutes so a burst of
-callers cannot hammer a failing endpoint.
+1. `cost.input === 0` **and** `cost.output === 0` (unknown output cost is not free);
+2. `status !== 'deprecated'`, unless `includeDeprecated` is enabled;
+3. the ID appears in a successfully fetched relay listing.
+
+Explicit `extraModels` remain force-added overrides (possibly `live:false`). Unknown
+live IDs matching `/(-free$|^big-pickle$)/` retain the existing naming-convention
+fallback, so newly introduced free IDs can appear before models.dev catches up.
+A known paid, deprecated or incomplete-price registry entry cannot re-enter through
+that suffix fallback. Listing availability is an upstream declaration, not an
+inference-health probe: refresh never sends completion requests.
+
+### 7.3 DSH model-picker updates
+
+Adapter `listModels`, model metadata resolution and registered discovery share the
+same snapshot. DSH's Client has its own host-generation catalog cache; merely
+changing plugin memory is insufficient, and reopening the picker need not refetch.
+After an actual content change, the plugin calls the **public owned registration
+handle's `replace(providers)`** with the same routes and adapter instance. This is
+an atomic registration update that causes DSH itself to publish its documented
+`llm/adapters-updated` notification and reload the Client catalog. It is not a
+manual fake event or periodic dispose/register loop; session selections and
+already prepared calls remain intact.
+
+Replacement re-reads provider metadata/retry policy and can move this provider to
+the end of registration order. It is not a side-effect-free models-only API.
+On older Hosts without handle.replace, the cache still updates and a one-time
+warning asks the user to reload the page; no private Client method is accessed.
 
 Field mapping:
 
@@ -822,6 +866,7 @@ keyless and config-free out of the box.
 | `includeDeprecated` | boolean | `false` | Offer deprecated-but-still-live models. |
 | `extraModels` | string[] | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
+| `modelRefreshIntervalMs` | number | `600000` | Startup prefetch and periodic model refresh. `0` disables background polling; positive values below 60000 use 60000. Integer range 0–2147483647. See section 7 for TTL, retry and UI notification behavior. |
 | `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S)/SOCKS/direct entries; saved store wins at startup. |
 | `proxyCooldownMs` | number | `60000` | Base 429 cooldown, clamped to at least 1s; exponential escalation. |
 | `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-bridge/proxies.json`; plaintext URL/credential store. |
@@ -941,6 +986,24 @@ Logging/client tests are offline too. `tests/wire-dump.mjs` is an offline dump;
 offline pass is not proof of every model, real tool dispatch, or Desktop startup.
 Final release verification results should be recorded separately, without
 recasting the historical gate observations as a fresh full acceptance run.
+
+### 0.5.1 periodic-catalog verification (2026-10-19)
+
+- Build/client syntax checks and **171/171 regressions passed, none skipped**,
+  including 26 catalog-state and 7 plugin-lifecycle cases. Fake clocks cover real
+  scheduling boundaries without waiting ten minutes or calling model inference.
+- Tests cover additions/removals/pricing changes, valid empty results, malformed
+  containers/rows, both source failures, backoff, concurrent sharing, isolated caller
+  cancellation, JSON-body timeout, late results, disabled/idempotent timers and unload.
+- Integration fixtures verify same-adapter/same-route `replace`, no repeated registration
+  or disposal, shared discovery results, unchanged-snapshot suppression and older-Host
+  fallback. The existing Issue form text was preserved; its stale API-key-description
+  assertion now checks the existing warn/error guidance and privacy checkbox instead.
+- A real metadata-only refresh against models.dev and relay GET /models succeeded with
+  10 models at this snapshot. No completion request or tool execution was sent.
+- The installed Host's public replacement semantics and Client catalog listener were
+  read from their installed source; this is not a visual automation result or a test
+  of all future DSH versions. Current-version metadata/tag preflight passes for v0.5.1.
 
 ### 0.4.1 SOCKS and release-preparation verification (2026-10-19)
 
@@ -1082,6 +1145,8 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-19 | 0.5.1 | **Description update**: order localized plugin descriptions and npm metadata as free-model access, dynamic model-list refresh, optional proxy-egress rotation, then the default-rejecting tool bridge and offline agent-scoped audit. Keep English locale and package description aligned. | 15.5 |
+| 2026-10-19 | 0.5.1 | **Periodic model refresh**: add `modelRefreshIntervalMs` (10 min default, 0 disables polling), startup prefetch, single-flight atomic two-source snapshots, deadlines/backoff and disposal. Preserve cached data on source failure and cache valid empty results. Require zero input/output cost for known models and prevent suffix fallback from re-adding paid/deprecated entries. On actual changes, atomically replace only owned routes with the same adapter to notify DSH; preserve prepared calls and document registration-order/policy effects and older-Host fallback. Add catalog/lifecycle regressions and synchronize package/README/current release examples to 0.5.1. | 3, 6.2, 7, 8, 11, 14, 16, READMEs |
 | 2026-10-19 | 0.5.0 | **Required bug logs**: make redacted error logs mandatory in the bug form, add bilingual Settings diagnostic-log refresh/copy and manual-redaction instructions, and update form tests. | 16.1 |
 | 2026-10-19 | 0.5.0 | **Desktop installation guide**: put the Plugins → Add plugin UI steps before CLI instructions in both READMEs, including the version-pinned package name and registry mirror-sync note; retain CLI installation and suggest restarting the profile only if models do not appear. | READMEs |
 | 2026-10-19 | 0.5.0 | **Release version preparation**: change package version from 0.4.1 to 0.5.0 and synchronize both READMEs' installation/tarball versions and the current tag-release instructions. Historical change and verification records remain unchanged; no tag, commit or publication is created by this edit. | 0, 14, 16, READMEs |
@@ -1241,8 +1306,8 @@ Commit these files to the default branch for them to appear on the new-issue pag
 
 [.github/workflows/release.yml](.github/workflows/release.yml) triggers only on pushed `v*` tags,
 then requires the tag to **equal `v` + `package.json.version` exactly** and verifies both READMEs'
-installation/tarball versions. Package `0.5.0` needs `v0.5.0`; prerelease tags such as
-`v0.5.1-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
+installation/tarball versions. Package `0.5.1` needs `v0.5.1`; prerelease tags such as
+`v0.5.2-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
 never rewrites versions or publishes to npm.
 
 It uses Node 24, pnpm 11.28.5 and SHA-pinned Actions. Current pnpm project configuration
@@ -1272,17 +1337,17 @@ Protect release tags and do not force-move tags that have already shipped.
 ### 16.3 Maintainer steps
 
 Choose an **unused** version and synchronize the package and both READMEs, then commit all code,
-workflow/templates, tests and lockfile. For current `0.5.0` (if already tagged, bump to a fresh version
+workflow/templates, tests and lockfile. For current `0.5.1` (if already tagged, bump to a fresh version
 and substitute it below):
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.0
+node scripts/release-check.mjs --tag v0.5.1
 # After passing, commit and push main yourself, then tag that commit:
-git tag -a v0.5.0 -m "Release v0.5.0"
-git push origin v0.5.0
+git tag -a v0.5.1 -m "Release v0.5.1"
+git push origin v0.5.1
 ```
 
 Inspect **Actions → Tagged plugin release**, then download assets from **Releases**.
@@ -1311,7 +1376,7 @@ src/bridge-audit.ts       offline current-agent scoped native-registry audit
 src/proxy-pool.ts         ordered egress/cooldown/store and HTTP/SOCKS dispatcher cache
 src/socks-dispatcher.ts   SOCKS handshake, DNS/authentication, TLS and cleanup
 src/proxy-service.ts      live proxy edits, health, GET probes and RPC
-src/catalog.ts            free-model catalog
+src/catalog.ts            periodic, atomic, single-flight free-model catalog
 src/logger.ts             leveled logger (redaction, rotation, memory fallback)
 src/log-service.ts        LogService + RPC routes + agent tool
 client.js                 Settings log and proxy-management panels (browser module)
@@ -1332,6 +1397,8 @@ tests/github-config.test.mjs Issue/workflow YAML, permissions and lock checks
 tests/proxy-rotation.test.mjs adapter failover and no mid-stream replay tests
 tests/proxy-live.mjs      optional real CONNECT/direct metadata and synthetic inference probe
 tests/readme-version.test.mjs README install-command/tarball version guard
+tests/catalog-refresh.test.mjs fake-clock refresh/cache/failure/cancellation tests
+tests/catalog-lifecycle.test.mjs discovery/registration/effect lifecycle tests
 docs/COMPARISON.zh.md     fixed-HEAD source comparison and evidence boundaries
 docs/research-notes/      publishable research notes (own analysis; no third-party sources)
 tests/smoke.mjs           live end-to-end probe

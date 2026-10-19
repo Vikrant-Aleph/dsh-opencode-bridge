@@ -135,7 +135,9 @@ HTTP(S) CONNECT 或 SOCKS 代理发出（见6.9）。
 | [tests/bridge-cancellation.test.mjs](tests/bridge-cancellation.test.mjs) | — | POST 前、缓存调用及逐块取消回归。 |
 | [docs/COMPARISON.zh.md](docs/COMPARISON.zh.md) | — | 六仓库固定 HEAD 源码比较及差异化边界。 |
 | [docs/research-notes/](docs/research-notes/README.md) | — | 可公开的调研笔记（自研分析），仓库不含第三方源码。 |
-| `src/catalog.ts` | — | `FreeModelCatalog`：元数据/实时列表筛选、缓存与降级。 |
+| [src/catalog.ts](src/catalog.ts) | — | `FreeModelCatalog`：原子快照、定时刷新、请求合并、取消、旧缓存降级与免费筛选。 |
+| [tests/catalog-refresh.test.mjs](tests/catalog-refresh.test.mjs) | — | 假时钟/来源夹具覆盖调度、故障、空快照、并发与筛选。 |
+| [tests/catalog-lifecycle.test.mjs](tests/catalog-lifecycle.test.mjs) | — | 插件 effect、模型发现、同适配器路由更新与卸载清理。 |
 | `src/logger.ts` | 326 | `PluginLogger`：分级、脱敏、按大小轮转（最旧优先清理）、内存兜底。见第 15 章。 |
 | `src/log-service.ts` | 245 | `LogService` + RPC 路由 + `opencode_bridge_log` agent 工具（一套实现两个调用方）。 |
 | [client.js](client.js) | — | 单个 OpenCode Bridge 设置页（order30），页内日志与代理轮换标签；浏览器模块非 tsc 产物。见6.9、15.4、15.6。 |
@@ -403,7 +405,9 @@ export function apply(ctx: Context, config: Config): void
 ctx.effect(() => () => { registration?.() })
 ```
 
-目录的首次加载以即发即忘方式启动，因此插件激活永不阻塞在网络 I/O 上。
+通过 `ctx.effect(() => catalog.start())` 持有启动预取与定时器，插件激活不等待网络。
+内容变化时使用现有注册的公开原子 `replace(providers)`，相同快照不通知。
+卸载会取消元数据请求与定时器，并清理注册及代理资源；并发与 Client 缓存语义见第 7 章。
 
 ### 6.3 流块协议映射
 
@@ -668,27 +672,53 @@ HTTPS 在隧道上建立 TLS，按原始目标主机名校验证书和发送 SNI
 
 | 来源 | 提供 | 缓存 |
 |---|---|---|
-| `https://models.dev/api.json` → `.opencode.models` | 限额、模态、推理档位、按模型的 API base、弃用状态 | 内存中 10 分钟 |
+| `https://models.dev/api.json` → `.opencode.models` | 限额、模态、推理档位、按模型的 API base、弃用状态 | 共享快照，默认10分钟 |
 | `GET {baseUrl}/models`（匿名） | 实时可用性 | 同一刷新周期 |
 
-两个来源一起抓取，共用同一个 10 分钟内存缓存（`fetchedAt`）。
-没有磁盘缓存：宿主重启会重新抓取。注册表自身上游的刷新节奏与本插件无关，
-因为它只读取已发布的快照。
+两个来源并发抓取，作为**一个完整的内存快照**原子提交。
+启动时预取一次，此后默认每 10 分钟后台刷新（`modelRefreshIntervalMs:600000`），
+下一轮从本轮完成后计时。没有磁盘缓存，重载插件会重新抓取；注册表发布快照的节奏仍由上游决定。
 
-合并规则——模型被提供的条件是**同时**满足：
+### 7.1 刷新生命周期、并发与失败
 
-1. `cost.input === 0`（注册表中零成本），且
-2. `status !== 'deprecated'`（除非开启 `includeDeprecated`），且
-3. 出现在实时列表中（当该列表可达时）。
+- `start()` 即时预取，并启动单条不重叠的定时链；重复启动幂等。所属 `ctx.effect` 在卸载时清理。
+- 正数间隔最小按 60 秒、最大按 2147483647 毫秒处理。`0` 关闭后台轮询，
+  但保留启动预取和按需 10 分钟 TTL；正数时按需 TTL 同刷新间隔。
+- `list()` 读取新鲜缓存，`refresh()` 绕过 TTL；多个查询、模型发现与定时器共享一轮在途请求，
+  不并发争写快照。
+- 两个请求及 JSON 响应体共用 30 秒总期限。任一来源的 HTTP/网络错误、超时或非法结构，
+  都保留最后成功快照；首次失败返回空列表。失败后的按需查询退避 60 秒，
+  已开启的后台刷新也在一分钟后重试，而非等待完整刷新周期。
+- **有效空列表也缓存**，模型全部下架不会触发请求风暴；故障不伪装成成功的空列表。
+- 单个调用者取消只拒绝自己的等待，不取消其他调用者共用的刷新。
+  卸载则取消所属请求及定时器，等待中的操作以 AbortError 拒绝，迟到响应不得覆盖缓存或通知界面。
+  因此 `list()` 会对来源故障降级，但不再笼统宣称“永不抛出”。
+- `onUpdated` 仅首次成功或内容（含元数据）真正变化时调用；通知失败不丢弃已经提交的快照。
 
-两个逃生通道：
+### 7.2 免费模型筛选
 
-- `config.extraModels` 中的 id 始终被强制加入。
-- 实时存在且匹配 `/(-free$|^big-pickle$)/` 的未知 id 会被呈现，
-  使注册表尚未跟上就已上线的模型仍可使用。
+对注册表中已知型号，必须**同时**满足：
 
-`list()` **永不抛出**。刷新失败时记录日志并继续提供缓存；
-若缓存为空，则把时间戳回拨 5 分钟，避免一批调用者反复冲击故障端点。
+1. `cost.input === 0` **且** `cost.output === 0`（输出价格未知不视为免费）；
+2. 非 deprecated，或显式开启 `includeDeprecated`；
+3. 出现在本次成功获取的 relay 列表中。
+
+`extraModels` 仍是强制附加的显式覆盖，可能带 `live:false`。
+实时列表中注册表尚未知晓且匹配 `/(-free$|^big-pickle$)/` 的 ID，继续按既有命名约定补入，
+以覆盖尚未同步到 models.dev 的新免费型号。已知付费、弃用或费用不完整的型号不能被后缀规则重新加回。
+目录中的可用性是上游声明，不是实际推理健康探针；刷新不发送补全请求。
+
+### 7.3 通知 DSH 模型选择器
+
+适配器 `listModels`、模型元数据解析和模型发现共用同一个快照。
+DSH Client 自身还有跨会话共享的目录缓存，仅修改插件内存不足以使界面重查，重新打开选择器也不保证刷新。
+实际内容变化后，插件使用**公开注册句柄的 `replace(providers)`** 原子更新自有路由注册，
+保持同样的路由名和适配器实例，由 DSH 自己发出契约中的 `llm/adapters-updated`，让界面重读目录。
+这不是手工伪造事件，也不是周期 dispose/register；不会主动修改会话选择或取消已经准备好的请求。
+
+该接口会重新获取提供商元数据/重试策略，并可能把本提供商移到注册顺序末尾，
+因此不能称为“无副作用的纯模型失效 API”。较旧宿主若没有 handle.replace，
+缓存仍会更新，但仅记录一次提醒，需刷新页面；不访问私有 Client 方法。
 
 字段映射：
 
@@ -717,6 +747,7 @@ provider.api             → api             → 按请求覆盖对话端点
 | `includeDeprecated` | boolean | `false` | 是否提供已弃用但在线的模型。 |
 | `extraModels` | string[] | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
+| `modelRefreshIntervalMs` | number | `600000` | 模型定时刷新间隔（毫秒）；`0` 关闭后台轮询，正数小于 60000 按 60000 执行。配置须为 0–2147483647 的整数；TTL、重试与界面通知见第 7 章。 |
 | `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S)/SOCKS/直连条目；启动时已保存 store 优先。 |
 | `proxyCooldownMs` | number | `60000` | 429 基础冷却，最小钳到1秒，指数递增。 |
 | `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-bridge/proxies.json`，URL/凭据明文存储。 |
@@ -822,6 +853,20 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 `tests/wire-dump.mjs` 是离线转储，`tests/smoke.mjs` 才是消耗网络/额度的实时探针。
 存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
 发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
+
+### 0.5.1 模型定时刷新验证（2026-10-19）
+
+- 编译/客户端语法检查及完整回归 **171/171 通过，无跳过**，其中目录状态26例、插件生命周期7例。
+  假时钟覆盖真实计时间隔，不必等待10分钟，也不调用模型推理。
+- 覆盖增删/价格变更、有效空结果、容器及条目结构错误、两来源失败、退避、并发合并、
+  调用者取消隔离、JSON 响应体超时、迟到结果、关闭/重复定时任务与卸载。
+- 接线夹具验证同适配器/同路由原子 `replace`，不反复注册或提前清理，模型发现复用新快照，
+  相同快照不通知及旧宿主降级。保留现有 Issue 表单描述，修正仍要求描述中出现 API Key
+  的过时断言，改为检查已有 warn/error 提示及隐私确认项。
+- 真实 models.dev 与 relay GET /models 的纯元数据刷新成功，本次快照返回10个模型；
+  未发送补全请求或执行工具。
+- 已读取当前安装版 Host 公共 replace 语义及 Client 目录监听代码；不等于已做视觉自动化，
+  也不证明所有未来 DSH 版本。当前版本/tag 发布前置检查已通过 v0.5.1。
 
 ### 0.4.1 SOCKS 与发布准备验证（2026-10-19）
 
@@ -930,6 +975,8 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-19 | 0.5.1 | **简介完善**：中英文插件简介与 npm 包描述按“免费模型接入、模型列表动态刷新、可选代理出口轮换、工具桥与离线 Agent 作用域审计”排序，工具桥/审计说明置于最后。 | 15.5 |
+| 2026-10-19 | 0.5.1 | **模型定时刷新**：新增 `modelRefreshIntervalMs`（默认10分钟，0关闭轮询），启动预取、两来源原子快照、请求合并、期限/退避及卸载清理；来源故障保留旧缓存，有效空列表也缓存。已知型号须输入/输出均零价，后缀规则不得重新加入付费/弃用项。内容变化时用同一适配器原子更新自有路由来通知 DSH，保留已准备请求，并说明注册顺序/策略重捕获副作用及旧宿主降级。新增目录/生命周期回归，同步包、README 和当前发布示例至0.5.1。 | 3、6.2、7、8、11、14、16、README |
 | 2026-10-19 | 0.5.0 | **Bug 日志必填**：问题反馈表单的脱敏错误日志改为必填，增加从设置页诊断日志刷新/复制及手动脱敏的双语提示；同步表单测试。 | 16.1 |
 | 2026-10-19 | 0.5.0 | **Desktop 安装指引**：两份 README 在命令行安装前新增“插件 → 添加插件”的界面操作、固定版本包名及镜像同步提示；保留 CLI 安装，改为模型未显示时再建议重启 profile。 | README |
 | 2026-10-19 | 0.5.0 | **发布版本准备**：包版本由 0.4.1 升至 0.5.0，同步两份 README 的安装命令/tarball 版本及当前 tag 发布操作示例。保留历史变更与验证记录；此次文件编辑不创建 tag、提交或执行发布。 | 0、14、16、README |
@@ -1066,7 +1113,7 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 
 [.github/workflows/release.yml](.github/workflows/release.yml) 仅由推送 `v*` tag 触发，
 随后要求 tag **严格等于 `v` + `package.json.version`**，并验证两份 README 安装命令和 tarball 版本。
-例如包版本 `0.5.0` 对应 `v0.5.0`；`v0.5.1-rc.1` 这类预发行 tag 对应同名预发行包版本。
+例如包版本 `0.5.1` 对应 `v0.5.1`；`v0.5.2-rc.1` 这类预发行 tag 对应同名预发行包版本。
 错误 tag 会失败，不会自动修改源码版本，也不会发布 npm。
 
 工作流使用 Node 24、pnpm 11.28.5；按固定 SHA 引用 Actions。
@@ -1091,16 +1138,16 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 ### 16.3 维护者操作
 
 先选**未使用**的版本号，同步包版本与两份 README；提交所有源码、工作流、模板、测试与锁文件。
-以当前 `0.5.0` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
+以当前 `0.5.1` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.0
+node scripts/release-check.mjs --tag v0.5.1
 # 通过后自行提交并推送 main，再创建并推送该提交的 tag：
-git tag -a v0.5.0 -m "Release v0.5.0"
-git push origin v0.5.0
+git tag -a v0.5.1 -m "Release v0.5.1"
+git push origin v0.5.1
 ```
 
 到 GitHub **Actions → Tagged plugin release** 看结果，再到 **Releases** 下载资产。
@@ -1128,7 +1175,7 @@ src/bridge-audit.ts       离线当前 agent 原生注册表作用域审计
 src/proxy-pool.ts         顺序出口/冷却/store与HTTP/SOCKS dispatcher缓存
 src/socks-dispatcher.ts   SOCKS握手、DNS/认证、TLS与连接清理
 src/proxy-service.ts      实时代理编辑、health、GET探测与RPC
-src/catalog.ts            免费模型目录
+src/catalog.ts            定时、原子快照、请求合并的免费模型目录
 src/logger.ts             分级日志（脱敏、轮转、内存兜底）
 src/log-service.ts        LogService + RPC 路由 + agent 工具
 client.js                 设置界面日志与代理管理面板（浏览器端模块）
@@ -1149,6 +1196,8 @@ tests/github-config.test.mjs Issue/工作流YAML、权限及锁配置校验
 tests/proxy-rotation.test.mjs 适配器改道与流中途不重播测试
 tests/proxy-live.mjs      按需真实CONNECT/直连元数据与合成推理探针
 tests/readme-version.test.mjs README 安装命令/tarball 版本一致性守卫
+tests/catalog-refresh.test.mjs 假时钟刷新/缓存/故障/取消测试
+tests/catalog-lifecycle.test.mjs 模型发现/注册/effect 生命周期测试
 docs/COMPARISON.zh.md     固定 HEAD 源码比较及证据边界
 docs/research-notes/      可公开的调研笔记（自研分析；不含第三方源码）
 tests/smoke.mjs           实时端到端探针

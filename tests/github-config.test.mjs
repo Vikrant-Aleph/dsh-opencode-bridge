@@ -27,9 +27,11 @@ test('bug form requires redacted logs and explains how to obtain them', () => {
   assert.match(logs.attributes.description, /设置 → OpenCode Bridge → 诊断日志/)
   assert.match(logs.attributes.description, /Copy all/)
   assert.match(logs.attributes.description, /复制全部/)
-  assert.match(logs.attributes.description, /API Key|API keys/)
+  assert.match(logs.attributes.description, /\bwarn\b/)
+  assert.match(logs.attributes.description, /\berror\b/)
   assert.equal(logs.attributes.render, 'text')
   assert.equal(fields.get('privacy').attributes.options[0].required, true)
+  assert.match(fields.get('privacy').attributes.options[0].label, /API Key|API keys/)
   assert.equal(form.labels, undefined, 'do not depend on labels that may not exist in the repository')
 })
 test('feature form and issue chooser provide required structure and a privacy checklist', () => {

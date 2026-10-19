@@ -50,7 +50,7 @@ body:
       label: Redacted error logs / 脱敏错误日志
       description: |
         Reproduce the problem, then open Settings → OpenCode Bridge → Diagnostic log. Click Refresh, then Copy all, and paste the logs here after removing API keys, proxy credentials, private chats and personal paths.
-        复现问题后，打开“设置 → OpenCode Bridge → 诊断日志”，点击“刷新”，再点击“复制全部”。粘贴前请移除 API Key、代理凭据、私人聊天及个人路径。
+        复现问题后，打开“设置 → OpenCode Bridge → 诊断日志”，点击“刷新”，再点击“复制全部”。建议默认提交 warn 及以上，包含 warn 和 error，无需开启 debug，需要深入排查时，再临时开启 debug 并重新复现。
       render: text
     validations:
       required: true

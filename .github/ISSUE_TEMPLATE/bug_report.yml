@@ -49,8 +49,10 @@ body:
     attributes:
       label: Redacted error logs / 脱敏错误日志
       description: |
-        Reproduce the problem, then open Settings → OpenCode Bridge → Diagnostic log. Click Refresh, then Copy all, and paste the logs here after removing API keys, proxy credentials, private chats and personal paths.
-        复现问题后，打开“设置 → OpenCode Bridge → 诊断日志”，点击“刷新”，再点击“复制全部”。建议默认提交 warn 及以上，包含 warn 和 error，无需开启 debug，需要深入排查时，再临时开启 debug 并重新复现。
+        Reproduce the problem, then open Settings → OpenCode Bridge → Diagnostic log. Click Refresh, then Copy all. 
+        It is recommended to submit logs at the 'warn' level and above (including both 'warn' and 'error') by default; there is no need to enable 'debug' mode. If an in-depth investigation is required, you can temporarily enable 'debug' mode and reproduce the issue.
+        复现问题后，打开“设置 → OpenCode Bridge → 诊断日志”，点击“刷新”，再点击“复制全部”。
+        建议默认提交 warn 及以上，包含 warn 和 error，无需开启 debug，需要深入排查时，再临时开启 debug 并重新复现。
       render: text
     validations:
       required: true

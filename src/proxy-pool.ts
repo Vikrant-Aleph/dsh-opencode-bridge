@@ -1,9 +1,9 @@
 /**
  * Egress pool for the relay.
  *
- * The free tier throttles per egress IP. A pool lets one profile rotate a
- * rate-limited IP out of rotation and try the next entry instead of failing the
- * whole request. Entries are either the machine's own IP ("direct") or an
+ * Some quota failures are egress-scoped; only ready configured exits may be
+ * selected. Request-scoped errors and server-requested waits must not be
+ * bypassed by immediate failover. Entries are the machine's IP ("direct") or an
  * HTTP(S) CONNECT or SOCKS proxy.
  *
  * Selection/state are testable independently of I/O; fetch and per-proxy
@@ -14,6 +14,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { createHash } from 'node:crypto'
+import { retryAfterMs } from './retry-after.js'
+export { retryAfterMs } from './retry-after.js'
 
 /** One configured egress: an empty url means "use this machine's IP". */
 export interface ProxyEntry {
@@ -35,8 +37,10 @@ export interface ProxyHealth {
 export interface PoolOptions {
   /** Base cooldown after a rate-limit rejection. */
   cooldownMs?: number
-  /** Upper bound for escalated cooldowns. */
+  /** Upper bound for locally generated cooldowns (never a cap on server hints). */
   maxCooldownMs?: number
+  /** Injectable randomness for non-negative fallback jitter. */
+  random?: () => number
 }
 
 export const DIRECT_ID = 'direct'
@@ -131,22 +135,24 @@ export function normalizeList(raw: readonly string[]): { entries: ProxyEntry[]; 
  * Ordered egress selection with per-entry cooldowns.
  *
  * A healthy pool keeps using the earliest entry, so one profile normally keeps
- * one egress IP; a throttled or unreachable entry is retired for its cooldown
- * and the next one takes over. `acquire()` never reports "nothing to try" while
- * any entry exists: when every entry is cooling it returns the one whose
- * cooldown expires first, marked `cooling: true`, so a single-egress profile
- * still behaves exactly like a plain fetch.
+ * one egress IP; a throttled or unreachable entry is retired for its cooldown.
+ * acquire() returns only ready entries. A fully cooling pool refuses network
+ * work until a deadline expires; the caller can report the remaining wait.
  */
 export class ProxyPool {
   private slots: Slot[] = []
   private readonly cooldownMs: number
   private readonly maxCooldownMs: number
   private readonly now: () => number
+  private readonly random: () => number
 
   constructor(entries: readonly string[] = [], options: PoolOptions = {}, now: () => number = Date.now) {
-    this.cooldownMs = Math.max(1000, options.cooldownMs ?? DEFAULT_COOLDOWN_MS)
-    this.maxCooldownMs = Math.max(this.cooldownMs, options.maxCooldownMs ?? MAX_COOLDOWN_MS)
+    const base = options.cooldownMs
+    this.cooldownMs = typeof base === 'number' && Number.isFinite(base) ? Math.max(1000, base) : DEFAULT_COOLDOWN_MS
+    const cap = options.maxCooldownMs
+    this.maxCooldownMs = Math.max(this.cooldownMs, typeof cap === 'number' && Number.isFinite(cap) ? cap : MAX_COOLDOWN_MS)
     this.now = now
+    this.random = options.random ?? Math.random
     this.replace(entries)
   }
 
@@ -191,25 +197,25 @@ export class ProxyPool {
     return { ok: true }
   }
 
-  /**
-   * The next egress to use: the earliest configured entry that is not cooling.
-   *
-   * Selection is order-based, not round-robin, so a healthy profile keeps one
-   * stable egress (better for per-IP quota accounting) and only moves on when
-   * that egress is cooling. When everything is cooling, the entry that recovers
-   * soonest is returned with `cooling: true` so the caller can still try.
-   */
-  acquire(): { index: number; cooling: boolean } | null {
-    if (!this.slots.length) return null
+  /** Earliest ready egress; excluded IDs prevent repeating an exit in one request. */
+  acquire(excluded: ReadonlySet<string> = new Set()): { index: number; cooling: false } | null {
     const now = this.now()
     for (let index = 0; index < this.slots.length; index++) {
-      if (this.slots[index].coolingUntil <= now) return { index, cooling: false }
+      const slot = this.slots[index]
+      if (!excluded.has(slot.entry.id) && slot.coolingUntil <= now) return { index, cooling: false }
     }
-    let best = 0
-    for (let i = 1; i < this.slots.length; i++) {
-      if (this.slots[i].coolingUntil < this.slots[best].coolingUntil) best = i
-    }
-    return { index: best, cooling: true }
+    return null
+  }
+
+  /** Match an in-flight response to its exit even after live edits reorder the pool. */
+  indexOf(id: string): number {
+    return this.slots.findIndex(slot => slot.entry.id === id)
+  }
+
+  /** A probe is subject to the same deadlines as an inference request. */
+  waitAt(index: number): number {
+    const until = this.slots[index]?.coolingUntil ?? 0
+    return Math.max(0, Math.ceil(until - this.now()))
   }
 
   /** Milliseconds until the next entry becomes usable again (0 when ready). */
@@ -222,7 +228,8 @@ export class ProxyPool {
 
   succeeded(index: number): void {
     const slot = this.slots[index]
-    if (!slot) return
+    // An earlier request or metadata probe cannot erase a concurrent throttle.
+    if (!slot || slot.coolingUntil > this.now()) return
     slot.failures = 0
     slot.coolingUntil = 0
     delete slot.lastCode
@@ -234,11 +241,14 @@ export class ProxyPool {
     if (!slot) return
     slot.failures += 1
     slot.lastCode = 'RATE_LIMIT'
-    const escalated = Math.min(this.maxCooldownMs, this.cooldownMs * 2 ** (slot.failures - 1))
+    const escalated = Math.min(this.maxCooldownMs, this.cooldownMs * 2 ** Math.min(52, slot.failures - 1))
+    const random = this.random()
+    const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0
     const wait = Number.isFinite(retryAfterMs) && (retryAfterMs as number) > 0
-      ? Math.min(this.maxCooldownMs, retryAfterMs as number)
-      : escalated
-    slot.coolingUntil = this.now() + wait
+      ? retryAfterMs as number
+      : Math.min(this.maxCooldownMs, Math.ceil(escalated * (1 + 0.2 * jitter)))
+    const now = this.now()
+    slot.coolingUntil = Math.max(slot.coolingUntil, Math.min(Number.MAX_SAFE_INTEGER, now + wait))
   }
 
   /** Transport failure: unreachable proxy, DNS, reset. Short cooldown. */
@@ -247,7 +257,7 @@ export class ProxyPool {
     if (!slot) return
     slot.failures += 1
     slot.lastCode = code
-    slot.coolingUntil = this.now() + Math.min(CONNECT_FAILURE_COOLDOWN_MS, this.cooldownMs)
+    slot.coolingUntil = Math.max(slot.coolingUntil, this.now() + Math.min(CONNECT_FAILURE_COOLDOWN_MS, this.cooldownMs))
   }
 
   health(): ProxyHealth[] {
@@ -322,19 +332,24 @@ export interface PooledFetchInput {
   signal?: AbortSignal
   dispatcherFor?: (url: string) => Promise<unknown> | unknown
   onAttempt?: (event: AttemptEvent) => void
-  /** Response statuses that retire the egress instead of failing the request. */
+  /** Response statuses eligible for throttle handling. */
   throttledStatuses?: readonly number[]
+  /** Provider-specific scope. A request-scoped throttle must not rotate proxies. */
+  throttleScope?: (response: Response, egress: string) => Promise<'request' | 'egress'>
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>
 }
 
-/** `retry-after-ms` wins over `retry-after`; an HTTP-date is not parsed. */
-export function retryAfterMs(response: Response): number | undefined {
-  const raw = response.headers.get('retry-after-ms') ?? response.headers.get('retry-after')
-  if (!raw) return undefined
-  const value = Number(raw)
-  if (!Number.isFinite(value) || value <= 0) return undefined
-  return response.headers.get('retry-after-ms') ? value : value * 1000
+/** No HTTP request was sent: the caller must honor the pool's remaining wait. */
+export class EgressCoolingError extends Error {
+  readonly code = 'EGRESS_COOLING'
+  readonly retryAfterMs: number
+  constructor(wait: number) {
+    const delay = Math.max(1, Math.ceil(wait))
+    super(`All configured egresses are cooling down; retry after ${Math.ceil(delay / 1000)} seconds.`)
+    this.name = 'EgressCoolingError'
+    this.retryAfterMs = delay
+  }
 }
 
 function transportCode(error: unknown): string {
@@ -347,10 +362,10 @@ function transportCode(error: unknown): string {
 }
 
 /**
- * Fetch through the pool, retiring a throttled or unreachable egress and trying
- * the next one. Reached only before a response body exists, so a retry can never
- * duplicate streamed content. Returns the last response (a 429 when every egress
- * throttled) so the caller keeps its existing error mapping.
+ * Bounded pre-response failover, not an independent retry loop. Each exit is
+ * attempted at most once. A positive server wait always ends this invocation;
+ * request-scoped throttles never rotate exits. Already cooling exits are never
+ * selected, including metadata/background calls. No timers are started here.
  */
 export async function fetchWithPool(input: PooledFetchInput): Promise<Response> {
   const { pool } = input
@@ -361,40 +376,67 @@ export async function fetchWithPool(input: PooledFetchInput): Promise<Response> 
   if (!pool || pool.size === 0) return doFetch(input.url, init as RequestInit)
   const throttled = input.throttledStatuses ?? [429]
   const attempts = pool.size
+  const attempted = new Set<string>()
+  const rejected: Response[] = []
   let lastResponse: Response | undefined
   let lastError: unknown
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const lease = pool.acquire()
-    if (!lease) break
-    const entry = pool.entryAt(lease.index)
-    if (!entry) break
-    const egress = redactProxyUrl(entry.url)
-    try {
+  let retained: Response | undefined
+  try {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       signal?.throwIfAborted()
-      const dispatcher = entry.url ? await (input.dispatcherFor ?? dispatcherFor)(entry.url) : undefined
-      // A configured proxy must never silently become a direct connection.
-      if (entry.url && !dispatcher) throw new Error('Proxy dispatcher unavailable')
-      signal?.throwIfAborted()
-      const response = await doFetch(input.url, { ...init, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
-      if (throttled.includes(response.status)) {
-        pool.rateLimited(lease.index, retryAfterMs(response))
-        lastResponse = response
-        input.onAttempt?.({ egress, status: response.status, rotated: attempt + 1 < attempts, code: 'RATE_LIMIT' })
+      const lease = pool.acquire(attempted)
+      if (!lease) {
+        if (lastResponse || lastError) break
+        throw new EgressCoolingError(pool.waitMs())
+      }
+      const entry = pool.entryAt(lease.index)
+      if (!entry) break
+      attempted.add(entry.id)
+      const egress = redactProxyUrl(entry.url)
+      let response: Response
+      try {
+        const dispatcher = entry.url ? await (input.dispatcherFor ?? dispatcherFor)(entry.url) : undefined
+        if (entry.url && !dispatcher) throw new Error('Proxy dispatcher unavailable')
+        signal?.throwIfAborted()
+        response = await doFetch(input.url, { ...init, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        const code = transportCode(error)
+        const current = pool.indexOf(entry.id)
+        if (current >= 0) pool.failed(current, code)
+        lastError = error
+        input.onAttempt?.({ egress, code, rotated: attempt + 1 < attempts && pool.acquire(attempted) !== null })
         continue
       }
-      pool.succeeded(lease.index)
-      input.onAttempt?.({ egress, status: response.status, rotated: false })
+      signal?.throwIfAborted()
+      if (throttled.includes(response.status)) {
+        rejected.push(response)
+        const scope = input.throttleScope ? await input.throttleScope(response, egress) : 'egress'
+        signal?.throwIfAborted()
+        const hint = retryAfterMs(response)
+        const current = pool.indexOf(entry.id)
+        if (scope === 'egress' && current >= 0) pool.rateLimited(current, hint)
+        lastResponse = response
+        const rotate = hint === undefined && scope === 'egress' && attempt + 1 < attempts && pool.acquire(attempted) !== null
+        input.onAttempt?.({ egress, status: response.status, rotated: rotate, code: 'RATE_LIMIT' })
+        if (rotate) continue
+      } else {
+        const current = pool.indexOf(entry.id)
+        if (current >= 0) pool.succeeded(current)
+        input.onAttempt?.({ egress, status: response.status, rotated: false })
+      }
+      retained = response
       return response
-    } catch (error) {
-      if (signal?.aborted) throw error
-      const code = transportCode(error)
-      pool.failed(lease.index, code)
-      lastError = error
-      input.onAttempt?.({ egress, code, rotated: attempt + 1 < attempts })
+    }
+    if (lastResponse) { retained = lastResponse; return lastResponse }
+    throw lastError ?? new Error('no egress available')
+  } finally {
+    // Keep a returned error response readable. Other rejected bodies must not
+    // tie up CONNECT/SOCKS connections after this bounded operation finishes.
+    for (const response of rejected) {
+      if (response !== retained && !response.bodyUsed) void response.body?.cancel().catch(() => {})
     }
   }
-  if (lastResponse) return lastResponse
-  throw lastError ?? new Error('no egress available')
 }
 
 

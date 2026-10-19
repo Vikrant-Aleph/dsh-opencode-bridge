@@ -16,7 +16,7 @@ No OpenCode account or API key is required by default.
 
 - **Automatic model refresh**: fetches the free-model list at startup and every 10 minutes by default, adds/removes models as the upstream catalog changes, and retains the last successful list if a refresh fails.
 - **Streaming and tool calls**: adapts DSH's native tools and rejects unverified conversions rather than treating Bash commands as PowerShell.
-- **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies and try another egress when one is rate-limited or a connection fails.
+- **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies, try another ready egress for explicit egress-quota errors or connection failures, and respect server-requested waits.
 
 ## Install and get started
 
@@ -26,7 +26,7 @@ No OpenCode account or API key is required by default.
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@0.5.1
+   dsh-opencode-bridge@0.5.2
    ```
 
 3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
@@ -37,13 +37,13 @@ No OpenCode account or API key is required by default.
 Install from npm into your DSH profile:
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
 ```
 
 Replace `desktop` with the profile you use. If `dsh` is not available in your terminal, use:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
 ```
 
 After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
@@ -55,9 +55,11 @@ Without proxy configuration, the plugin uses a direct connection from your machi
 
 1. Open **Settings → OpenCode Bridge → Egress rotation (optional)**.
 2. Add your existing proxy addresses one at a time, such as `http://127.0.0.1:7890` or `socks5h://127.0.0.1:1080`. You can keep `direct` (this machine) as an egress.
-3. Use **Test all** to check connectivity. Adding or removing an entry saves and applies the change automatically.
+3. Use **Test all** to check connectivity. Cooling entries are skipped to avoid early requests. Adding or removing an entry saves and applies the change automatically.
 
-The plugin prefers available entries in list order. HTTP 429 or a connection failure temporarily cools that entry and triggers an attempt through the next one. A reply that has already started streaming is not replayed through another egress.
+The plugin prefers ready entries in list order. Explicit egress-quota errors or connection failures temporarily cool an entry. A server-requested wait prevents immediate failover, and a fully cooling pool sends no early requests. Model-backend unavailability and unexplained 429s are not automatically treated as exhausted proxy quota.
+
+DSH centrally performs at most two automatic retries; excessive waits return an error for you to retry later. Replies that have started streaming are not automatically replayed.
 
 **HTTP(S), SOCKS4/4a and SOCKS5/5h** proxies are supported. Use only authorized proxies and respect upstream service limits.
 
@@ -98,7 +100,7 @@ Build output is not committed to Git. To install a local build in DSH:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.1.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.2.tgz
 ```
 
 </details>

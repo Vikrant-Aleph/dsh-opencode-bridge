@@ -25,7 +25,7 @@ export { PluginLogger, defaultLogDir } from './logger.js'
 export { LogService } from './log-service.js'
 export { auditToolBridge, resolveToolCall, ToolBridgeError } from './tool-bridge.js'
 export { createBridgeAuditTool } from './bridge-audit.js'
-export { ProxyPool, normalizeEntry, redactProxyUrl, fetchWithPool } from './proxy-pool.js'
+export { ProxyPool, EgressCoolingError, retryAfterMs, normalizeEntry, redactProxyUrl, fetchWithPool } from './proxy-pool.js'
 export { ProxyService } from './proxy-service.js'
 
 export interface Config {
@@ -63,7 +63,7 @@ export interface Config {
   logMaxFiles: number
   /** Egress pool: `direct`, HTTP(S) or SOCKS proxy URLs, tried in order. */
   proxies: string[]
-  /** Base cooldown in ms for an egress that answered 429. */
+  /** Local fallback cooldown for egress quota; server waits are never shortened. */
   proxyCooldownMs: number
   /** Pool store written by the Settings page; empty means the profile data dir. */
   proxyStorePath: string

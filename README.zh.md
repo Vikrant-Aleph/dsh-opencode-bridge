@@ -15,7 +15,7 @@
 
 - **模型列表自动刷新**：启动时获取免费模型列表，默认每 10 分钟重新获取一次，跟随上游增删模型；刷新失败时保留上次成功的列表。
 - **流式对话与工具调用**：适配 DSH 原生工具，拒绝无法验证的工具转换，避免将 Bash 命令直接当作 PowerShell 执行。
-- **可选代理轮换**：配置多个 HTTP(S) 或 SOCKS 代理，在出口被限流或连接失败时尝试下一个。
+- **可选代理轮换**：配置多个 HTTP(S) 或 SOCKS 代理，在明确的出口配额限制或连接失败时尝试其他可用出口，并遵守服务端等待提示。
 
 ## 安装与开始使用
 
@@ -25,7 +25,7 @@
 2. 在输入框中填写：
 
    ```text
-   dsh-opencode-bridge@0.5.1
+   dsh-opencode-bridge@0.5.2
    ```
 
 3. **安装源**建议选择 npm 官方源；如果使用镜像源，新版本可能需要等待同步。
@@ -36,13 +36,13 @@
 从 npm 安装到你的 DSH profile：
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
 ```
 
 `desktop` 是示例 profile 名称，请按实际使用的名称替换。如果终端找不到 `dsh`，可使用：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
 ```
 
 安装完成后，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话；如果未显示，请重启对应的 DSH profile。
@@ -54,9 +54,11 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.1
 
 1. 打开 **设置 → OpenCode Bridge → 出口代理轮换（可选）**。
 2. 逐个添加已有的代理地址，例如 `http://127.0.0.1:7890` 或 `socks5h://127.0.0.1:1080`。可保留 `direct`（本机直连）作为一个出口。
-3. 点击 **测试全部** 检查连通性；新增、删除操作会自动保存并应用。
+3. 点击 **测试全部** 检查连通性；冷却中的出口会跳过，避免提前发出请求。新增、删除操作会自动保存并应用。
 
-插件按列表顺序优先使用可用出口。遇到 HTTP 429 限流或连接失败时，会暂时冷却该出口并尝试下一个；已经开始输出的回复不会因切换出口而重新发送。
+插件按列表顺序优先使用可用出口。明确的出口配额错误或连接失败会使该出口暂时冷却；有服务端等待提示时不立即切换出口，全部出口冷却时也不会提前请求。模型后端暂不可用或原因不明的 429，不直接当作代理额度耗尽。
+
+自动重试由 DSH 统一执行，最多重试两次；过长的等待会交还错误，供你稍后重试。已经开始输出的回复不会自动重放。
 
 支持 **HTTP(S)、SOCKS4/4a 和 SOCKS5/5h** 代理。请仅使用获授权的代理并遵守上游服务限制。
 
@@ -97,7 +99,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.1.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.2.tgz
 ```
 
 </details>

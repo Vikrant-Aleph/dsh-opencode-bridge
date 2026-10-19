@@ -226,7 +226,10 @@ export class FreeModelCatalog {
 
   private async fetchRegistry(signal: AbortSignal): Promise<Record<string, unknown>> {
     const response = await fetch(MODELS_DEV_URL, { signal })
-    if (!response.ok) throw new Error(`models.dev HTTP ${response.status}`)
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {})
+      throw new Error(`models.dev HTTP ${response.status}`)
+    }
     const data: unknown = await response.json()
     if (!record(data) || !record(data.opencode) || !record(data.opencode.models) || Object.values(data.opencode.models).some(model => !record(model))) {
       throw new Error('models.dev returned an invalid model registry')
@@ -242,7 +245,10 @@ export class FreeModelCatalog {
       signal,
       ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
     })
-    if (!response.ok) throw new Error(`relay model listing HTTP ${response.status}`)
+    if (!response.ok) {
+      if (!response.bodyUsed) void response.body?.cancel().catch(() => {})
+      throw new Error(`relay model listing HTTP ${response.status}`)
+    }
     const data: unknown = await response.json()
     if (!record(data) || !Array.isArray(data.data) || data.data.some(model => !record(model) || typeof model.id !== 'string' || !model.id.length)) {
       throw new Error('relay returned an invalid model listing')

@@ -68,7 +68,7 @@ test('rotation skips a throttled egress and keeps single-proxy behaviour unchang
 
 test('cooldown expires and the egress re-enters rotation', () => {
   const t = clock()
-  const pool = new ProxyPool(['direct', '127.0.0.1:7890'], { cooldownMs: 60_000 }, t.now)
+  const pool = new ProxyPool(['direct', '127.0.0.1:7890'], { cooldownMs: 60_000, random: () => 0 }, t.now)
   pool.rateLimited(0)
   assert.equal(pool.health()[0].state, 'cooling')
   assert.equal(pool.acquire().index, 1)
@@ -86,14 +86,13 @@ test('retry-after is honoured, escalated and capped', () => {
   assert.ok(pool.health()[0].coolingUntil <= t.now() + 120_000)
 })
 
-test('all-cooling pool still makes one best-effort attempt', () => {
+test('all-cooling pool refuses a lease until a deadline expires', () => {
   const t = clock()
   const pool = new ProxyPool(['direct', '127.0.0.1:7890'], { cooldownMs: 60_000 }, t.now)
   pool.rateLimited(0)
   pool.rateLimited(1)
   assert.ok(pool.waitMs() > 0)
-  const lease = pool.acquire()
-  assert.equal(lease.cooling, true)
+  assert.equal(pool.acquire(), null)
 })
 
 test('transport failure retires that egress and surfaces the code', async () => {

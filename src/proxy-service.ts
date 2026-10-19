@@ -39,6 +39,7 @@ export interface ProbeResult {
   ms: number
   status?: number
   code?: string
+  retryAfterMs?: number
 }
 
 export interface ProxyServiceOptions {
@@ -114,39 +115,52 @@ export class ProxyService {
   }
 
   /**
-   * Probe every egress with the relay's own model listing (metadata only, no
-   * prompt). A throttled probe retires that egress exactly like a real call.
+   * Probe ready egresses with the relay listing (metadata only). Cooling entries
+   * are reported without network access; probes cannot bypass a server wait.
    */
   async test(): Promise<{ results: ProbeResult[]; reachable: number }> {
     const results: ProbeResult[] = []
-    for (let index = 0; index < this.pool.size; index++) {
-      const entry = this.pool.entryAt(index)
-      if (!entry) continue
+    for (const entry of this.pool.rawEntries()) {
+      const index = this.pool.indexOf(entry.id)
+      if (index < 0) continue
       const display = redactProxyUrl(entry.url)
+      const wait = this.pool.waitAt(index)
+      if (wait > 0) {
+        results.push({ id: entry.id, display, ok: false, ms: 0, code: 'EGRESS_COOLING', retryAfterMs: wait })
+        continue
+      }
       const started = Date.now()
       const timeout = AbortSignal.timeout(this.probeTimeoutMs)
+      let response: Response | undefined
       try {
         const dispatcher = entry.url ? await (this.options.dispatcherFor ?? dispatcherFor)(entry.url) : undefined
-        const response = await fetch(`${this.options.baseUrl.replace(/\/$/, '')}/models`, {
+        if (entry.url && !dispatcher) throw new Error('Proxy dispatcher unavailable')
+        timeout.throwIfAborted()
+        response = await fetch(`${this.options.baseUrl.replace(/\/$/, '')}/models`, {
           method: 'GET',
           headers: { 'user-agent': 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' },
           signal: timeout,
           ...(dispatcher ? { dispatcher } : {}),
         } as RequestInit)
         const ms = Date.now() - started
+        const current = this.pool.indexOf(entry.id)
         if (response.status === 429) {
-          this.pool.rateLimited(index, retryAfterMs(response))
-          results.push({ id: entry.id, display, ok: false, ms, status: 429, code: 'RATE_LIMIT' })
+          const hint = retryAfterMs(response)
+          if (current >= 0) this.pool.rateLimited(current, hint)
+          results.push({ id: entry.id, display, ok: false, ms, status: 429, code: 'RATE_LIMIT', ...(hint ? { retryAfterMs: hint } : {}) })
         } else if (!response.ok) {
           results.push({ id: entry.id, display, ok: false, ms, status: response.status, code: 'HTTP_ERROR' })
         } else {
-          this.pool.succeeded(index)
+          if (current >= 0) this.pool.succeeded(current)
           results.push({ id: entry.id, display, ok: true, ms, status: response.status })
         }
       } catch (error) {
         const code = transportCode(error)
-        this.pool.failed(index, code)
+        const current = this.pool.indexOf(entry.id)
+        if (current >= 0) this.pool.failed(current, code)
         results.push({ id: entry.id, display, ok: false, ms: Date.now() - started, code })
+      } finally {
+        if (response && !response.bodyUsed) void response.body?.cancel().catch(() => {})
       }
     }
     this.logger.info('proxy', 'probe finished', {

@@ -36,11 +36,11 @@ async function run(adapter) {
   return { chunks, text: chunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join(''), terminal: chunks.at(-1) }
 }
 
-test('a 429 on the local IP rotates to the next proxy and completes normally', async (t) => {
+test('an explicit egress quota without a server wait rotates to a ready proxy', async (t) => {
   const pool = new ProxyPool(['direct', 'http://proxy-a:8080', 'http://proxy-b:8080'], { cooldownMs: 60_000 })
   const { adapter, seen, logs } = makeAdapter(t, pool, (egress) =>
     egress === 'direct'
-      ? new Response('{"error":{"message":"FreeUsageLimitError"}}', { status: 429, headers: { 'retry-after': '120' } })
+      ? new Response('{"error":{"type":"FreeUsageLimitError","message":"Usage limit exceeded"}}', { status: 429 })
       : new Response(streamOf('ROTATED'), { status: 200 }))
   const result = await run(adapter)
   assert.equal(result.text, 'ROTATED')
@@ -48,7 +48,7 @@ test('a 429 on the local IP rotates to the next proxy and completes normally', a
   assert.deepEqual(seen, ['direct', 'http://proxy-a:8080'])
   const health = pool.health()
   assert.equal(health[0].state, 'cooling')
-  assert.ok(health[0].coolingUntil > Date.now() + 100_000, 'retry-after should drive the cooldown')
+  assert.ok(health[0].coolingUntil > Date.now() + 50_000, 'fallback cooldown must keep the throttled exit retired')
   assert.equal(health[1].state, 'ready')
   assert.ok(logs.some((entry) => String(entry[1]).includes('egress attempt')))
 })
@@ -81,7 +81,7 @@ test('rotation never duplicates streamed text when the first egress fails mid-st
 
 test('all egresses throttled surfaces the rate limit instead of hanging', async (t) => {
   const pool = new ProxyPool(['direct', 'http://proxy-a:8080'], { cooldownMs: 60_000 })
-  const { adapter, seen } = makeAdapter(t, pool, () => new Response('{"error":{"message":"FreeUsageLimitError"}}', { status: 429 }))
+  const { adapter, seen } = makeAdapter(t, pool, () => new Response('{"error":{"type":"FreeUsageLimitError","message":"Usage limit exceeded"}}', { status: 429 }))
   const result = await run(adapter)
   assert.deepEqual(seen.length, 2)
   assert.equal(result.terminal.reason.kind, 'error')

@@ -135,7 +135,11 @@ patch global HTTP entry points.
 |---|---:|---|
 | `src/index.ts` | — | Cordis plugin entry: `name`, `inject`, Schemastery `Config`, `apply()`, registrations, disposer. |
 | `src/opencode-protocol.ts` | — | **All gate-sensitive constants.** ID minting, header recipe, verbatim fingerprint tools, tool cloaking/translation, message projection. |
-| [src/adapter.ts](src/adapter.ts) | — | `OpenCodeFreeAdapter`: model metadata, request/SSE handling, whole-batch tool validation before chunk release, errors. |
+| [src/adapter.ts](src/adapter.ts) | — | Model metadata, SSE/tool validation, bounded Host retry policy, per-model server waits and safe diagnostics. |
+| [src/http-errors.ts](src/http-errors.ts) | — | HTTP-status-preserving error conversion and validated diagnostic fields. |
+| [src/retry-after.ts](src/retry-after.ts) | — | Shared duration/HTTP-date parser, upward rounding and safe overflow. |
+| [tests/http-errors.test.mjs](tests/http-errors.test.mjs) | — | Header/body/error conversion, clock-skew and credential-filtering tests. |
+| [tests/retry-integration.test.mjs](tests/retry-integration.test.mjs) | — | Strict pool/model waits, no-replay, probe/concurrency/logging tests and a declared Host-policy simulator. |
 | [src/tool-bridge.ts](src/tool-bridge.ts) | — | Pure fail-closed mapping/schema subset; reject executable decoys; no I/O or execution. |
 | [src/bridge-audit.ts](src/bridge-audit.ts) | — | Current-agent scoped registry audit tool; metadata-only results, no network/execution. |
 | [src/proxy-pool.ts](src/proxy-pool.ts) | — | Ordered egress/cooldown, proxy store, pooled fetch and HTTP/SOCKS dispatcher cache. |
@@ -612,16 +616,23 @@ HTTP failures become `LlmError` with a stable `code` (`httpError()`):
 | HTTP 429 | `RATE_LIMIT` |
 | anything else | `PROVIDER_HTTP_ERROR` |
 
-Also extracted: the upstream's `error.message` (surfaced verbatim — it explains
-quota resets), `retry-after` / `retry-after-ms` (as `providerRetryAfterMs`),
-and `x-opencode-log-id` (as `requestId`, for upstream support tickets), **only
-when nonempty**. In 0.4.0 this fixes absent headers passing `requestId:null` to
-`LlmError`, which previously masked real 429/401 HTTP failures as `STREAM_FAILED`.
-Pool health/attempt `lastCode` may be `RATE_LIMIT`, an underlying transport code
-such as `ECONNREFUSED`, `TIMEOUT`, or fallback `TRANSPORT_ERROR`. These are egress
-state codes, not new outer LlmError types: exhausted transport errors still
-surface as `TIMEOUT` (TimeoutError) or `STREAM_FAILED`; HTTP 503 stays
-`PROVIDER_HTTP_ERROR` and does not trigger pool failover.
+[http-errors.ts](src/http-errors.ts) preserves the actual HTTP status: the text
+“Endpoint is unavailable” or a nested body code never turns a 429 into a 503.
+The HTTP error message is control-stripped and bounded to 1000 characters for
+UI failure context; it is **not copied into persistent diagnostic logs**.
+`UpstreamHttpError.diagnostics` contains only status, a fixed reason category,
+validated upstream type/request ID and a positive wait. Header IDs are optional,
+length/character checked and rejected when credential-shaped; null is never
+passed to LlmError. Type identifiers are similarly constrained. No raw bodies,
+headers, messages or tool arguments are diagnostic fields.
+
+`endpoint_unavailable` identifies exact known wording, not its underlying cause.
+Only explicit `FreeUsageLimitError` (without that outage wording) is eligible for
+inference egress failover; unknown 429, generic rate-limit and model/backend errors
+are request-scoped. HTTP 503 remains `PROVIDER_HTTP_ERROR` without proxy rotation.
+Local preflight refusals use `EGRESS_COOLING` or `REQUEST_COOLING` and a remaining
+wait, **without inventing an HTTP status for a request that was not sent**.
+Transport exhaustion remains TIMEOUT or STREAM_FAILED before output begins.
 
 Stream-level failures:
 
@@ -632,7 +643,8 @@ Stream-level failures:
 | Bridge check rejection | `TOOL_BRIDGE_REJECTED`; fixed reason only, never arguments |
 | Tool fragments without terminal `tool_calls` | `TOOL_BRIDGE_INCOMPLETE`; no tool-call chunks |
 | any other throw | code `STREAM_FAILED` |
-| mid-stream `{"error":…}` frame | `LlmError` with `PROVIDER_STREAM_ERROR` |
+| mid-stream `{"error":…}` frame | `LlmError` with `PROVIDER_STREAM_ERROR` before output |
+| non-policy failure after text/reasoning/tool output starts | `PARTIAL_STREAM_ERROR`; original code retained only in diagnostics; no automatic replay |
 
 Bridge reason codes are `UNKNOWN_TOOL`, `TRANSLATION_DISABLED`,
 `EXECUTABLE_DECOY`, `NO_CALLER_TARGET`, `UNSUPPORTED_TARGET_SCHEMA` and
@@ -644,6 +656,32 @@ Timeouts are enforced with
 `AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)])`, so
 caller cancellation and the request deadline both work, and the caller's signal
 is never ignored.
+
+### 6.8.1 One bounded retry owner
+
+The adapter returns `resolveRetryPolicy(...)` from the public DSH SDK:
+normal mode, at most **2 retries after the first call**, codes RATE_LIMIT,
+EGRESS_COOLING and REQUEST_COOLING, initial local backoff 2000 ms, ±20% jitter,
+and max accepted/scheduled delay 120000 ms. Execution requires the Host's standard
+retry plugin; if absent, failures return without automatic retries. No plugin-side
+retry timer/loop is added.
+The installed DSH retry plugin waits a valid provider hint exactly (without jitter);
+in normal mode, hints exceeding the accepted delay stop automatic retry rather
+than being shortened. Without a hint, local exponential backoff applies.
+
+A positive server hint is also remembered per model in adapter memory, so an
+immediate manual call cannot bypass it. Concurrent 200s do not clear the deadline.
+The map keeps at most 256 model keys; overflow conservatively adds a global floor
+instead of forgetting an active block. Oversized hints saturate safely; no huge
+value is ever handed to a Node timer by this plugin. State is process-local.
+
+DSH's generic retry executor does not itself check whether content has streamed.
+The adapter therefore uses PARTIAL_STREAM_ERROR after output (except the already
+non-retryable tool-policy/incomplete codes), retaining already emitted text and
+closing its block. Cancellation remains ABORTED. These codes are absent from this
+adapter's bounded policy. Manual resubmission and independently installed custom
+recovery plugins are outside that policy; no claim is made that upstream never
+computed a timed-out request.
 
 ### 6.9 Egress proxy pool (0.4.0)
 
@@ -672,30 +710,39 @@ removing its last entry restores direct; adding to a direct-only pool retains it
 
 | Event | State/action |
 |---|---|
-| HTTP 429 | Increment failures, set lastCode=RATE_LIMIT, cool entry, try another before streaming. |
-| Pre-stream fetch/CONNECT/DNS/reset failure | Increment failures, record transport code, cool briefly and try another. |
-| Other HTTP status (including 401/403/503) | Return immediately, no failover; pooled fetch clears cooldown/failure state on this transport response, not proof of inference success. |
-| Cooldown elapsed | Entry is selectable again; failure count resets only on a non-429 pooled response/successful probe. |
-| All entries cooling | Select earliest-to-recover for best effort, not immediate local hard failure. |
+| Explicit inference egress quota, no server wait | Cool that exit and try another ready, unattempted exit before streaming. |
+| Valid server wait | End the pooled operation without immediate failover; return the original status/hint to the bounded Host retry owner. |
+| Backend unavailable or unknown inference 429 | Request-scoped; do not mark the proxy exhausted or switch exits. |
+| Pre-stream fetch/CONNECT/DNS/reset failure | Short monotonic cooldown; try another ready, unattempted exit. |
+| Other HTTP status (including 401/403/503) | Return without failover; a concurrent response cannot clear an active deadline. |
+| Cooldown elapsed | Entry becomes selectable; a subsequent success may reset its failure state. |
+| All entries cooling | No lease/no HTTP; EgressCoolingError reports the remaining wait as EGRESS_COOLING. |
 
-A pooled request budgets at most the pool size in attempts, without sleeping
-until cooldown expiry. If attempts all throttle, the last 429 is returned; if
-only transport attempts fail, the final exception is surfaced. This is not a
-guarantee of fresh quota, distinct public IPs or eventual success.
+A pooled invocation budgets at most its initial pool size, attempting each stable
+ID once even across live reordering. Responses update state by ID, not a stale
+array index. There are no pool retry timers. Unreturned rejected response bodies
+are cancelled; a returned error response remains available to its caller.
 
-For 429, positive numeric `retry-after-ms` takes precedence over numeric
-`retry-after` seconds. HTTP-date is not parsed. Otherwise cooldown is
-`base * 2^(failures-1)`, capped at `max(base,30min)` with the configured base
-clamped to at least 1s (default 60s). Transport cooldown is `min(15s,base)`.
-The probe and normal pooled requests share this header parser. Cooldowns/failure
-counts are process-memory state; saved URLs, not health history, survive restart.
+[retry-after.ts](src/retry-after.ts) is shared by HTTP diagnostics, pool and probes.
+A valid positive decimal `retry-after-ms` wins; invalid ms falls back to decimal
+seconds or the three HTTP-date formats in `retry-after`. Durations round upward.
+Zero/past/malformed values do not disable local fallback. For date hints a valid
+server Date avoids local clock skew. Positive overflow saturates safely rather
+than becoming a short/overflowed Node timer.
+
+Server waits are **never capped to the local 30-minute limit**. Only fallback
+cooldown uses capped `base * 2^(failures-1)` plus non-negative 0–20% jitter;
+default base is 60s, minimum 1s, local cap max(base,30min). Transport cooldown is
+min(15s,base). Existing deadlines only extend: concurrent successes/probes/failures
+cannot shorten them. Cooldown state is not persisted across restart.
 
 **Safe retry boundary.** Failover is limited to the fetch/response-status phase,
 before handing a response body to the SSE reader. A 429 already has an HTTP
 response; no successful streaming body has been exposed. Once a response is
 returned to the adapter, any body/stream failure is reported without pool
-replay, so already streamed text is not duplicated by this pool. This does not
-prove that a timed-out POST was never computed upstream, nor govern Host retries.
+replay, so already streamed text is not duplicated by this pool. The adapter also
+marks post-output faults non-retryable for its Host policy (6.8.1). This does not
+prove that a timed-out POST was never computed upstream.
 
 **Persistence and credentials.** A valid settings JSON store wins over config
 at startup, including an empty saved list (which resolves to direct). Missing/
@@ -721,9 +768,10 @@ tabs inside it separate “Diagnostic log” from “Egress rotation (optional)�
 as two unrelated entries. The proxy tab provides add/remove, Test all,
 refresh, redacted addresses, ready/cooling with remaining seconds and lastCode.
 Package-private RPC routes are `/api/opencode-bridge-proxies/{read,write,test}`.
-Test all sequentially GETs relay `/models` per entry (8s timeout by default),
-without prompts or completion requests; it can change health (429 cools it,
-transport failure cools briefly, successful probe clears failures). It is a
+Test all sequentially GETs relay `/models` only for ready entries (8s timeout by
+default), without prompts/completions. Cooling entries are reported as EGRESS_COOLING
+with their wait and no request. Responses update health by stable ID; concurrent
+success cannot clear an unexpired throttle. Unused probe bodies are cancelled. It is a
 reachability/status check, not model/tool/remaining-quota validation; network
 traffic is still subject to provider rules. UI rendering and real RPC require
 separate verification; an unauthenticated 401 on arbitrary `/api` paths proves
@@ -868,7 +916,7 @@ keyless and config-free out of the box.
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
 | `modelRefreshIntervalMs` | number | `600000` | Startup prefetch and periodic model refresh. `0` disables background polling; positive values below 60000 use 60000. Integer range 0–2147483647. See section 7 for TTL, retry and UI notification behavior. |
 | `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S)/SOCKS/direct entries; saved store wins at startup. |
-| `proxyCooldownMs` | number | `60000` | Base 429 cooldown, clamped to at least 1s; exponential escalation. |
+| `proxyCooldownMs` | number | `60000` | Local egress-quota fallback base, minimum 1s, capped exponential escalation with non-negative jitter; never truncates a server hint. |
 | `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-bridge/proxies.json`; plaintext URL/credential store. |
 | `toolFingerprint` | boolean | `true` | Add fingerprint declarations and cloak conflicts; false preserves caller tools and adds no decoys. |
 | `toolTranslation` | boolean | `true` | Enable conservatively validated read/search decoys; false rejects decoys but still restores caller aliases. Injected shell is always rejected. |
@@ -943,7 +991,7 @@ upgrade:
 |---|---|---|
 | `403 FREE_TIER_GATE` returns | The gate moved (new UA floor, changed id scheme, schema diff) | Update the constants in `src/opencode-protocol.ts` (below), then rebuild + repack. |
 | `401 AUTH` | The `Bearer public` sentinel changed | Check the client's signed-out path; update `apiKey`. |
-| `429 RATE_LIMIT` | Selected egress throttled; other quota dimensions are possible | Pool cools it and tries another within budget; if exhausted, wait/check Retry-After and configured authorized egresses. |
+| `429 RATE_LIMIT` | Upstream rejection; scope/cause requires diagnostics | Check model/status/upstreamType/reason/wait; honor the wait. Only explicit egress quota without a server wait can fail over. Endpoint unavailable is not proof of IP exhaustion. |
 | HTTP 503 / Endpoint is unavailable | Inference endpoint unavailable; root cause not isolated | No pool rotation on 503; do not equate it with IP quota or promise another proxy fixes it. |
 | Pool lastCode ECONNREFUSED/TIMEOUT/TRANSPORT_ERROR | Pre-stream connection/transport failure | Check proxy reachability; short cooldown permits another egress. Body failures do not replay. |
 | Model missing from the selector | Registry/live mismatch | Add the id to `extraModels`, or set `includeDeprecated: true`. |
@@ -986,6 +1034,23 @@ Logging/client tests are offline too. `tests/wire-dump.mjs` is an offline dump;
 offline pass is not proof of every model, real tool dispatch, or Desktop startup.
 Final release verification results should be recorded separately, without
 recasting the historical gate observations as a fresh full acceptance run.
+
+### 0.5.2 throttle/retry verification (2026-10-19)
+
+- Build/client syntax and **211/211 tests passed, none skipped**. Added 12 HTTP/parser
+  tests and 28 retry integration cases; updated prior failover/cooling fixtures for
+  the intentional stricter behavior rather than retaining best-effort cold requests.
+- Covered all-cold zero-network, exact deadlines, monotonic concurrent state,
+  millisecond/second/HTTP-date and oversized hints, ready-exit failover only without
+  a server wait, stable-ID edits, per-model manual-call protection and skipped probes.
+- Verified safe structured diagnostics with secret-bearing error bodies, URL userinfo
+  removal, cancellation, and text/reasoning output followed by timeout/transport failure
+  becoming non-retryable PARTIAL_STREAM_ERROR.
+- The Host retry runner in tests is explicitly a contract simulator, not an in-process
+  invocation of the installed Host. Its source/API was separately read to verify policy,
+  wait, budget, cancellation and post-output behavior.
+- No live GLM inference or retry stress test was performed. These changes bound client
+  recovery and improve diagnosis; they do not establish upstream stability or new quota.
 
 ### 0.5.1 periodic-catalog verification (2026-10-19)
 
@@ -1124,12 +1189,13 @@ An end-to-end acceptance run has two parts:
    per model.
 3. **Response-side reasoning.** Only `reasoning_content` is recognised. Other
    providers' spellings (`reasoning`, `thinking`) are not parsed.
-4. **Narrow egress failover, not general retry.** The pool retries only 429 or
-   pre-stream transport failure within its attempt budget; 401/403/503 and body
-   failures do not rotate. Other Host retry policy remains separate. Only
+4. **Narrow egress failover, not general retry.** Inference failover requires
+   explicit egress quota without a server wait, or pre-response transport failure;
+   401/403/503, unknown/model-scoped 429s and body failures do not rotate. Host
+   retry uses the bounded provider policy in 6.8.1. Only
    HTTP(S) CONNECT and SOCKS4/4a/5/5h are supported. Selection is ordered healthy reuse,
    not per-session binding; earlier recovered entries take priority. Credentials
-   are plaintext on disk; numeric Retry-After only, and quota may not be IP-only.
+   are plaintext on disk; Retry-After supports decimal durations and HTTP-date, and quota may not be IP-only.
 5. **Single-tier default.** Only zero-cost models are offered; there is no
    switch to opt into paid console models.
 6. **Session cache is process-local.** A restarted host mints new `ses_` ids for
@@ -1145,6 +1211,7 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-19 | 0.5.2 | **429 diagnostics and bounded recovery**: add strict Retry-After duration/date parsing and safe HTTP metadata; preserve actual status and omit raw error bodies from logs. Refuse cooling exits, never shorten server deadlines, prevent repeated exits/reorder races and skip cooling probes. Distinguish request/backend throttles from explicit egress quota, remember server waits per model, and let DSH alone execute a normal 2-retry policy. Mark post-output faults PARTIAL_STREAM_ERROR to prevent replay. Add helper/integration regressions, update bilingual docs and prepare 0.5.2 without publishing. | 3, 6.8–6.9, 11, 13–16, READMEs |
 | 2026-10-19 | 0.5.1 | **Description update**: order localized plugin descriptions and npm metadata as free-model access, dynamic model-list refresh, optional proxy-egress rotation, then the default-rejecting tool bridge and offline agent-scoped audit. Keep English locale and package description aligned. | 15.5 |
 | 2026-10-19 | 0.5.1 | **Periodic model refresh**: add `modelRefreshIntervalMs` (10 min default, 0 disables polling), startup prefetch, single-flight atomic two-source snapshots, deadlines/backoff and disposal. Preserve cached data on source failure and cache valid empty results. Require zero input/output cost for known models and prevent suffix fallback from re-adding paid/deprecated entries. On actual changes, atomically replace only owned routes with the same adapter to notify DSH; preserve prepared calls and document registration-order/policy effects and older-Host fallback. Add catalog/lifecycle regressions and synchronize package/README/current release examples to 0.5.1. | 3, 6.2, 7, 8, 11, 14, 16, READMEs |
 | 2026-10-19 | 0.5.0 | **Required bug logs**: make redacted error logs mandatory in the bug form, add bilingual Settings diagnostic-log refresh/copy and manual-redaction instructions, and update form tests. | 16.1 |
@@ -1190,9 +1257,19 @@ Timestamp (ISO) + level + scope + message + optional JSON data. Scopes:
 `plugin` (entry/registration), `adapter` (per model call), `catalog` (model
 catalog), `log-service` (log operations themselves).
 
-Call-site rule: **metadata only** — model name, message/tool counts, token
-usage, status codes, durations, session/request ids. Never message content,
-tool arguments, or full request bodies.
+Call-site rule: **metadata only** — validated model ID, message/tool counts,
+token usage, status, durations and request IDs, never message content, tool
+arguments, request bodies or arbitrary provider error bodies. Debug requests
+log only URL origin (no userinfo/query/path). HTTP diagnostics use bounded,
+credential-filtered type/ID fields and fixed reason summaries.
+
+Pre-output throttles/cooling log WARN `request deferred`, not a claim that the
+whole conversation failed. Fields include model, code, status when actually
+observed, upstreamType/reason, effective retryAfterMs, serverRetryAfterMs when
+present, local request and upstream requestId, redacted egress, outputStarted
+and retryEligible. The latter means eligible by code, **not** proof of remaining
+budget or a scheduled retry. Non-retryable/partial failures remain ERROR; partial
+logs retain originalCode, safe transport codes and tool bridge reasons where relevant.
 
 ### 15.2 Redaction (three backstops against leaks)
 
@@ -1306,8 +1383,8 @@ Commit these files to the default branch for them to appear on the new-issue pag
 
 [.github/workflows/release.yml](.github/workflows/release.yml) triggers only on pushed `v*` tags,
 then requires the tag to **equal `v` + `package.json.version` exactly** and verifies both READMEs'
-installation/tarball versions. Package `0.5.1` needs `v0.5.1`; prerelease tags such as
-`v0.5.2-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
+installation/tarball versions. Package `0.5.2` needs `v0.5.2`; prerelease tags such as
+`v0.5.3-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
 never rewrites versions or publishes to npm.
 
 It uses Node 24, pnpm 11.28.5 and SHA-pinned Actions. Current pnpm project configuration
@@ -1337,17 +1414,17 @@ Protect release tags and do not force-move tags that have already shipped.
 ### 16.3 Maintainer steps
 
 Choose an **unused** version and synchronize the package and both READMEs, then commit all code,
-workflow/templates, tests and lockfile. For current `0.5.1` (if already tagged, bump to a fresh version
+workflow/templates, tests and lockfile. For current `0.5.2` (if already tagged, bump to a fresh version
 and substitute it below):
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.1
+node scripts/release-check.mjs --tag v0.5.2
 # After passing, commit and push main yourself, then tag that commit:
-git tag -a v0.5.1 -m "Release v0.5.1"
-git push origin v0.5.1
+git tag -a v0.5.2 -m "Release v0.5.2"
+git push origin v0.5.2
 ```
 
 Inspect **Actions → Tagged plugin release**, then download assets from **Releases**.
@@ -1370,7 +1447,9 @@ scripts/release-check.mjs version/archive resource checks
 scripts/release-checksum.mjs SHA256SUMS generation/verification
 src/index.ts              plugin entry (Config, apply, registrations, logging wiring)
 src/opencode-protocol.ts  gate constants, ids, headers, tools, messages
-src/adapter.ts            LlmAdapter; atomic bridge-level release of completed tool batches
+src/adapter.ts            LlmAdapter; tool batches, bounded retry and safe diagnostics
+src/http-errors.ts        HTTP status/type/reason and safe diagnostic conversion
+src/retry-after.ts        shared strict Retry-After duration/date parser
 src/tool-bridge.ts        conservative schema subset, read/search mapping, executable-decoy refusal
 src/bridge-audit.ts       offline current-agent scoped native-registry audit
 src/proxy-pool.ts         ordered egress/cooldown/store and HTTP/SOCKS dispatcher cache
@@ -1388,6 +1467,8 @@ tests/tool-bridge.test.mjs planning, collision, flags, schema/JSON and decoy ref
 tests/bridge-integration.test.mjs scoped audit and atomic mock-stream batch tests
 tests/bridge-cancellation.test.mjs preflight/buffered/yield cancellation regressions
 tests/proxy-pool.test.mjs  entry/health/ordered selection/store/cooldown tests
+tests/http-errors.test.mjs HTTP conversion, hints and safe diagnostics
+tests/retry-integration.test.mjs strict cooldown/no-replay and Host contract simulation
 tests/socks-config.test.mjs SOCKS URL/auth/store and cancellation boundaries
 tests/socks-network.test.mjs real loopback SOCKS/TLS/auth/failover/close tests
 tests/helpers/socks-server.mjs loopback-only test peers

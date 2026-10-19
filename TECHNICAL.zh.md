@@ -115,7 +115,11 @@ HTTP(S) CONNECT 或 SOCKS 代理发出（见6.9）。
 |---|---:|---|
 | `src/index.ts` | — | Cordis 插件入口：`name`、`inject`、Schemastery `Config`、`apply()`、注册、清理器。 |
 | `src/opencode-protocol.ts` | — | **全部闸门敏感常量。** ID 生成、请求头配方、逐字指纹工具、工具遮蔽/翻译、消息投影。 |
-| [src/adapter.ts](src/adapter.ts) | — | `OpenCodeFreeAdapter`：元数据、请求/SSE、工具整批校验后发块、错误分类。 |
+| [src/adapter.ts](src/adapter.ts) | — | 模型元数据、SSE/工具校验、有界宿主重试策略、按模型保留等待与安全诊断。 |
+| [src/http-errors.ts](src/http-errors.ts) | — | 保留 HTTP 状态的错误转换与合法诊断字段。 |
+| [src/retry-after.ts](src/retry-after.ts) | — | 共用时长/HTTP-date 解析、向上取整与安全溢出处理。 |
+| [tests/http-errors.test.mjs](tests/http-errors.test.mjs) | — | headers/body/错误转换、时钟偏差与凭据过滤回归。 |
+| [tests/retry-integration.test.mjs](tests/retry-integration.test.mjs) | — | 严格池/模型等待、防重放、探测/并发/日志与明确标注的宿主策略模拟器。 |
 | [src/tool-bridge.ts](src/tool-bridge.ts) | — | 纯函数保守映射/schema 子集；拒绝可执行诱饵，不做 I/O/执行。 |
 | [src/bridge-audit.ts](src/bridge-audit.ts) | — | 当前 agent 注册表作用域审计，最小元数据输出、不联网不执行。 |
 | [src/proxy-pool.ts](src/proxy-pool.ts) | — | 顺序出口/冷却、代理 store、pooled fetch 与 HTTP/SOCKS dispatcher 缓存。 |
@@ -545,14 +549,19 @@ HTTP 失败转成带稳定 `code` 的 `LlmError`（`httpError()`）：
 | HTTP 429 | `RATE_LIMIT` |
 | 其他 | `PROVIDER_HTTP_ERROR` |
 
-同时提取：上游的 `error.message`（原样透出——它会说明配额重置时间）、
-`retry-after` / `retry-after-ms`（作为 `providerRetryAfterMs`）、
-以及 `x-opencode-log-id`（仅非空时作为 `requestId`，便于向上游提工单）。
-0.4.0 修正缺头时向 `LlmError` 传 `requestId:null`，此前会将真实429/401 HTTP错误
-掩盖成 `STREAM_FAILED`。池 health/attempt 的 lastCode 可为 `RATE_LIMIT`、
-底层传输码（如 `ECONNREFUSED`）、`TIMEOUT` 或兜底 `TRANSPORT_ERROR`。
-这些是出口状态码，不是新增外层 LlmError 类型；传输耗尽仍映射 `TIMEOUT`
-（TimeoutError）或 `STREAM_FAILED`，HTTP503仍为 `PROVIDER_HTTP_ERROR` 且不触发池改道。
+[http-errors.ts](src/http-errors.ts) 保留真实 HTTP 状态；“Endpoint is unavailable”
+或响应体中的嵌套 code 不会把 429 改写为 503。
+HTTP 错误文字去控制字符、限制为1000字符，仅用于界面错误上下文，**不复制到持久诊断日志**。
+`UpstreamHttpError.diagnostics` 仅含状态、固定 reason 类别、合法上游类型/请求 ID 及正等待值；
+请求 ID 可缺省，须通过长度/字符校验并排除凭据形态，绝不传 null；类型标识也受约束。
+原始正文、headers、消息和工具参数都不作为诊断字段。
+
+`endpoint_unavailable` 只表示匹配到已知固定文案，不推断根因。
+推理请求仅明确的 `FreeUsageLimitError`（且无该不可用文案）可进入出口改道；
+未知429、普通请求限流、模型/后端不可用均按请求作用域处理。
+HTTP503仍为 `PROVIDER_HTTP_ERROR`，不换代理。
+本地预检拒绝使用 `EGRESS_COOLING` 或 `REQUEST_COOLING` 并携带剩余等待，
+**不为尚未发送的请求伪造 HTTP 状态**。输出前的传输耗尽仍为 TIMEOUT 或 STREAM_FAILED。
 
 流级失败：
 
@@ -563,7 +572,8 @@ HTTP 失败转成带稳定 `code` 的 `LlmError`（`httpError()`）：
 | 桥接检查拒绝 | `TOOL_BRIDGE_REJECTED`，仅固定原因，不含入参 |
 | 工具片段未以 `tool_calls` 完成 | `TOOL_BRIDGE_INCOMPLETE`，不发工具块 |
 | 其他抛出 | code `STREAM_FAILED` |
-| 流中 `{"error":…}` 帧 | `LlmError`，code `PROVIDER_STREAM_ERROR` |
+| 流中 `{"error":…}` 帧 | 输出前为 `LlmError`，code `PROVIDER_STREAM_ERROR` |
+| 已开始输出文本/推理/工具后的非策略失败 | `PARTIAL_STREAM_ERROR`，日志保留 originalCode，不自动重放 |
 
 桥接原因码为 `UNKNOWN_TOOL`、`TRANSLATION_DISABLED`、`EXECUTABLE_DECOY`、
 `NO_CALLER_TARGET`、`UNSUPPORTED_TARGET_SCHEMA`、`INVALID_ARGUMENTS`。
@@ -572,6 +582,24 @@ HTTP 失败转成带稳定 `code` 的 `LlmError`（`httpError()`）：
 
 超时通过 `AbortSignal.any([options.signal, AbortSignal.timeout(requestTimeoutMs)])`
 实现，因此调用方取消与请求截止时间都生效，且调用方的 signal 永不被忽略。
+
+### 6.8.1 单一且有界的重试执行者
+
+适配器通过 DSH SDK 的公开 `resolveRetryPolicy(...)` 返回 normal 策略：
+首次调用后**最多重试2次**，仅对 RATE_LIMIT、EGRESS_COOLING、REQUEST_COOLING 生效；
+无提示时本地指数退避初始2000毫秒、±20%抖动，最大接受/调度等待120000毫秒。
+自动重试依赖宿主标准重试插件，未启用时直接交回失败；本插件不会补一层自己的请求重试计时器或循环。
+安装版 DSH 会原样等待有效 provider 提示，不抖动；normal 模式对超过上限的提示停止自动重试，
+不是截短后提前发请求。没有提示才使用本地退避。
+
+适配器还按模型在内存中保留正服务端等待，立即手动再调用也不得提前发送；
+并发200不会清除该期限。Map最多256个模型键，溢出时保守添加全局等待下限，而非遗忘活动阻塞。
+超大提示安全饱和，本插件不把超32位的大数直接交给 Node 定时器；状态仅在当前进程内。
+
+DSH 通用重试执行器本身不检查是否已有输出，因此适配器在输出后失败时使用 PARTIAL_STREAM_ERROR
+（本来就不可重试的工具策略/未完整结束代码保留），保留已输出文字并结束对应文本块。
+取消仍为 ABORTED；这些代码不在本适配器的重试名单里。
+用户手动重新提交、其他自定义恢复插件不属于这项策略；也不保证超时请求从未被上游计算。
 
 ### 6.9 出口代理池（0.4.0）
 
@@ -594,24 +622,32 @@ HTTP(S)、SOCKS4/4a、SOCKS5/5h URL 或裸 `host:port` 规范化、去重并保�
 
 | 事件 | 状态/动作 |
 |---|---|
-| HTTP 429 | failures递增、lastCode=RATE_LIMIT、冷却当前出口，在流开始前尝试下一出口。 |
-| 流前 fetch/CONNECT/DNS/reset 失败 | failures递增、记传输码、短期冷却并尝试下一出口。 |
-| 其它 HTTP（含401/403/503） | 立即返回、不改道；pooled fetch 此时清零出口冷却/失败状态，仅代表有传输响应，不证明推理成功。 |
-| 冷却到期 | 可再次选择；失败数仅在非429池响应/探测成功时清零。 |
-| 全部冷却 | 取最早恢复者尽力尝试，不在本地立即硬失败。 |
+| 明确推理出口配额错误且没有等待提示 | 冷却该出口，流开始前尝试另一个就绪且本轮未尝试的出口。 |
+| 有效服务端等待 | 结束本次池操作，不立即换代理；原始状态/提示交给宿主有界重试策略。 |
+| 后端不可用或未知推理429 | 请求作用域，不将代理标为额度耗尽，也不改道。 |
+| 流前 fetch/CONNECT/DNS/reset 失败 | 单调延长短冷却，尝试其它就绪、未尝试出口。 |
+| 其它 HTTP（含401/403/503） | 不改道；并发响应不得清除尚未到期的冷却。 |
+| 冷却到期 | 可重新选择，后续成功才可重置失败状态。 |
+| 全部冷却 | 不给 lease、不发 HTTP；EgressCoolingError 以 EGRESS_COOLING 报告剩余等待。 |
 
-一次 pooled 请求最多以池大小为尝试预算，不等待冷却到期。全部限流时返回最后429，
-只有传输失败时透出最后异常；不保证新额度、不同公网 IP 或最终成功。
+一次池操作最多以初始池大小为预算；即使列表实时重排，每个稳定 ID 也只尝试一次。
+响应按 ID 更新状态，不使用已失效的数组下标。池不启动重试计时器；
+不再返回的拒绝响应体会取消，返回给调用者的错误响应仍可读取。
 
-429 优先用正数 `retry-after-ms`，其次数值 `retry-after` 秒，不解析 HTTP-date；
-否则冷却为 `base * 2^(failures-1)`，上限 `max(base,30分钟)`。
-base 默认60秒、最小钳到1秒；传输冷却为 `min(15秒,base)`。
-探测与普通池请求共用头解析。冷却/失败计数仅在进程内，重启持久化的是 URL 而非健康历史。
+[retry-after.ts](src/retry-after.ts) 供 HTTP 诊断、池和探测共用：有效正十进制 `retry-after-ms`
+优先，无效 ms 回退 `retry-after` 的十进制秒数或三种 HTTP-date 格式，毫秒向上取整。
+0、过去日期、畸形值不关闭本地退避；日期提示优先用有效服务端 Date 避免本机时钟偏差。
+正数溢出安全饱和，不变成短等待或直接溢出的 Node 定时器。
+
+**服务端等待不受本地30分钟上限截断**。只有无提示兜底采用
+`base * 2^(failures-1)` 加非负0–20%抖动，并以 max(base,30分钟)封顶；
+默认base60秒、最小1秒，传输冷却为 min(15秒,base)。已有期限只延长不缩短，
+并发成功、探测或连接失败都不能提前清除。冷却状态不跨重启持久化。
 
 **安全重试边界。** 只在 fetch/响应状态阶段、将响应体交给 SSE reader 前改道。
 429 已有 HTTP 响应，但尚未暴露成功的流响应体；一旦响应交回适配器，响应体/流中途失败
-直接报错，不由池重播，因而池不会重复已流出的文字。这不证明超时 POST 从未在上游计算，
-也不约束宿主其它重试层。
+直接报错，不由池重播；适配器也将输出后故障标为自身宿主策略不可重试（6.8.1）。
+这不证明超时 POST 从未在上游计算。
 
 **持久化与凭据。** 启动时有效设置 JSON store 优先于 config，包括已保存空列表（解析为直连）；
 文件缺失/不可读/非法才退 config；解析JSON前剥UTF-8 BOM以兼容PowerShell/编辑器。
@@ -629,8 +665,9 @@ health/日志/UI display 去掉 userinfo；稳定 id 形如 `proxy:host:port#<8�
 导航名 “OpenCode Bridge”）；页内用两个浏览器式标签页区分“诊断日志”与“出口代理轮换（可选）”，
 避免同一插件在设置里出现两处入口。代理标签可添加/删除、测试全部、刷新，显示脱敏地址、
 就绪/冷却剩余秒与 lastCode。包私有 RPC 为 `/api/opencode-bridge-proxies/{read,write,test}`。
-测试全部逐条 GET relay `/models`（默认每条8秒超时），不发提示词或补全请求；但会改变健康状态：
-429冷却、传输失败短冷却、成功清零。它是可达性/状态检查，不是模型/工具/剩余额度验证，
+测试全部仅对就绪条目逐条 GET relay `/models`（默认每条8秒超时），不发提示词或补全请求；
+冷却条目返回 EGRESS_COOLING 与等待时间，不发请求。响应按稳定 ID 更新，
+并发成功不能清除未到期的限流；不使用的探测响应体会取消。它是可达性/状态检查，不是模型/工具/剩余额度验证，
 仍有受上游规则约束的网络流量。UI 渲染和真实 RPC 需另验；任意 `/api` 路径都可返回
 未授权401，不能据此证明注册或 handler 成功。
 
@@ -749,7 +786,7 @@ provider.api             → api             → 按请求覆盖对话端点
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
 | `modelRefreshIntervalMs` | number | `600000` | 模型定时刷新间隔（毫秒）；`0` 关闭后台轮询，正数小于 60000 按 60000 执行。配置须为 0–2147483647 的整数；TTL、重试与界面通知见第 7 章。 |
 | `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S)/SOCKS/直连条目；启动时已保存 store 优先。 |
-| `proxyCooldownMs` | number | `60000` | 429 基础冷却，最小钳到1秒，指数递增。 |
+| `proxyCooldownMs` | number | `60000` | 出口配额本地兜底基础冷却，最小1秒，指数递增并有非负抖动；不截短服务端提示。 |
 | `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-bridge/proxies.json`，URL/凭据明文存储。 |
 | `toolFingerprint` | boolean | `true` | 注入指纹并遮蔽冲突；false 保留调用方工具且不加诱饵。 |
 | `toolTranslation` | boolean | `true` | 允许保守校验的只读/搜索诱饵；false 拒绝诱饵但仍恢复别名。注入 shell 始终拒绝。 |
@@ -813,7 +850,7 @@ peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
 |---|---|---|
 | 重新出现 `403 FREE_TIER_GATE` | 闸门变了（UA 下限、id 方案、schema 比对） | 更新 `src/opencode-protocol.ts` 中的常量（见下），再重新构建与打包。 |
 | `401 AUTH` | `Bearer public` 哨兵值改变 | 检查客户端的未登录路径；更新 `apiKey`。 |
-| `429 RATE_LIMIT` | 当前出口限流，也可能有其它配额维度 | 池冷却并在预算内尝试其它出口；耗尽则等待/检查Retry-After及获授权出口配置。 |
+| `429 RATE_LIMIT` | 上游拒绝，作用域/原因需结合诊断 | 检查模型/状态/upstreamType/reason/等待并遵守期限；仅明确出口配额且无等待提示可改道。Endpoint不可用不证明IP额度耗尽。 |
 | HTTP503 / Endpoint is unavailable | 推理端点不可用，根因未隔离 | 503不触发池轮换，不当作IP配额或承诺换代理能修好。 |
 | 池lastCode ECONNREFUSED/TIMEOUT/TRANSPORT_ERROR | 流前连接/传输故障 | 检查代理可达性，短冷却后可用其它出口；响应体故障不重播。 |
 | 模型未出现在选择器中 | 注册表/实时列表不匹配 | 把 id 加入 `extraModels`，或开启 `includeDeprecated: true`。 |
@@ -853,6 +890,19 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 `tests/wire-dump.mjs` 是离线转储，`tests/smoke.mjs` 才是消耗网络/额度的实时探针。
 存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
 发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
+
+### 0.5.2 限流/重试验证（2026-10-19）
+
+- 编译/客户端语法及 **211/211 测试通过，无跳过**，新增HTTP/解析12例、重试接线28例；
+  原改道/冷却夹具按有意收紧后的规则更新，不再保留冷却期间尽力发请求的旧预期。
+- 覆盖全部冷却零网络、期限边界、并发状态不缩短、毫秒/秒/HTTP-date/超大提示，
+  无服务端等待才尝试就绪出口、稳定ID实时编辑、模型手动重试保护与探测跳过冷却。
+- 验证含秘密的错误正文不进结构日志、URL userinfo去除、取消，以及文本/推理输出后
+  超时或传输失败变为不可重试的 PARTIAL_STREAM_ERROR。
+- 测试中的宿主重试执行器明确是契约模拟器，不是直接调用安装版Host；
+  另已读取其源码/API，核实策略、等待、预算、取消与部分输出行为。
+- 未调用真实GLM推理，也未做重试压力测试。本次约束客户端恢复和完善诊断，
+  不证明上游服务已经稳定或产生新的可用额度。
 
 ### 0.5.1 模型定时刷新验证（2026-10-19）
 
@@ -959,10 +1009,10 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
    应发出真实内容分片。注册表已发布 `inputModalities`，适配器可按模型决策。
 3. **响应侧推理内容。** 目前只识别 `reasoning_content`。
    其他提供方的写法（`reasoning`、`thinking`）未解析。
-4. **窄边界出口改道，不是通用重试。** 池只在预算内对429/流前传输失败重试，
-   401/403/503、响应体失败不轮换，宿主其它重试另计。支持 HTTP(S) CONNECT 与 SOCKS4/4a/5/5h；
+4. **窄边界出口改道，不是通用重试。** 推理仅对明确出口配额且无服务端等待、或流前传输失败改道，
+   401/403/503、未知/模型作用域429及响应体失败不换出口；宿主使用6.8.1的有界策略。支持 HTTP(S) CONNECT 与 SOCKS4/4a/5/5h；
    按顺序健康复用，不逐会话绑定；靠前出口恢复后重新优先。凭据磁盘明文，
-   Retry-After只解析数值，上游额度不一定仅由IP决定。
+   Retry-After支持十进制时长及HTTP-date，上游额度不一定仅由IP决定。
 5. **单一层级默认。** 只提供零成本模型；没有切换到付费 console 模型的开关。
 6. **会话缓存是进程内的。** 宿主重启后，既有对话会获得新的 `ses_` id，
    因此跨重启会失去上游 prompt 缓存亲和。
@@ -975,6 +1025,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-19 | 0.5.2 | **429诊断与有界恢复**：新增严格 Retry-After 时长/日期解析与安全 HTTP 元数据，保留实际状态、日志不抄原始错误正文。拒绝冷却出口，不缩短服务端期限，避免重复出口及重排错位，探测跳过冷却。区分请求/后端错误与明确出口配额，按模型记住服务端等待，仅由 DSH 执行 normal 最多2次重试；输出后故障用 PARTIAL_STREAM_ERROR 防重放。补充辅助模块/集成回归，同步双语文档并准备0.5.2，不执行发布。 | 3、6.8–6.9、11、13–16、README |
 | 2026-10-19 | 0.5.1 | **简介完善**：中英文插件简介与 npm 包描述按“免费模型接入、模型列表动态刷新、可选代理出口轮换、工具桥与离线 Agent 作用域审计”排序，工具桥/审计说明置于最后。 | 15.5 |
 | 2026-10-19 | 0.5.1 | **模型定时刷新**：新增 `modelRefreshIntervalMs`（默认10分钟，0关闭轮询），启动预取、两来源原子快照、请求合并、期限/退避及卸载清理；来源故障保留旧缓存，有效空列表也缓存。已知型号须输入/输出均零价，后缀规则不得重新加入付费/弃用项。内容变化时用同一适配器原子更新自有路由来通知 DSH，保留已准备请求，并说明注册顺序/策略重捕获副作用及旧宿主降级。新增目录/生命周期回归，同步包、README 和当前发布示例至0.5.1。 | 3、6.2、7、8、11、14、16、README |
 | 2026-10-19 | 0.5.0 | **Bug 日志必填**：问题反馈表单的脱敏错误日志改为必填，增加从设置页诊断日志刷新/复制及手动脱敏的双语提示；同步表单测试。 | 16.1 |
@@ -1019,8 +1070,15 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 `plugin`（入口/注册）、`adapter`（每次模型调用）、`catalog`（模型目录）、
 `log-service`（日志自身操作）。
 
-调用点约定：**只记元数据**——模型名、消息数、工具数、token 用量、状态码、
-耗时、会话/请求 id。绝不记录消息内容、工具参数、完整请求体。
+调用点约定：**只记元数据**——合法模型 ID、消息/工具数、token 用量、状态、耗时与请求 ID；
+不记消息内容、工具参数、请求体或任意上游错误正文。debug 请求只记 URL origin，
+不含 userinfo、查询或路径；HTTP 诊断使用有界且过滤凭据形态的类型/ID及固定 reason 摘要。
+
+输出前限流/冷却改记 WARN `request deferred`，不表示整段对话已经失败。
+字段含 model、code、真实观察到的 status、upstreamType/reason、实际 retryAfterMs、
+有提示时的 serverRetryAfterMs、本地 request/上游 requestId、脱敏 egress、
+outputStarted、retryEligible。后者仅表示代码符合重试类别，**不保证剩余预算或已调度重试**。
+不可重试/部分输出错误仍记 ERROR；部分输出保留 originalCode，并保留安全传输码/工具桥原因。
 
 ### 15.2 脱敏（防泄漏三道闸）
 
@@ -1113,7 +1171,7 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 
 [.github/workflows/release.yml](.github/workflows/release.yml) 仅由推送 `v*` tag 触发，
 随后要求 tag **严格等于 `v` + `package.json.version`**，并验证两份 README 安装命令和 tarball 版本。
-例如包版本 `0.5.1` 对应 `v0.5.1`；`v0.5.2-rc.1` 这类预发行 tag 对应同名预发行包版本。
+例如包版本 `0.5.2` 对应 `v0.5.2`；`v0.5.3-rc.1` 这类预发行 tag 对应同名预发行包版本。
 错误 tag 会失败，不会自动修改源码版本，也不会发布 npm。
 
 工作流使用 Node 24、pnpm 11.28.5；按固定 SHA 引用 Actions。
@@ -1138,16 +1196,16 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 ### 16.3 维护者操作
 
 先选**未使用**的版本号，同步包版本与两份 README；提交所有源码、工作流、模板、测试与锁文件。
-以当前 `0.5.1` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
+以当前 `0.5.2` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.1
+node scripts/release-check.mjs --tag v0.5.2
 # 通过后自行提交并推送 main，再创建并推送该提交的 tag：
-git tag -a v0.5.1 -m "Release v0.5.1"
-git push origin v0.5.1
+git tag -a v0.5.2 -m "Release v0.5.2"
+git push origin v0.5.2
 ```
 
 到 GitHub **Actions → Tagged plugin release** 看结果，再到 **Releases** 下载资产。
@@ -1169,7 +1227,9 @@ scripts/release-check.mjs 版本/归档资源检查
 scripts/release-checksum.mjs SHA256SUMS 生成与验证
 src/index.ts              插件入口（Config、apply、注册、日志装配）
 src/opencode-protocol.ts  闸门常量、id、请求头、工具、消息
-src/adapter.ts            LlmAdapter；完整工具批次的桥接层原子放行
+src/adapter.ts            LlmAdapter；工具批次、有界重试与安全诊断
+src/http-errors.ts        HTTP 状态/类型/reason 与安全诊断转换
+src/retry-after.ts        共用严格 Retry-After 时长/日期解析
 src/tool-bridge.ts        保守 schema 子集、只读/搜索映射、可执行诱饵拒绝
 src/bridge-audit.ts       离线当前 agent 原生注册表作用域审计
 src/proxy-pool.ts         顺序出口/冷却/store与HTTP/SOCKS dispatcher缓存
@@ -1187,6 +1247,8 @@ tests/tool-bridge.test.mjs 规划、碰撞、开关、schema/JSON 与诱饵拒�
 tests/bridge-integration.test.mjs 作用域审计与 mock 流原子整批测试
 tests/bridge-cancellation.test.mjs 请求前/缓存批次/发块时取消回归
 tests/proxy-pool.test.mjs  条目/health/顺序选择/store/冷却测试
+tests/http-errors.test.mjs HTTP 转换、等待提示与安全诊断
+tests/retry-integration.test.mjs 严格冷却/防重放与宿主契约模拟
 tests/socks-config.test.mjs SOCKS URL/凭据/存储与取消边界
 tests/socks-network.test.mjs 真实loopback SOCKS/TLS/认证/轮换/关闭测试
 tests/helpers/socks-server.mjs 仅loopback测试服务器

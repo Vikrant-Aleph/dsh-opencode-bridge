@@ -15,7 +15,7 @@ No OpenCode account or API key is required by default.
 ## Features
 
 - **Automatic model refresh**: fetches the free-model list at startup and every 10 minutes by default, adds/removes models as the upstream catalog changes, and retains the last successful list if a refresh fails.
-- **Streaming and tool calls**: adapts DSH's native tools and rejects unverified conversions rather than treating Bash commands as PowerShell.
+- **Streaming and tool calls**: preserves reasoning history across multi-step tool calls, adapts DSH's native tools, and rejects unverified conversions rather than treating Bash commands as PowerShell.
 - **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies, try another ready egress for explicit egress-quota errors or connection failures, and respect server-requested waits.
 
 ## Install and get started
@@ -26,7 +26,7 @@ No OpenCode account or API key is required by default.
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@0.5.2
+   dsh-opencode-bridge@0.5.3
    ```
 
 3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
@@ -37,13 +37,13 @@ No OpenCode account or API key is required by default.
 Install from npm into your DSH profile:
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.3
 ```
 
 Replace `desktop` with the profile you use. If `dsh` is not available in your terminal, use:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.3
 ```
 
 After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
@@ -75,6 +75,7 @@ DSH centrally performs at most two automatic retries; excessive waits return an 
 | Problem | What to try |
 |---|---|
 | No models after installation | Check the target profile, confirm the plugin is enabled, restart DSH and check network connectivity. |
+| Thinking mode fails after a tool result with missing reasoning_content | Update the plugin; 0.5.3 restores the required assistant-history field, including empty reasoning. |
 | HTTP 429 | Retry later. If proxies are configured, inspect their status in Settings. |
 | HTTP 403 or 503 | Check for plugin updates and upstream service issues, then retry later. These errors do not trigger proxy failover. Report persistent problems. |
 | Tool calls fail | Check the **Diagnostic log** tab, or ask the agent to run `opencode_bridge_audit` for tool compatibility. |
@@ -100,7 +101,7 @@ Build output is not committed to Git. To install a local build in DSH:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.2.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.3.tgz
 ```
 
 </details>

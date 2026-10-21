@@ -14,7 +14,7 @@
 ## 主要功能
 
 - **模型列表自动刷新**：启动时获取免费模型列表，默认每 10 分钟重新获取一次，跟随上游增删模型；刷新失败时保留上次成功的列表。
-- **流式对话与工具调用**：适配 DSH 原生工具，拒绝无法验证的工具转换，避免将 Bash 命令直接当作 PowerShell 执行。
+- **流式对话与工具调用**：保留多步工具调用中的思考历史，适配 DSH 原生工具，拒绝无法验证的工具转换，避免将 Bash 命令直接当作 PowerShell 执行。
 - **可选代理轮换**：配置多个 HTTP(S) 或 SOCKS 代理，在明确的出口配额限制或连接失败时尝试其他可用出口，并遵守服务端等待提示。
 
 ## 安装与开始使用
@@ -25,7 +25,7 @@
 2. 在输入框中填写：
 
    ```text
-   dsh-opencode-bridge@0.5.2
+   dsh-opencode-bridge@0.5.3
    ```
 
 3. **安装源**建议选择 npm 官方源；如果使用镜像源，新版本可能需要等待同步。
@@ -36,13 +36,13 @@
 从 npm 安装到你的 DSH profile：
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.3
 ```
 
 `desktop` 是示例 profile 名称，请按实际使用的名称替换。如果终端找不到 `dsh`，可使用：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.3
 ```
 
 安装完成后，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话；如果未显示，请重启对应的 DSH profile。
@@ -74,6 +74,7 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.2
 | 问题 | 建议 |
 |---|---|
 | 安装后没有看到模型 | 确认安装到了正在使用的 profile，插件已启用，然后重启 DSH 并检查网络连接。 |
+| 思考模式在工具返回后报 reasoning_content 缺失 | 更新插件；0.5.3修复了assistant历史回传，空思考也会带上必要字段。 |
 | 出现 HTTP 429 | 稍后重试；如已配置代理，可在设置中查看出口状态。 |
 | 出现 HTTP 403 或 503 | 检查插件更新与上游服务状态，稍后重试；这类错误不会触发代理轮换。仍有问题时请反馈。 |
 | 工具调用失败 | 在“诊断日志”标签查看错误，也可让 Agent 调用 `opencode_bridge_audit` 检查工具兼容性。 |
@@ -99,7 +100,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.2.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.3.tgz
 ```
 
 </details>

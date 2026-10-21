@@ -255,6 +255,8 @@ export function normalizeToolCall(call: WireCall, plan: ToolsPlan, options: { tr
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | null
+  /** Assistant reasoning replay; an explicit empty string is required on some thinking routes. */
+  reasoning_content?: string
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
   tool_call_id?: string
 }
@@ -286,9 +288,11 @@ export function buildChatMessages(options: GenerateOptions, plan: ToolsPlan): Ch
         break
       case 'assistant': {
         const texts: string[] = []
+        const reasoning: string[] = []
         const calls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = []
         for (const block of message.content) {
           if (block.type === 'text') texts.push(block.text)
+          else if (block.type === 'reasoning') reasoning.push(block.text)
           else if (block.type === 'tool-call') {
             calls.push({
               id: String(block.id),
@@ -300,6 +304,10 @@ export function buildChatMessages(options: GenerateOptions, plan: ToolsPlan): Ch
         out.push({
           role: 'assistant',
           content: texts.join('\n') || null,
+          // Replay only text actually present in the supplied history. Joining
+          // without a separator preserves streamed fragments and whitespace.
+          // Missing reasoning still needs an explicit field in thinking mode.
+          reasoning_content: reasoning.join(''),
           ...(calls.length ? { tool_calls: calls } : {}),
         })
         break

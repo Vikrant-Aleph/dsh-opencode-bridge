@@ -577,12 +577,34 @@ messages:
 | `role:'system'` | `{role:'system'}` (text only) |
 | `role:'developer'` | **dropped** — tool additions/removals are already projected into `options.tools`, and the wire request carries the complete declarations |
 | `role:'tool'` | `{role:'tool', tool_call_id, content}`; empty content becomes `'(no output)'` |
-| `role:'assistant'` | `{role:'assistant', content: text|null, tool_calls: [...]}`; tool names are re-cloaked through the alias map |
+| `role:'assistant'` | `{role:'assistant', content: text|null, reasoning_content: string, tool_calls: [...]}`; tool names are re-cloaked through the alias map |
 | user content | text joined; `image` → `[image omitted: the free-tier chat path is text-only]`; `file` → `[attached file]` |
 
 Because this route is text-only, images and files are represented by explicit
 placeholders rather than dropped silently — the model is told something was
 there, and the user can see why the content is missing.
+
+#### Assistant reasoning replay (0.5.3, Issue #2)
+
+Assistant history must not discard DSH `reasoning` blocks. Their `text` values
+are concatenated in original block order with `join('')`: no trimming, invented
+newlines, reordering or merging into ordinary `content`. Every assistant message
+explicitly includes `reasoning_content`, even when its value is `''`, including
+text-only, tool-only and older histories without reasoning. This covers thinking
+routes that validate field presence after a tool result even when the prior
+response emitted no reasoning text. Other roles do not acquire this field.
+
+Projection reads only supplied content blocks; it does not invent missing thoughts
+or copy opaque adapter-private replayState. Existing text joining, content:null,
+tool aliases, IDs and raw arguments remain unchanged. Reasoning belongs in the
+provider request history, not debug/error logs. This fixes request-side replay;
+it does not relax HTTP 400 retry policy or tool-bridge permissions.
+
+The dated live matrix accepted empty fields on nine currently tested OpenAI-compatible
+free models. Jev returned ModelProtocolUnsupported with and without the field,
+including plain text controls; it is an independent existing protocol issue, not
+resolved, removed or hidden in this patch. Future models, other protocols and all
+possible effort/settings combinations are not certified by that matrix.
 
 ### 6.6 Session affinity
 
@@ -1035,6 +1057,30 @@ offline pass is not proof of every model, real tool dispatch, or Desktop startup
 Final release verification results should be recorded separately, without
 recasting the historical gate observations as a fresh full acceptance run.
 
+### 0.5.3 reasoning replay verification (2026-10-21)
+
+- Build/client syntax and **240/240 offline tests passed, none skipped**. Added 23
+  reasoning-history cases covering exact whitespace/order, empty fields on every
+  assistant, non-assistant exclusion, immutable inputs, alias collisions, call/result
+  IDs, real adapter projection across two fake-fetch steps and all log levels.
+- Probe-reader fixtures reject HTTP200 error events/objects, multiline errors,
+  malformed/truncated SSE and unsuccessful termination. Live scripts are opt-in;
+  normal test runs do not send inference requests.
+- Before implementation, the current ten-model/default-plus-high matrix ran twice.
+  Nine models had successful empty-field samples; Jev failed both with/without
+  fields and with ordinary/tool histories as ModelProtocolUnsupported. Strict repeat
+  also saw one transient Nemotron default 500. This is not an all-routes certificate.
+  The user explicitly approved fixing #2 independently of Jev; catalog/routing is unchanged.
+- A two-POST `deepseek-v4.1-flash-free` high-effort probe used the actual compiled
+  adapter, observing but not rewriting its body: tool-calls, then stop with the fixed
+  ROUNDTRIP_OK fixture result. The second request contained the required assistant
+  reasoning_content. The first response had **zero reasoning characters**, so this
+  live sample validates the empty-field boundary, not nonempty-provider replay.
+  Nonempty replay is covered by synthetic SSE/offline roundtrips.
+- No real file tool was executed or private conversation sent. Generated reasoning
+  and tool arguments are not saved in probe reports. This API fixture test is not a
+  full browser/Host agent-loop acceptance run and does not guarantee upstream uptime.
+
 ### 0.5.2 throttle/retry verification (2026-10-19)
 
 - Build/client syntax and **211/211 tests passed, none skipped**. Added 12 HTTP/parser
@@ -1187,8 +1233,11 @@ An end-to-end acceptance run has two parts:
    multimodal chat, `buildChatMessages` should emit real content parts. The
    registry already publishes `inputModalities`, so the adapter can decide
    per model.
-3. **Response-side reasoning.** Only `reasoning_content` is recognised. Other
-   providers' spellings (`reasoning`, `thinking`) are not parsed.
+3. **Reasoning protocol scope.** Responses recognise `reasoning_content` and
+   0.5.3 replays supplied assistant reasoning through that field. Other provider
+   spellings (`reasoning`, `thinking`) and opaque signed/encrypted replay formats
+   are not generically supported. Empty-field compatibility is a dated sample,
+   not a guarantee for every future route; Jev's protocol issue remains separate.
 4. **Narrow egress failover, not general retry.** Inference failover requires
    explicit egress quota without a server wait, or pre-response transport failure;
    401/403/503, unknown/model-scoped 429s and body failures do not rotate. Host
@@ -1211,6 +1260,7 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-21 | 0.5.3 | **Issue #2 reasoning replay**: preserve assistant reasoning blocks in original text order, always send reasoning_content (empty string when absent), and retain text/tool alias/ID/arguments semantics. Add 23 offline history/two-step/log-privacy regressions, bounded opt-in compatibility and actual-adapter fixture probes, and strict probe-reader checks. Prepare package/README/release examples for 0.5.3. Jev protocol support and the existing retry/tool-permission policies are unchanged. | 3, 6.5, 11, 13–16, READMEs |
 | 2026-10-19 | 0.5.2 | **429 diagnostics and bounded recovery**: add strict Retry-After duration/date parsing and safe HTTP metadata; preserve actual status and omit raw error bodies from logs. Refuse cooling exits, never shorten server deadlines, prevent repeated exits/reorder races and skip cooling probes. Distinguish request/backend throttles from explicit egress quota, remember server waits per model, and let DSH alone execute a normal 2-retry policy. Mark post-output faults PARTIAL_STREAM_ERROR to prevent replay. Add helper/integration regressions, update bilingual docs and prepare 0.5.2 without publishing. | 3, 6.8–6.9, 11, 13–16, READMEs |
 | 2026-10-19 | 0.5.1 | **Description update**: order localized plugin descriptions and npm metadata as free-model access, dynamic model-list refresh, optional proxy-egress rotation, then the default-rejecting tool bridge and offline agent-scoped audit. Keep English locale and package description aligned. | 15.5 |
 | 2026-10-19 | 0.5.1 | **Periodic model refresh**: add `modelRefreshIntervalMs` (10 min default, 0 disables polling), startup prefetch, single-flight atomic two-source snapshots, deadlines/backoff and disposal. Preserve cached data on source failure and cache valid empty results. Require zero input/output cost for known models and prevent suffix fallback from re-adding paid/deprecated entries. On actual changes, atomically replace only owned routes with the same adapter to notify DSH; preserve prepared calls and document registration-order/policy effects and older-Host fallback. Add catalog/lifecycle regressions and synchronize package/README/current release examples to 0.5.1. | 3, 6.2, 7, 8, 11, 14, 16, READMEs |
@@ -1383,8 +1433,8 @@ Commit these files to the default branch for them to appear on the new-issue pag
 
 [.github/workflows/release.yml](.github/workflows/release.yml) triggers only on pushed `v*` tags,
 then requires the tag to **equal `v` + `package.json.version` exactly** and verifies both READMEs'
-installation/tarball versions. Package `0.5.2` needs `v0.5.2`; prerelease tags such as
-`v0.5.3-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
+installation/tarball versions. Package `0.5.3` needs `v0.5.3`; prerelease tags such as
+`v0.5.4-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
 never rewrites versions or publishes to npm.
 
 It uses Node 24, pnpm 11.28.5 and SHA-pinned Actions. Current pnpm project configuration
@@ -1414,17 +1464,17 @@ Protect release tags and do not force-move tags that have already shipped.
 ### 16.3 Maintainer steps
 
 Choose an **unused** version and synchronize the package and both READMEs, then commit all code,
-workflow/templates, tests and lockfile. For current `0.5.2` (if already tagged, bump to a fresh version
+workflow/templates, tests and lockfile. For current `0.5.3` (if already tagged, bump to a fresh version
 and substitute it below):
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.2
+node scripts/release-check.mjs --tag v0.5.3
 # After passing, commit and push main yourself, then tag that commit:
-git tag -a v0.5.2 -m "Release v0.5.2"
-git push origin v0.5.2
+git tag -a v0.5.3 -m "Release v0.5.3"
+git push origin v0.5.3
 ```
 
 Inspect **Actions → Tagged plugin release**, then download assets from **Releases**.
@@ -1469,6 +1519,11 @@ tests/bridge-cancellation.test.mjs preflight/buffered/yield cancellation regress
 tests/proxy-pool.test.mjs  entry/health/ordered selection/store/cooldown tests
 tests/http-errors.test.mjs HTTP conversion, hints and safe diagnostics
 tests/retry-integration.test.mjs strict cooldown/no-replay and Host contract simulation
+tests/reasoning-history.test.mjs reasoning projection/two-step/log privacy regressions
+tests/reasoning-probe-reader.test.mjs strict synthetic SSE verifier fixtures
+tests/reasoning-compat-live.mjs opt-in dated free-route empty-field matrix
+tests/reasoning-controls-live.mjs opt-in Jev with/without-field baseline controls
+tests/reasoning-roundtrip-live.mjs opt-in real adapter + canned fixture two-step probe
 tests/socks-config.test.mjs SOCKS URL/auth/store and cancellation boundaries
 tests/socks-network.test.mjs real loopback SOCKS/TLS/auth/failover/close tests
 tests/helpers/socks-server.mjs loopback-only test peers

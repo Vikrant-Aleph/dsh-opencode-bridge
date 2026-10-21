@@ -513,11 +513,29 @@ finish{reason}
 | `role:'system'` | `{role:'system'}`（仅文本） |
 | `role:'developer'` | **丢弃** —— 工具的增删已投影进 `options.tools`，线上请求携带完整声明 |
 | `role:'tool'` | `{role:'tool', tool_call_id, content}`；空内容变为 `'(no output)'` |
-| `role:'assistant'` | `{role:'assistant', content: 文本|null, tool_calls: [...]}`；工具名经别名表重新遮蔽 |
+| `role:'assistant'` | `{role:'assistant', content: 文本|null, reasoning_content: 字符串, tool_calls: [...]}`；工具名经别名表重新遮蔽 |
 | 用户内容 | 文本拼接；`image` → `[image omitted: the free-tier chat path is text-only]`；`file` → `[attached file]` |
 
 由于该通路是纯文本的，图片与文件以显式占位符表示而非静默丢弃
 ——模型知道那里曾有内容，用户也能看出内容缺失的原因。
+
+#### Assistant 思考历史回传（0.5.3，Issue #2）
+
+assistant 历史不再丢弃 DSH 的 `reasoning` 块；按原块顺序用 `join('')` 拼接 `text`，
+不 trim、不新增换行、不排序，也不混入普通 `content`。
+每条 assistant 消息都显式携带 `reasoning_content`，没有内容时为 `''`，
+包括纯正文、纯工具调用及旧的无思考历史；覆盖 thinking 路由在工具返回后检查字段存在性、
+即使前一轮没有输出思考文本也要求该字段的情况。其他角色不新增该字段。
+
+投影只读取传入内容块，不补造缺失思考，不复制适配器私有的 opaque replayState；
+原有正文拼接、content:null、工具别名、ID和原始参数保持不变。
+思考只按协议进入请求历史，不进入 debug/error 日志。
+这修复的是请求侧回传，不放宽 HTTP400 重试规则或工具桥权限。
+
+带日期的实测中，九个被测 OpenAI 兼容免费型号接受空字段；
+Jev 在有/无字段及普通文本对照下均为 ModelProtocolUnsupported，
+属于独立已有协议问题，本补丁不修复、移除或隐藏它。
+该矩阵不认证未来型号、其他协议或所有档位/设置组合。
 
 ### 6.6 会话亲和
 
@@ -891,6 +909,23 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
 发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
 
+### 0.5.3 思考回传验证（2026-10-21）
+
+- 编译/客户端语法及 **240/240 离线测试通过，无跳过**；新增23项思考历史回归，
+  覆盖原始空白/顺序、每条assistant空字段、非assistant不加字段、输入不变、别名碰撞、
+  调用/结果ID、两步fake-fetch中的实际适配器投影及全部日志级别。
+- 探针reader夹具拒绝HTTP200中的错误事件/对象、多行错误、畸形/截断SSE和非成功终止；
+  live脚本须显式启用，普通测试不发送推理请求。
+- 修改前，对当前10模型的默认及已声明high档位矩阵实测两轮：9个模型有空字段成功样本，
+  Jev有/无字段及普通/工具历史均为ModelProtocolUnsupported；严格复验还遇到一次Nemotron默认500。
+  这不是“所有路由通过”的认证。用户明确同意将#2修复与Jev独立处理，模型目录/路由保持不变。
+- 使用实际编译后的适配器，对deepseek-v4.1-flash-free high进行两次POST，只观察、不改写请求体：
+  首轮tool-calls，提供固定合成结果后第二轮stop且回答ROUNDTRIP_OK；第二轮assistant确有reasoning_content。
+  首轮实际返回**0个思考字符**，因此真实样本验证空字段边界，不是非空模型思考回放；
+  非空回传由合成SSE/离线两步测试覆盖。
+- 未执行真实文件工具、未发送私人会话；探针记录不保存生成的思考或工具参数。
+  该API合成夹具验证不等同浏览器/Host agent-loop完整验收，也不保证上游持续可用。
+
 ### 0.5.2 限流/重试验证（2026-10-19）
 
 - 编译/客户端语法及 **211/211 测试通过，无跳过**，新增HTTP/解析12例、重试接线28例；
@@ -1007,8 +1042,9 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 2. **纯文本内容通路。** 图片与文件是占位符。部分免费模型在注册表中声明
    `image` 输入；当 relay 提供多模态对话时，`buildChatMessages`
    应发出真实内容分片。注册表已发布 `inputModalities`，适配器可按模型决策。
-3. **响应侧推理内容。** 目前只识别 `reasoning_content`。
-   其他提供方的写法（`reasoning`、`thinking`）未解析。
+3. **思考协议范围。** 响应识别 `reasoning_content`，0.5.3也通过该字段回传传入的assistant思考。
+   其他提供方写法（`reasoning`、`thinking`）及 opaque 签名/加密回放格式没有通用支持；
+   空字段兼容性是带日期的样本，不保证未来所有路由。Jev协议问题独立保留。
 4. **窄边界出口改道，不是通用重试。** 推理仅对明确出口配额且无服务端等待、或流前传输失败改道，
    401/403/503、未知/模型作用域429及响应体失败不换出口；宿主使用6.8.1的有界策略。支持 HTTP(S) CONNECT 与 SOCKS4/4a/5/5h；
    按顺序健康复用，不逐会话绑定；靠前出口恢复后重新优先。凭据磁盘明文，
@@ -1025,6 +1061,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-21 | 0.5.3 | **Issue #2思考回传**：按原文本顺序保留assistant思考块，始终发送reasoning_content（缺少则空字符串），保持正文/工具别名/ID/参数语义。新增23项离线历史/两步/日志隐私回归、有界按需兼容性及实际适配器合成夹具探针、严格探针reader检查。包/README/当前发布示例准备为0.5.3；Jev协议支持及已有重试/工具权限策略不变。 | 3、6.5、11、13–16、README |
 | 2026-10-19 | 0.5.2 | **429诊断与有界恢复**：新增严格 Retry-After 时长/日期解析与安全 HTTP 元数据，保留实际状态、日志不抄原始错误正文。拒绝冷却出口，不缩短服务端期限，避免重复出口及重排错位，探测跳过冷却。区分请求/后端错误与明确出口配额，按模型记住服务端等待，仅由 DSH 执行 normal 最多2次重试；输出后故障用 PARTIAL_STREAM_ERROR 防重放。补充辅助模块/集成回归，同步双语文档并准备0.5.2，不执行发布。 | 3、6.8–6.9、11、13–16、README |
 | 2026-10-19 | 0.5.1 | **简介完善**：中英文插件简介与 npm 包描述按“免费模型接入、模型列表动态刷新、可选代理出口轮换、工具桥与离线 Agent 作用域审计”排序，工具桥/审计说明置于最后。 | 15.5 |
 | 2026-10-19 | 0.5.1 | **模型定时刷新**：新增 `modelRefreshIntervalMs`（默认10分钟，0关闭轮询），启动预取、两来源原子快照、请求合并、期限/退避及卸载清理；来源故障保留旧缓存，有效空列表也缓存。已知型号须输入/输出均零价，后缀规则不得重新加入付费/弃用项。内容变化时用同一适配器原子更新自有路由来通知 DSH，保留已准备请求，并说明注册顺序/策略重捕获副作用及旧宿主降级。新增目录/生命周期回归，同步包、README 和当前发布示例至0.5.1。 | 3、6.2、7、8、11、14、16、README |
@@ -1171,7 +1208,7 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 
 [.github/workflows/release.yml](.github/workflows/release.yml) 仅由推送 `v*` tag 触发，
 随后要求 tag **严格等于 `v` + `package.json.version`**，并验证两份 README 安装命令和 tarball 版本。
-例如包版本 `0.5.2` 对应 `v0.5.2`；`v0.5.3-rc.1` 这类预发行 tag 对应同名预发行包版本。
+例如包版本 `0.5.3` 对应 `v0.5.3`；`v0.5.4-rc.1` 这类预发行 tag 对应同名预发行包版本。
 错误 tag 会失败，不会自动修改源码版本，也不会发布 npm。
 
 工作流使用 Node 24、pnpm 11.28.5；按固定 SHA 引用 Actions。
@@ -1196,16 +1233,16 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 ### 16.3 维护者操作
 
 先选**未使用**的版本号，同步包版本与两份 README；提交所有源码、工作流、模板、测试与锁文件。
-以当前 `0.5.2` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
+以当前 `0.5.3` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.2
+node scripts/release-check.mjs --tag v0.5.3
 # 通过后自行提交并推送 main，再创建并推送该提交的 tag：
-git tag -a v0.5.2 -m "Release v0.5.2"
-git push origin v0.5.2
+git tag -a v0.5.3 -m "Release v0.5.3"
+git push origin v0.5.3
 ```
 
 到 GitHub **Actions → Tagged plugin release** 看结果，再到 **Releases** 下载资产。
@@ -1249,6 +1286,11 @@ tests/bridge-cancellation.test.mjs 请求前/缓存批次/发块时取消回归
 tests/proxy-pool.test.mjs  条目/health/顺序选择/store/冷却测试
 tests/http-errors.test.mjs HTTP 转换、等待提示与安全诊断
 tests/retry-integration.test.mjs 严格冷却/防重放与宿主契约模拟
+tests/reasoning-history.test.mjs 思考投影/两步/日志隐私回归
+tests/reasoning-probe-reader.test.mjs 严格SSE验证器合成夹具
+tests/reasoning-compat-live.mjs 按需带日期的免费路由空字段矩阵
+tests/reasoning-controls-live.mjs 按需Jev有/无字段基线对照
+tests/reasoning-roundtrip-live.mjs 按需实际适配器+固定合成工具结果的两步探针
 tests/socks-config.test.mjs SOCKS URL/凭据/存储与取消边界
 tests/socks-network.test.mjs 真实loopback SOCKS/TLS/认证/轮换/关闭测试
 tests/helpers/socks-server.mjs 仅loopback测试服务器

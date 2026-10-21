@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "Use OpenCode free models in DSH, with automatic model-list refresh and optional egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing.",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

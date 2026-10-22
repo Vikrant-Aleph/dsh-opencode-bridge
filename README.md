@@ -15,10 +15,13 @@ No OpenCode account or API key is required by default.
 ## Features
 
 - **Automatic model refresh**: fetches the free-model list at startup and every 10 minutes by default, adds/removes models as the upstream catalog changes, and retains the last successful list if a refresh fails.
+- **Declared image input**: models that advertise image support receive uploaded/pasted images through DSH's official attachment interface. Tool-output images are forwarded with their result association; text-only models keep a clear fallback.
 - **Streaming and tool calls**: preserves reasoning history across multi-step tool calls, adapts DSH's native tools, and rejects unverified conversions rather than treating Bash commands as PowerShell.
 - **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies, try another ready egress for explicit egress-quota errors or connection failures, and respect server-requested waits.
 
 ## Install and get started
+
+Image input requires DSH's attachment request-version API; this version is built and verified against DSH SDK 0.2.1-rc.2.
 
 ### Install in DSH Desktop
 
@@ -26,7 +29,7 @@ No OpenCode account or API key is required by default.
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@0.5.3
+   dsh-opencode-bridge@0.5.4
    ```
 
 3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
@@ -37,13 +40,13 @@ No OpenCode account or API key is required by default.
 Install from npm into your DSH profile:
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.3
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.4
 ```
 
 Replace `desktop` with the profile you use. If `dsh` is not available in your terminal, use:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.3
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.4
 ```
 
 After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
@@ -67,7 +70,7 @@ DSH centrally performs at most two automatic retries; excessive waits return an 
 
 - **Unofficial project**: not affiliated with OpenCode or DeepSeek. Upstream protocols, models and free quotas may change; continued availability is not guaranteed.
 - **Third-party processing**: model requests are sent to OpenCode's service and, when configured, traverse your proxy. Do not send content you would not entrust to those third parties.
-- **Input limitations**: this path primarily supports text and tool calls; images and attachment contents are not fully forwarded to the model.
+- **Attachments**: image input follows each model's declared capability. DSH prepares request versions and applies image budgets/offload decisions; ordinary files remain text handles rather than native file inputs. Image bytes and data URLs are not written to diagnostic logs.
 - **Credentials and logs**: proxy passwords are stored in plaintext locally. SOCKS username/password authentication is not encrypted by SOCKS itself; use trusted proxies and networks. Do not publish the configuration file; inspect logs and screenshots for sensitive information before sharing.
 
 ## Troubleshooting
@@ -101,7 +104,7 @@ Build output is not committed to Git. To install a local build in DSH:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.3.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.4.tgz
 ```
 
 </details>

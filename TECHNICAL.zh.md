@@ -505,7 +505,9 @@ finish{reason}
 
 ### 6.5 消息投影
 
-`buildChatMessages(options, plan)` 把 DSH 的消息模型映射为 OpenAI 对话消息：
+`buildChatMessages(options, plan, images?)` 将 DSH 消息映射为 OpenAI 对话；
+保持同步、无I/O。适配器先异步通过 DSH 附件服务准备可选图片投影。
+直接调用者不传第三参时仍保留原有纯文本投影。
 
 | DSH | 线上 |
 |---|---|
@@ -514,10 +516,33 @@ finish{reason}
 | `role:'developer'` | **丢弃** —— 工具的增删已投影进 `options.tools`，线上请求携带完整声明 |
 | `role:'tool'` | `{role:'tool', tool_call_id, content}`；空内容变为 `'(no output)'` |
 | `role:'assistant'` | `{role:'assistant', content: 文本|null, reasoning_content: 字符串, tool_calls: [...]}`；工具名经别名表重新遮蔽 |
-| 用户内容 | 文本拼接；`image` → `[image omitted: the free-tier chat path is text-only]`；`file` → `[attached file]` |
+| 用户内容 | 视觉路由保留原顺序的文本/`image_url`分片与请求图片句柄；否则明确文本降级。普通文件仍为句柄/占位符。 |
 
-由于该通路是纯文本的，图片与文件以显式占位符表示而非静默丢弃
-——模型知道那里曾有内容，用户也能看出内容缺失的原因。
+#### 正式图片输入与工具结果（0.5.4，Issue #3）
+
+[image-input.ts](src/image-input.ts) 只使用正式附件接口
+`ctx.get('attachments').readImageRequest(ref,target,signal)`，不拼存储路径、不直接打开内容寻址对象。
+附件服务按需可选解析，缺少后台不影响纯文本请求；list/resolve均保留模型声明，
+只有 inputModalities 包含 image 才读取字节，未知/纯文本模型用明确文字降级。
+
+目标用正式 requestImageDimensions，默认4MP像素、单图1MiB字节目标，
+并由 imageRequestTarget 暴露给坐标映射。采用实际请求版本的MIME/尺寸/bytes，不沿用原PNG元数据。
+原内容块顺序保留，每张图配 requestImageHandleText。默认总预算为20MiB base64和20个保留图像出现次数；
+按附件ID串行去重读取，但同图多次在线上出现仍逐次计费。
+正式 requiredImageOffload 计算应卸载的最老前缀，超预算返回 IMAGE_OFFLOAD_REQUIRED 与 offloadImages，
+不私自丢图；预算通过后才生成base64。已offloaded图用 offloadedImageText，零读取。
+不支持的system/assistant图片角色明确拒绝，缺失或损坏请求图在POST前以固定错误结束。
+
+工具图片在独立实测后默认对声明视觉能力的路由开启，可用 toolResultImages:false 关闭。
+每条tool结果仍是保留原ID的文本；图片统一在**整组连续tool结果全部写完之后**，
+以一条带来源说明的user图片消息承载，不插入多调用结果中间。
+说明明确图片是工具输出数据、不是新用户指令；这是兼容投影，不声称原生tool.content图片数组可用。
+纯文本工具结果、别名、思考历史及原始参数保持不变，也不新增执行权限。
+
+图片预备共享调用方取消、请求截止和插件生命周期，取消后晚到的读取不能触发POST。
+已准备调用保存同一份能力/API/档位快照，不受目录刷新途中变化影响。
+图片、base64、文件名不记日志；不杜撰提供方视觉token公式，沿用SDK中性估算。
+开发/peer契约按0.2.1-rc.2验证，实际图片调用需要正式附件后台实现请求版本接口。
 
 #### Assistant 思考历史回传（0.5.3，Issue #2）
 
@@ -803,6 +828,11 @@ provider.api             → api             → 按请求覆盖对话端点
 | `extraModels` | string[] | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
 | `modelRefreshIntervalMs` | number | `600000` | 模型定时刷新间隔（毫秒）；`0` 关闭后台轮询，正数小于 60000 按 60000 执行。配置须为 0–2147483647 的整数；TTL、重试与界面通知见第 7 章。 |
+| `requestImagePixelBudget` | integer | `4194304` | 请求图片像素，1–100000000；保持比例、不放大。 |
+| `requestImageMaxBytes` | integer | `1048576` | 单图字节目标，1–33554432；总预算仍按实际字节检查。 |
+| `maxRequestImageBytes` | integer | `20971520` | 总base64图片预算，1–134217728。 |
+| `maxRequestImages` | integer | `20` | 保留图片出现次数，1–100；同图多次出现逐次计数。 |
+| `toolResultImages` | boolean | `true` | 对声明视觉能力的路由启用兼容工具图片投影。 |
 | `proxies` | string[] | `[]` | 默认仅直连；有序 HTTP(S)/SOCKS/直连条目；启动时已保存 store 优先。 |
 | `proxyCooldownMs` | number | `60000` | 出口配额本地兜底基础冷却，最小1秒，指数递增并有非负抖动；不截短服务端提示。 |
 | `proxyStorePath` | string | `''` | 空时使用 `$DSH_PROFILE_DIR`（未设置则 `~/.dsh`）加 `/data/dsh-opencode-bridge/proxies.json`，URL/凭据明文存储。 |
@@ -836,8 +866,10 @@ provider.api             → api             → 按请求覆盖对话端点
 
 | 包 | 版本 |
 |---|---|
-| `@deepseek-ai/dsh-llm` | `0.2.0-rc.2` |
-| `@deepseek-ai/cordis` | `4.0.4` |
+| `@deepseek-ai/dsh-llm` | `0.2.1-rc.2` |
+| `@deepseek-ai/dsh-attachment` | `0.2.1-rc.2` |
+| `@deepseek-ai/dsh-brand` | `0.2.1-rc.2` |
+| `@deepseek-ai/cordis` | `4.0.5` |
 | `@deepseek-ai/schemastery` | `3.18.4` |
 
 peer 依赖通过 `peerDependenciesMeta.optional = true` 声明，
@@ -908,6 +940,26 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 `tests/wire-dump.mjs` 是离线转储，`tests/smoke.mjs` 才是消耗网络/额度的实时探针。
 存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
 发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
+
+### 0.5.4 视觉验证（2026-10-22）
+
+- **298/298 离线测试通过，无跳过**：此前240项，加28项图片预备与30项适配器接线。
+  覆盖字节/MIME转换、几何目标、去重与出现次数预算、卸载、准备元数据快照、缺少服务、
+  取消/超时/卸载、工具组顺序、思考/调用ID及全部日志等级不含图片/base64/文件名。
+- 当日目录中声明图片能力的5个免费模型为DeepSeek v4.1 Flash、GLM5.3 Flash、MiMo v2.6 Flash、
+  MiniMax m3.1 Flash和Nemotron3.5 Super VL；五者均有用户图、工具图OCR成功样本。
+  随机8字符验证码只在像素中，不在提示词/文件名中；工具案例跨3条结果、2张图，均按顺序识别且保留所有ID。
+  无图对照返回NO_IMAGE。实测对已声明low使用low，否则使用提供方默认，并非穷举所有档位/MIME/型号组合。
+- 外部推理共13次POST：初始矩阵/对照及2次有界跟进。首轮DeepSeek用户流错误、Nemotron工具500端点不可用，
+  随后采用正式DSH请求版本合成夹具均成功；孤立失败不证明图片不兼容，也未完全隔离根因。
+  未换代理规避限制、未无限重试。
+- API实测使用实际适配器及合成附件reader夹具，不读取私人附件；另用临时Host bundle验证真实
+  ctx.attachments.saveImage/readImageRequest，保存3个合成引用及默认请求版本，并对已安装候选作loopback：
+  字节/hash/MIME完全一致、target及signal/receiver绑定正确、offloaded零读取。
+  缩小目标109x37，实际JPEG1048字节，2次本地POST通过；该Host检查未调用外部模型或文件工具。
+  临时bundle/服务器已移除/停止，合成存储对象交由正式存储管理，不猜路径删除。
+- 工具图片在整组tool结果后以user图片承载；这些结果不认证原生tool.content多模态数组。
+  输入仍按目录图片声明启用；样本不保证持续可用、未来型号，也不等同完整浏览器上传/agent-loop验收。
 
 ### 0.5.3 思考回传验证（2026-10-21）
 
@@ -1039,9 +1091,9 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
    合法工具；原生完整 schema/权限仍由宿主负责。工具需等整批响应，增加延迟。
    作用域审计不一定等于 PTC/辅助请求工具集，不查看实际调用历史，也不授予权限。
    read/search 路线名不证明任意同名实现无副作用。
-2. **纯文本内容通路。** 图片与文件是占位符。部分免费模型在注册表中声明
-   `image` 输入；当 relay 提供多模态对话时，`buildChatMessages`
-   应发出真实内容分片。注册表已发布 `inputModalities`，适配器可按模型决策。
+2. **视觉范围。** 声明的图片输入通过正式附件接口支持；工具图片使用关联user图片投影，
+   不是原生tool图片数组。普通文件仍为句柄，未声明/纯文本模型使用文字降级。
+   带日期的视觉矩阵不认证未来型号、任意端点、所有MIME/档位组合或持续可用性。
 3. **思考协议范围。** 响应识别 `reasoning_content`，0.5.3也通过该字段回传传入的assistant思考。
    其他提供方写法（`reasoning`、`thinking`）及 opaque 签名/加密回放格式没有通用支持；
    空字段兼容性是带日期的样本，不保证未来所有路由。Jev协议问题独立保留。
@@ -1061,6 +1113,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-22 | 0.5.4 | **Issue #3视觉输入**：保留图片模态声明，以正式附件接口准备请求图、匹配坐标目标、预算/卸载及取消；编码原顺序用户文字/图片，并在整组工具结果后承载单独验证的工具图，保持ID/思考/权限。新增图片单元/接线/随机码OCR检查，SDK开发契约升至0.2.1-rc.2；保留文本降级、固定隐私安全错误，准备0.5.4。 | 3、6.5、8、10–16、README |
 | 2026-10-21 | 0.5.3 | **Issue #2思考回传**：按原文本顺序保留assistant思考块，始终发送reasoning_content（缺少则空字符串），保持正文/工具别名/ID/参数语义。新增23项离线历史/两步/日志隐私回归、有界按需兼容性及实际适配器合成夹具探针、严格探针reader检查。包/README/当前发布示例准备为0.5.3；Jev协议支持及已有重试/工具权限策略不变。 | 3、6.5、11、13–16、README |
 | 2026-10-19 | 0.5.2 | **429诊断与有界恢复**：新增严格 Retry-After 时长/日期解析与安全 HTTP 元数据，保留实际状态、日志不抄原始错误正文。拒绝冷却出口，不缩短服务端期限，避免重复出口及重排错位，探测跳过冷却。区分请求/后端错误与明确出口配额，按模型记住服务端等待，仅由 DSH 执行 normal 最多2次重试；输出后故障用 PARTIAL_STREAM_ERROR 防重放。补充辅助模块/集成回归，同步双语文档并准备0.5.2，不执行发布。 | 3、6.8–6.9、11、13–16、README |
 | 2026-10-19 | 0.5.1 | **简介完善**：中英文插件简介与 npm 包描述按“免费模型接入、模型列表动态刷新、可选代理出口轮换、工具桥与离线 Agent 作用域审计”排序，工具桥/审计说明置于最后。 | 15.5 |
@@ -1208,7 +1261,7 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 
 [.github/workflows/release.yml](.github/workflows/release.yml) 仅由推送 `v*` tag 触发，
 随后要求 tag **严格等于 `v` + `package.json.version`**，并验证两份 README 安装命令和 tarball 版本。
-例如包版本 `0.5.3` 对应 `v0.5.3`；`v0.5.4-rc.1` 这类预发行 tag 对应同名预发行包版本。
+例如包版本 `0.5.4` 对应 `v0.5.4`；`v0.5.5-rc.1` 这类预发行 tag 对应同名预发行包版本。
 错误 tag 会失败，不会自动修改源码版本，也不会发布 npm。
 
 工作流使用 Node 24、pnpm 11.28.5；按固定 SHA 引用 Actions。
@@ -1233,16 +1286,16 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 ### 16.3 维护者操作
 
 先选**未使用**的版本号，同步包版本与两份 README；提交所有源码、工作流、模板、测试与锁文件。
-以当前 `0.5.3` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
+以当前 `0.5.4` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.3
+node scripts/release-check.mjs --tag v0.5.4
 # 通过后自行提交并推送 main，再创建并推送该提交的 tag：
-git tag -a v0.5.3 -m "Release v0.5.3"
-git push origin v0.5.3
+git tag -a v0.5.4 -m "Release v0.5.4"
+git push origin v0.5.4
 ```
 
 到 GitHub **Actions → Tagged plugin release** 看结果，再到 **Releases** 下载资产。
@@ -1263,7 +1316,8 @@ pnpm-workspace.yaml       pnpm 11 项目配置，autoInstallPeers=false（需与
 scripts/release-check.mjs 版本/归档资源检查
 scripts/release-checksum.mjs SHA256SUMS 生成与验证
 src/index.ts              插件入口（Config、apply、注册、日志装配）
-src/opencode-protocol.ts  闸门常量、id、请求头、工具、消息
+src/opencode-protocol.ts  闸门常量、id、请求头、工具、多模态消息投影
+src/image-input.ts        正式请求图片预备/几何目标/预算/卸载
 src/adapter.ts            LlmAdapter；工具批次、有界重试与安全诊断
 src/http-errors.ts        HTTP 状态/类型/reason 与安全诊断转换
 src/retry-after.ts        共用严格 Retry-After 时长/日期解析
@@ -1286,6 +1340,10 @@ tests/bridge-cancellation.test.mjs 请求前/缓存批次/发块时取消回归
 tests/proxy-pool.test.mjs  条目/health/顺序选择/store/冷却测试
 tests/http-errors.test.mjs HTTP 转换、等待提示与安全诊断
 tests/retry-integration.test.mjs 严格冷却/防重放与宿主契约模拟
+tests/image-input.test.mjs 正式reader/预算/卸载/取消单元测试
+tests/image-adapter.test.mjs 多模态线上形状/快照/工具组/日志隐私测试
+tests/make-vision-fixtures.py 合成随机码PNG夹具（Pillow）
+tests/vision-compat-live.mjs 按需有界用户图/工具图OCR验证
 tests/reasoning-history.test.mjs 思考投影/两步/日志隐私回归
 tests/reasoning-probe-reader.test.mjs 严格SSE验证器合成夹具
 tests/reasoning-compat-live.mjs 按需带日期的免费路由空字段矩阵

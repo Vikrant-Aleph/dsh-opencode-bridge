@@ -568,8 +568,10 @@ alternative implementations and the limits of differentiation claims.
 
 ### 6.5 Message projection
 
-`buildChatMessages(options, plan)` maps DSH's message model to OpenAI chat
-messages:
+`buildChatMessages(options, plan, images?)` maps DSH's messages to OpenAI chat.
+It remains synchronous and I/O-free. The adapter asynchronously prepares the
+optional image projection through DSH's attachment service first. Without the
+third argument, direct callers retain the legacy text-only projection.
 
 | DSH | Wire |
 |---|---|
@@ -578,11 +580,44 @@ messages:
 | `role:'developer'` | **dropped** — tool additions/removals are already projected into `options.tools`, and the wire request carries the complete declarations |
 | `role:'tool'` | `{role:'tool', tool_call_id, content}`; empty content becomes `'(no output)'` |
 | `role:'assistant'` | `{role:'assistant', content: text|null, reasoning_content: string, tool_calls: [...]}`; tool names are re-cloaked through the alias map |
-| user content | text joined; `image` → `[image omitted: the free-tier chat path is text-only]`; `file` → `[attached file]` |
+| user content | Vision routes retain ordered text/`image_url` parts with a request-image handle; otherwise text placeholders. Ordinary files remain handles/placeholders. |
 
-Because this route is text-only, images and files are represented by explicit
-placeholders rather than dropped silently — the model is told something was
-there, and the user can see why the content is missing.
+#### Official image input and tool results (0.5.4, Issue #3)
+
+[image-input.ts](src/image-input.ts) uses only the public attachment seam:
+`ctx.get('attachments').readImageRequest(ref, target, signal)`. It never guesses
+storage paths or opens content-addressed objects itself. The optional service is
+resolved when needed; absent services do not disable text calls. Model declarations
+are preserved in both list/resolve metadata: only `inputModalities` containing
+`image` enables byte reads; unknown/text-only routes send explicit text fallbacks.
+
+The target uses official `requestImageDimensions`, defaults to 4 MP and a 1 MiB
+per-image byte target, and is exposed by `imageRequestTarget` for coordinate mapping.
+The actual request version's MIME/dimensions/bytes are used, not the original PNG's.
+Original block order is preserved; `requestImageHandleText` accompanies each image.
+The default total bound is 20 MiB of base64 and 20 retained occurrences. Reads are
+serial/deduplicated by attachment ID, but repeated wire occurrences count repeatedly.
+Official `requiredImageOffload` computes the oldest-prefix count; over-budget calls
+return `IMAGE_OFFLOAD_REQUIRED` with `offloadImages` rather than silently dropping
+images. Base64 is generated only after budget approval. Explicitly offloaded images
+use `offloadedImageText`, with zero reads; unsupported system/assistant image roles
+are rejected. Missing/corrupt request images fail with fixed errors before POST.
+
+Tool image support is enabled by default for declared vision routes after separate
+live verification, and can be disabled with `toolResultImages:false`. Each `tool`
+result remains a text message with its original ID. Image parts are collected and
+inserted as one associated `user` image message **after the whole contiguous tool
+result group**, never between results of a multi-call batch. Captions identify tool
+output data, not new user instructions. This is a compatible projection, not a claim
+that native `tool.content` image arrays are accepted. Plain tool results, aliases,
+reasoning history and raw call arguments are retained. No tool authority is added.
+
+Preparation shares caller cancellation, the request deadline and plugin lifetime;
+late reads cannot start a POST after cancellation. Prepared calls retain one
+capability/API/effort snapshot across catalog refresh. Images, base64 and names are
+not logged. No provider visual-token formula is invented: SDK neutral estimates
+remain in use. SDK development/peer contracts target 0.2.1-rc.2; the formal attachment
+backend must implement request projection for actual image calls.
 
 #### Assistant reasoning replay (0.5.3, Issue #2)
 
@@ -937,6 +972,11 @@ keyless and config-free out of the box.
 | `extraModels` | string[] | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
 | `modelRefreshIntervalMs` | number | `600000` | Startup prefetch and periodic model refresh. `0` disables background polling; positive values below 60000 use 60000. Integer range 0–2147483647. See section 7 for TTL, retry and UI notification behavior. |
+| `requestImagePixelBudget` | integer | `4194304` | Request image pixels, 1–100000000; aspect ratio preserved, no upscale. |
+| `requestImageMaxBytes` | integer | `1048576` | Per-image byte target, 1–33554432; actual bytes still checked against total budget. |
+| `maxRequestImageBytes` | integer | `20971520` | Total base64 image budget, 1–134217728. |
+| `maxRequestImages` | integer | `20` | Retained image occurrences, 1–100; repeated refs count repeatedly. |
+| `toolResultImages` | boolean | `true` | Enable compatible tool-output image projection on declared vision routes. |
 | `proxies` | string[] | `[]` | Direct-only default; ordered HTTP(S)/SOCKS/direct entries; saved store wins at startup. |
 | `proxyCooldownMs` | number | `60000` | Local egress-quota fallback base, minimum 1s, capped exponential escalation with non-negative jitter; never truncates a server hint. |
 | `proxyStorePath` | string | `''` | Empty uses `$DSH_PROFILE_DIR` (or `~/.dsh` if unset) + `/data/dsh-opencode-bridge/proxies.json`; plaintext URL/credential store. |
@@ -974,8 +1014,10 @@ Verified against this framework generation:
 
 | Package | Version |
 |---|---|
-| `@deepseek-ai/dsh-llm` | `0.2.0-rc.2` |
-| `@deepseek-ai/cordis` | `4.0.4` |
+| `@deepseek-ai/dsh-llm` | `0.2.1-rc.2` |
+| `@deepseek-ai/dsh-attachment` | `0.2.1-rc.2` |
+| `@deepseek-ai/dsh-brand` | `0.2.1-rc.2` |
+| `@deepseek-ai/cordis` | `4.0.5` |
 | `@deepseek-ai/schemastery` | `3.18.4` |
 
 Peer dependencies are declared with `peerDependenciesMeta.optional = true` so
@@ -1056,6 +1098,39 @@ Logging/client tests are offline too. `tests/wire-dump.mjs` is an offline dump;
 offline pass is not proof of every model, real tool dispatch, or Desktop startup.
 Final release verification results should be recorded separately, without
 recasting the historical gate observations as a fresh full acceptance run.
+
+### 0.5.4 vision verification (2026-10-22)
+
+- **298/298 offline tests passed, none skipped**: the prior 240 plus 28 image
+  preparation and 30 adapter-wiring cases. They cover byte/MIME conversion,
+  geometry, dedup versus occurrence accounting, offload, immutable prepared
+  metadata, missing services, cancellation/deadlines/unload, tool-group ordering,
+  reasoning/call IDs and image/base64/name absence from every log level.
+- The dated catalog exposed five image-declared free models: DeepSeek v4.1 Flash,
+  GLM 5.3 Flash, MiMo v2.6 Flash, MiniMax m3.1 Flash and Nemotron 3.5 Super VL.
+  All five had successful user-image and tool-image OCR samples. Random eight-character
+  codes existed only in pixels, not in prompts/filenames. Tool cases returned two
+  distinct codes in order across three tool results, preserving every ID; a no-image
+  control returned NO_IMAGE. Test settings used low effort where declared, otherwise
+  the provider default, not every possible effort/MIME/model combination.
+- There were 13 external inference POSTs: the initial matrix/control plus two
+  bounded follow-ups. Initial DeepSeek user streaming failed and Nemotron tool
+  returned endpoint-unavailable 500; follow-ups using official DSH request-version
+  fixtures succeeded. Those isolated failures are not proof of image incompatibility
+  or a fully identified root cause. No proxy rotation or unlimited retries were used.
+- Live API checks used synthetic attachment-reader fixtures in the actual adapter,
+  not private user attachments. Separately, a temporary Host bundle used REAL
+  ctx.attachments.saveImage/readImageRequest, saved three synthetic refs and their
+  default request versions, and verified the installed candidate over loopback:
+  exact bytes/hash/MIME, matching target and signal/receiver binding, plus offloaded
+  zero-read behavior. Its reduced target was 109x37, JPEG 1048 bytes. Both loopback
+  POSTs passed; no external model calls or file tools ran in that Host check.
+  The temporary bundle and server were removed/stopped; synthetic store objects are
+  left to official storage management, never deleted by guessed filesystem paths.
+- Tool support uses user-image hoisting AFTER every contiguous tool-result group;
+  these results do not certify native multimodal tool.content arrays. Catalog image
+  declarations remain authoritative for enabling input; the sample does not guarantee
+  continued availability, future models or a full browser upload/agent-loop test.
 
 ### 0.5.3 reasoning replay verification (2026-10-21)
 
@@ -1228,11 +1303,11 @@ An end-to-end acceptance run has two parts:
    adding latency. The scoped audit is not necessarily the PTC/aux request set,
    does not inspect actual call history, and grants no permission. Read/search
    route names do not certify an arbitrary implementation is side-effect-free.
-2. **Text-only content path.** Images and files are placeholders. Some free
-   models advertise `image` input in the registry; when the relay serves
-   multimodal chat, `buildChatMessages` should emit real content parts. The
-   registry already publishes `inputModalities`, so the adapter can decide
-   per model.
+2. **Vision scope.** Declared image inputs are supported through the official
+   attachment seam; tool images use associated user-image projection, not native
+   tool image arrays. Ordinary files remain handles. Undeclared/text-only models
+   use text fallbacks. The dated vision matrix does not certify future models,
+   arbitrary endpoints, every MIME/effort combination or continued uptime.
 3. **Reasoning protocol scope.** Responses recognise `reasoning_content` and
    0.5.3 replays supplied assistant reasoning through that field. Other provider
    spellings (`reasoning`, `thinking`) and opaque signed/encrypted replay formats
@@ -1260,6 +1335,7 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-22 | 0.5.4 | **Issue #3 vision input**: preserve declared image modalities; prepare request versions using official attachments APIs, matching coordinate targets, budgets/offload and cancellation. Encode ordered user text/image parts and separately verified tool images after complete tool-result groups; keep IDs, reasoning and permissions intact. Add image unit/integration/nonce-OCR checks, update SDK development contracts to 0.2.1-rc.2, retain text fallback and fixed privacy-safe errors, and prepare 0.5.4. | 3, 6.5, 8, 10–16, READMEs |
 | 2026-10-21 | 0.5.3 | **Issue #2 reasoning replay**: preserve assistant reasoning blocks in original text order, always send reasoning_content (empty string when absent), and retain text/tool alias/ID/arguments semantics. Add 23 offline history/two-step/log-privacy regressions, bounded opt-in compatibility and actual-adapter fixture probes, and strict probe-reader checks. Prepare package/README/release examples for 0.5.3. Jev protocol support and the existing retry/tool-permission policies are unchanged. | 3, 6.5, 11, 13–16, READMEs |
 | 2026-10-19 | 0.5.2 | **429 diagnostics and bounded recovery**: add strict Retry-After duration/date parsing and safe HTTP metadata; preserve actual status and omit raw error bodies from logs. Refuse cooling exits, never shorten server deadlines, prevent repeated exits/reorder races and skip cooling probes. Distinguish request/backend throttles from explicit egress quota, remember server waits per model, and let DSH alone execute a normal 2-retry policy. Mark post-output faults PARTIAL_STREAM_ERROR to prevent replay. Add helper/integration regressions, update bilingual docs and prepare 0.5.2 without publishing. | 3, 6.8–6.9, 11, 13–16, READMEs |
 | 2026-10-19 | 0.5.1 | **Description update**: order localized plugin descriptions and npm metadata as free-model access, dynamic model-list refresh, optional proxy-egress rotation, then the default-rejecting tool bridge and offline agent-scoped audit. Keep English locale and package description aligned. | 15.5 |
@@ -1433,8 +1509,8 @@ Commit these files to the default branch for them to appear on the new-issue pag
 
 [.github/workflows/release.yml](.github/workflows/release.yml) triggers only on pushed `v*` tags,
 then requires the tag to **equal `v` + `package.json.version` exactly** and verifies both READMEs'
-installation/tarball versions. Package `0.5.3` needs `v0.5.3`; prerelease tags such as
-`v0.5.4-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
+installation/tarball versions. Package `0.5.4` needs `v0.5.4`; prerelease tags such as
+`v0.5.5-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
 never rewrites versions or publishes to npm.
 
 It uses Node 24, pnpm 11.28.5 and SHA-pinned Actions. Current pnpm project configuration
@@ -1464,17 +1540,17 @@ Protect release tags and do not force-move tags that have already shipped.
 ### 16.3 Maintainer steps
 
 Choose an **unused** version and synchronize the package and both READMEs, then commit all code,
-workflow/templates, tests and lockfile. For current `0.5.3` (if already tagged, bump to a fresh version
+workflow/templates, tests and lockfile. For current `0.5.4` (if already tagged, bump to a fresh version
 and substitute it below):
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.3
+node scripts/release-check.mjs --tag v0.5.4
 # After passing, commit and push main yourself, then tag that commit:
-git tag -a v0.5.3 -m "Release v0.5.3"
-git push origin v0.5.3
+git tag -a v0.5.4 -m "Release v0.5.4"
+git push origin v0.5.4
 ```
 
 Inspect **Actions → Tagged plugin release**, then download assets from **Releases**.
@@ -1496,7 +1572,8 @@ pnpm-workspace.yaml       pnpm 11 project setting, autoInstallPeers=false (must 
 scripts/release-check.mjs version/archive resource checks
 scripts/release-checksum.mjs SHA256SUMS generation/verification
 src/index.ts              plugin entry (Config, apply, registrations, logging wiring)
-src/opencode-protocol.ts  gate constants, ids, headers, tools, messages
+src/opencode-protocol.ts  gate constants, ids, headers, tools, multimodal message projection
+src/image-input.ts        official request-image preparation/targets/budgets/offload
 src/adapter.ts            LlmAdapter; tool batches, bounded retry and safe diagnostics
 src/http-errors.ts        HTTP status/type/reason and safe diagnostic conversion
 src/retry-after.ts        shared strict Retry-After duration/date parser
@@ -1519,6 +1596,10 @@ tests/bridge-cancellation.test.mjs preflight/buffered/yield cancellation regress
 tests/proxy-pool.test.mjs  entry/health/ordered selection/store/cooldown tests
 tests/http-errors.test.mjs HTTP conversion, hints and safe diagnostics
 tests/retry-integration.test.mjs strict cooldown/no-replay and Host contract simulation
+tests/image-input.test.mjs official reader/budget/offload/cancellation unit tests
+tests/image-adapter.test.mjs multimodal wire/snapshot/tool-group/log privacy tests
+tests/make-vision-fixtures.py synthetic random-code PNG fixtures (Pillow)
+tests/vision-compat-live.mjs opt-in bounded user/tool image OCR verification
 tests/reasoning-history.test.mjs reasoning projection/two-step/log privacy regressions
 tests/reasoning-probe-reader.test.mjs strict synthetic SSE verifier fixtures
 tests/reasoning-compat-live.mjs opt-in dated free-route empty-field matrix

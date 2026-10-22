@@ -19,6 +19,8 @@ import type {
   StreamChunk,
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
+import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
+import { prepareImageProjection, requestImageTarget, resolveImageInputPolicy, type ImageInputPolicy } from './image-input.js'
 import type { FreeModelCatalog, FreeModel } from './catalog.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { noopLogger, type LoggerLike } from './logger.js'
@@ -47,6 +49,14 @@ export interface AdapterOptions {
   pool?: ProxyPool
   /** Build the CONNECT dispatcher for one proxy URL (injectable for tests). */
   dispatcherFor?: (url: string) => Promise<unknown> | unknown
+  /** Official DSH attachment seam; no filesystem-path resolution in the adapter. */
+  attachments?: Pick<AttachmentStore, 'readImageRequest'>
+  getAttachments?: () => Pick<AttachmentStore, 'readImageRequest'> | undefined
+  imagePolicy?: Partial<ImageInputPolicy>
+  /** Standard tool-result image hoist for vision routes; false is an explicit opt-out. */
+  toolImages?: boolean
+  /** Owned by the plugin context, in addition to caller cancellation/deadline. */
+  lifetimeSignal?: AbortSignal
 }
 
 interface ChatChunk {
@@ -71,12 +81,14 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
   private readonly sessions = new Map<string, string>()
   private readonly requestWaits = new Map<string, number>()
   private overflowWaitUntil = 0
+  private readonly imagePolicy: Readonly<ImageInputPolicy>
 
   constructor(
     private readonly catalog: FreeModelCatalog,
     private readonly options: AdapterOptions,
   ) {
     super()
+    this.imagePolicy = resolveImageInputPolicy(options.imagePolicy)
   }
 
   /** Leveled logger; defaults to a no-op so standalone use needs no wiring. */
@@ -97,39 +109,39 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
     }, 'opencode-bridge retry policy')
   }
 
+  /** Same geometry/byte target as serialization, including screenshot coordinate mapping. */
+  override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget {
+    return requestImageTarget(image, this.imagePolicy)
+  }
+
   override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     return this.catalog.list().then((models) => models.map((model) => this.toModelInfo(provider, model)))
   }
 
-  override resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
-    return this.catalog.list(_signal).then((models) => {
-      const found = models.find((m) => m.id === model)
-      const base = found
-        ? this.toModelInfo(provider, found)
-        : { provider, id: model, name: model, inputModalities: ['text' as const] }
+  override resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
+    return this.catalog.list(signal).then(models => this.resolvedModelInfo(provider, model, models.find(item => item.id === model)))
+  }
+
+  override prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    return this.catalog.list(signal).then(models => {
+      const item = models.find(entry => entry.id === model)
+      const snapshot = item ? {
+        ...item,
+        ...(item.inputModalities ? { inputModalities: [...item.inputModalities] } : {}),
+        ...(item.efforts ? { efforts: item.efforts.map(effort => ({ ...effort })) } : {}),
+      } : null
       return {
-        ...base,
-        ...(found?.contextWindow ? { context: { contextWindow: found.contextWindow } } : {}),
-        ...(found?.maxOutputTokens ? { defaultMaxTokens: found.maxOutputTokens } : {}),
-        ...(found?.efforts?.length
-          ? {
-              reasoning: {
-                efforts: found.efforts.map((effort) => ({ id: ReasoningEffortId(effort.id), name: effort.name })),
-              },
-            }
-          : {}),
+        model: this.resolvedModelInfo(provider, model, snapshot ?? undefined),
+        stream: (options: GenerateOptions) => this.streamWithModel(options, snapshot),
       }
     })
   }
 
-  override prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
-    return this.resolveModel(provider, model, signal).then((resolved) => ({
-      model: resolved,
-      stream: (options: GenerateOptions) => this.stream(options),
-    }))
+  override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    return this.streamWithModel(options)
   }
 
-  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+  private async *streamWithModel(options: GenerateOptions, snapshot?: FreeModel | null): AsyncIterable<StreamChunk> {
     let blockIndex = 0
     let open: { index: number; kind: 'text' | 'reasoning'; text: string } | null = null
     let outputStarted = false
@@ -151,14 +163,23 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
 
     try {
       options.signal?.throwIfAborted()
+      this.options.lifetimeSignal?.throwIfAborted()
       const requestWait = this.remainingRequestWait(options.model)
       if (requestWait > 0) throw new LlmError(`This model request is cooling down; retry after ${Math.ceil(requestWait / 1000)} seconds.`, 'REQUEST_COOLING', { providerRetryAfterMs: requestWait })
-      const models = await this.catalog.list(options.signal)
-      const meta = models.find((m) => m.id === options.model)
+      const meta = snapshot === undefined ? (await this.catalog.list(options.signal)).find(model => model.id === options.model) : snapshot ?? undefined
       const sessionId = this.sessionIdFor(options)
       requestId = mintRequestId()
       const plan = planTools(options.purpose ? [] : options.tools ?? [], { fingerprint: this.options.toolFingerprint })
-      const messages = buildChatMessages(options, plan)
+      const signals = [AbortSignal.timeout(this.options.requestTimeoutMs), options.signal, this.options.lifetimeSignal].filter((value): value is AbortSignal => value !== undefined)
+      const signal = AbortSignal.any(signals)
+      signal.throwIfAborted()
+      const imageProjection = await prepareImageProjection(options.messages, {
+        supportsImages: meta?.inputModalities?.includes('image') === true,
+        toolImages: this.options.toolImages ?? true,
+        attachments: this.options.attachments ?? this.options.getAttachments?.(),
+        policy: this.imagePolicy, signal,
+      })
+      const messages = buildChatMessages(options, plan, imageProjection)
       if (plan.decoys.size) {
         const nativeCommands = plan.tools.filter(tool => ['pwsh', 'bash', 'shell'].includes(plan.aliasToOriginal.get(tool.function.name) ?? tool.function.name) && !plan.decoys.has(tool.function.name)).map(tool => tool.function.name)
         const aliases = [...plan.aliasToOriginal].map(([wire, original]) => `${wire} = caller ${original}`).join('; ')
@@ -199,8 +220,6 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         purpose: options.purpose ?? 'chat',
       })
 
-      const timeout = AbortSignal.timeout(this.options.requestTimeoutMs)
-      const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
       signal.throwIfAborted()
       const errors = new WeakMap<Response, UpstreamHttpError>()
       const responseExits = new WeakMap<Response, string>()
@@ -354,7 +373,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (options.signal?.aborted) {
+      if (options.signal?.aborted || this.options.lifetimeSignal?.aborted) {
         yield { type: 'finish', reason: { kind: 'aborted', failure: { message, code: 'ABORTED' } } }
         return
       }
@@ -429,13 +448,23 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
     return minted
   }
 
+  private resolvedModelInfo(provider: string, model: string, found?: FreeModel): LlmResolvedModelInfo {
+    const base = found ? this.toModelInfo(provider, found) : { provider, id: model, name: model, inputModalities: ['text' as const] }
+    return {
+      ...base,
+      ...(found?.contextWindow ? { context: { contextWindow: found.contextWindow } } : {}),
+      ...(found?.maxOutputTokens ? { defaultMaxTokens: found.maxOutputTokens } : {}),
+      ...(found?.efforts?.length ? { reasoning: { efforts: found.efforts.map(effort => ({ id: ReasoningEffortId(effort.id), name: effort.name })) } } : {}),
+    }
+  }
+
   private toModelInfo(provider: string, model: FreeModel): LlmModelInfo {
     return {
       provider,
       id: model.id,
       name: model.name,
       ...(model.description ? { description: model.description } : {}),
-      ...(model.inputModalities?.length ? { inputModalities: model.inputModalities } : {}),
+      ...(model.inputModalities?.length ? { inputModalities: [...model.inputModalities] } : {}),
     }
   }
 }

@@ -10,6 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import type { AdapterRegistrationHandle, LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { FreeModelCatalog, DEFAULT_MODEL_REFRESH_INTERVAL_MS, MAX_MODEL_REFRESH_INTERVAL_MS } from './catalog.js'
+import { DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
 import { OpenCodeFreeAdapter } from './adapter.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
@@ -20,6 +21,8 @@ import { ProxyService, registerProxyAccess } from './proxy-service.js'
 
 export { FreeModelCatalog } from './catalog.js'
 export { OpenCodeFreeAdapter } from './adapter.js'
+export { prepareImageProjection, requestImageTarget, resolveImageInputPolicy, DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
+export type { ImageInputPolicy } from './image-input.js'
 export * from './opencode-protocol.js'
 export { PluginLogger, defaultLogDir } from './logger.js'
 export { LogService } from './log-service.js'
@@ -49,6 +52,16 @@ export interface Config {
   requestTimeoutMs: number
   /** Periodic catalog refresh; 0 disables background refresh, positive values clamp to at least 60s. */
   modelRefreshIntervalMs: number
+  /** Maximum pixels in a prepared image; geometry matches DSH coordinate mapping. */
+  requestImagePixelBudget: number
+  /** Per-image encoded byte target for the official attachment request version. */
+  requestImageMaxBytes: number
+  /** Sum of retained image base64 bytes per request before requesting offload. */
+  maxRequestImageBytes: number
+  /** Maximum retained image occurrences per request, including repeated images. */
+  maxRequestImages: number
+  /** Forward tool output images via associated user image parts on vision routes. */
+  toolResultImages: boolean
   /** Send the OpenCode tool fingerprint the free-tier gate requires. */
   toolFingerprint: boolean
   /** Allow schema-checked read/search decoy mapping. Executable decoys are always rejected. */
@@ -80,6 +93,11 @@ export const Config: Schema<Config> = Schema.object({
   extraModels: Schema.array(Schema.string()).default([]),
   requestTimeoutMs: Schema.number().default(600_000),
   modelRefreshIntervalMs: Schema.number().min(0).max(MAX_MODEL_REFRESH_INTERVAL_MS).step(1).default(DEFAULT_MODEL_REFRESH_INTERVAL_MS),
+  requestImagePixelBudget: Schema.number().min(1).max(100_000_000).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxPixels),
+  requestImageMaxBytes: Schema.number().min(1).max(32 * 1024 * 1024).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxImageBytes),
+  maxRequestImageBytes: Schema.number().min(1).max(128 * 1024 * 1024).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxRequestImageBytes),
+  maxRequestImages: Schema.number().min(1).max(100).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxImages),
+  toolResultImages: Schema.boolean().default(true),
   toolFingerprint: Schema.boolean().default(true),
   toolTranslation: Schema.boolean().default(true),
   logLevel: Schema.string().default('warn'),
@@ -163,12 +181,21 @@ export function apply(ctx: Context, config: Config): void {
     logger,
   )
   registerBridgeAudit(ctx, { fingerprint: config.toolFingerprint, translateDecoys: config.toolTranslation })
+  const lifetime = new AbortController()
+  ctx.effect(() => () => lifetime.abort(new DOMException('OpenCode Bridge was unloaded', 'AbortError')))
   const adapter = new OpenCodeFreeAdapter(catalog, {
     providerRoute: config.providers[0] ?? 'opencode-bridge',
     recipe,
     requestTimeoutMs: config.requestTimeoutMs,
     toolFingerprint: config.toolFingerprint,
     toolTranslation: config.toolTranslation,
+    getAttachments: () => typeof ctx.get === 'function' ? ctx.get('attachments') : undefined,
+    toolImages: config.toolResultImages,
+    imagePolicy: {
+      maxPixels: config.requestImagePixelBudget, maxImageBytes: config.requestImageMaxBytes,
+      maxRequestImageBytes: config.maxRequestImageBytes, maxImages: config.maxRequestImages,
+    },
+    lifetimeSignal: lifetime.signal,
     logger,
     pool,
     dispatcherFor,

@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "Use OpenCode free models in DSH, with automatic model-list refresh and optional egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing.",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -73,7 +73,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-attachment": ">=0.2.1-rc.2",
     "@deepseek-ai/schemastery": "*"
   },
   "peerDependenciesMeta": {
@@ -83,13 +84,18 @@
     "@deepseek-ai/dsh-llm": {
       "optional": true
     },
+    "@deepseek-ai/dsh-attachment": {
+      "optional": true
+    },
     "@deepseek-ai/schemastery": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.4",
-    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3",

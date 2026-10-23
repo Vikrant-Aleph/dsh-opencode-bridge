@@ -5,7 +5,8 @@
 Engineering documentation for the `dsh-opencode-bridge` DSH plugin: how the
 OpenCode free-tier gate was reverse-engineered, how the wire protocol is
 reproduced, how the adapter maps onto the DSH LLM contract, and what to do when
-the upstream changes.
+the upstream changes. It also covers optional context trimming of completed-turn
+reasoning and its compatibility safeguards.
 
 Audience: maintainers of this plugin, and DSH plugin authors who want a worked
 example of a provider-wire `LlmAdapter`.
@@ -619,6 +620,41 @@ not logged. No provider visual-token formula is invented: SDK neutral estimates
 remain in use. SDK development/peer contracts target 0.2.1-rc.2; the formal attachment
 backend must implement request projection for actual image calls.
 
+#### Optional completed-turn reasoning projection (0.5.5)
+
+Full replay remains the default. **Settings → OpenCode Bridge → Context trimming** exposes
+`trimCompletedReasoning`, a `Schema.boolean().default(false).volatile()` preference.
+The UI and `opencode_bridge_context` tool share ContextPreferencesService. Writes
+use official `settings.update` with this instance's actual entry namespace, a
+single-field merge and revision check; no profile document is written by the plugin.
+The stable volatile reference is read once per new request, without restarting the
+plugin or changing a request already in progress. Save failures are explicit and
+never optimistically change the UI value. Persistence is owned by DSH.
+
+The host-only `opencodeBridgeCompletedReasoning` session projection folds canonical
+`turn/start`, `assistant/message`, `tool/result` and `turn/end` events. Only completed
+successful turns with a final assistant response, no unresolved tool calls and no
+unsafe/interrupted surface qualify. It never infers boundaries from a `user` role:
+context injections, goal continuations and wire-only tool-image hoists are not
+completion evidence. Seed boundaries abandon inherited unfinished work; failed,
+aborted, max-token, orphaned and otherwise uncertain history stays full.
+
+State contains bounded message IDs and SHA-256 fingerprints, not reasoning text:
+8192 completed records, 512 pending records and 1024 pending call IDs. Overflow
+conservatively retains history. The original supplied reasoning fingerprint must
+still match before request-only removal; reused/rewritten IDs cannot remove new
+content. Missing session/agent/projection evidence, identity-free inputs and
+auxiliary requests fall back to full replay. Local messages/events, text, tool IDs,
+raw arguments, images and opaque replay state are not edited. Serialization still
+emits `reasoning_content:''` for cleared reasoning and preserves the current chain.
+
+No token-meter or compaction hooks are overridden. The setting changes outgoing
+OpenCode requests only: DSH's raw-history estimate/compaction can remain conservative,
+and upstreams may already ignore prior reasoning. It does not guarantee larger
+usable context, billed-token savings or unchanged answer quality. Turning it off
+restores full replay on later requests. The setting applies across this plugin
+instance's routes/sessions, not only the currently displayed conversation.
+
 #### Assistant reasoning replay (0.5.3, Issue #2)
 
 Assistant history must not discard DSH `reasoning` blocks. Their `text` values
@@ -972,6 +1008,7 @@ keyless and config-free out of the box.
 | `extraModels` | string[] | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | number | `600000` | Per-request deadline. |
 | `modelRefreshIntervalMs` | number | `600000` | Startup prefetch and periodic model refresh. `0` disables background polling; positive values below 60000 use 60000. Integer range 0–2147483647. See section 7 for TTL, retry and UI notification behavior. |
+| `trimCompletedReasoning` | live boolean | `false` | Opt-in trimming of confirmed successful completed turns; Settings → OpenCode Bridge → Context trimming. Stored by DSH; new requests only. |
 | `requestImagePixelBudget` | integer | `4194304` | Request image pixels, 1–100000000; aspect ratio preserved, no upscale. |
 | `requestImageMaxBytes` | integer | `1048576` | Per-image byte target, 1–33554432; actual bytes still checked against total budget. |
 | `maxRequestImageBytes` | integer | `20971520` | Total base64 image budget, 1–134217728. |
@@ -1098,6 +1135,29 @@ Logging/client tests are offline too. `tests/wire-dump.mjs` is an offline dump;
 offline pass is not proof of every model, real tool dispatch, or Desktop startup.
 Final release verification results should be recorded separately, without
 recasting the historical gate observations as a fresh full acceptance run.
+
+### 0.5.5 context preference verification
+
+332/332 tests passed: the prior 298 plus 34 policy/service/UI/presentation cases. Coverage includes
+successful/failed/interrupted/inherited turns, unresolved multi-call chains, reused
+IDs and changed hashes, bounded state, real volatile defaults, failure-safe and
+serialized settings writes, exact RPC envelopes, agent/UI operation parity and the
+third tab's default-off accessible switch/help. Existing thinking/image/tool-safety,
+retry and lifecycle regressions remain enabled.
+
+The installed native tool completed read → write true → write false; current mode
+was restored to full. A separate read-only Host check used detached synthetic Session
+events and the REAL registered projection: only an ended old turn was eligible,
+current tool reasoning and local records stayed intact. That check made zero config
+writes or model calls and was removed afterwards. An earlier activation-time mutable
+check failed and was removed; it is not counted as successful evidence.
+
+Official tokenMeter.measure on an empty first-turn envelope estimated 0 tokens before
+versus 173 with the new 674-byte preference tool schema. This is neutral declaration
+overhead, not actual provider billing or a measured reasoning-saving guarantee.
+No private conversation was used for the checks. Browser interaction/screenshot
+verification was unavailable; syntax, component regressions and live registration
+are not a claim that a browser click was visually exercised.
 
 ### 0.5.4 vision verification (2026-10-22)
 
@@ -1335,6 +1395,7 @@ line here (see the chapter 0 policy).
 
 | Date | Version | Change | Chapters affected |
 |---|---|---|---|
+| 2026-10-23 | 0.5.5 | Default full reasoning replay with opt-in canonical completed-turn trimming, host-only fingerprint projection and conservative current-chain protection. Add Context trimming settings tab with bilingual switch/help, official volatile settings persistence and matching agent tool. Keep required reasoning fields and local history; no token-meter/compaction override or savings guarantee. | 6.5, 8, 11, release examples, READMEs |
 | 2026-10-22 | 0.5.4 | **Issue #3 vision input**: preserve declared image modalities; prepare request versions using official attachments APIs, matching coordinate targets, budgets/offload and cancellation. Encode ordered user text/image parts and separately verified tool images after complete tool-result groups; keep IDs, reasoning and permissions intact. Add image unit/integration/nonce-OCR checks, update SDK development contracts to 0.2.1-rc.2, retain text fallback and fixed privacy-safe errors, and prepare 0.5.4. | 3, 6.5, 8, 10–16, READMEs |
 | 2026-10-21 | 0.5.3 | **Issue #2 reasoning replay**: preserve assistant reasoning blocks in original text order, always send reasoning_content (empty string when absent), and retain text/tool alias/ID/arguments semantics. Add 23 offline history/two-step/log-privacy regressions, bounded opt-in compatibility and actual-adapter fixture probes, and strict probe-reader checks. Prepare package/README/release examples for 0.5.3. Jev protocol support and the existing retry/tool-permission policies are unchanged. | 3, 6.5, 11, 13–16, READMEs |
 | 2026-10-19 | 0.5.2 | **429 diagnostics and bounded recovery**: add strict Retry-After duration/date parsing and safe HTTP metadata; preserve actual status and omit raw error bodies from logs. Refuse cooling exits, never shorten server deadlines, prevent repeated exits/reorder races and skip cooling probes. Distinguish request/backend throttles from explicit egress quota, remember server waits per model, and let DSH alone execute a normal 2-retry policy. Mark post-output faults PARTIAL_STREAM_ERROR to prevent replay. Add helper/integration regressions, update bilingual docs and prepare 0.5.2 without publishing. | 3, 6.8–6.9, 11, 13–16, READMEs |
@@ -1509,8 +1570,8 @@ Commit these files to the default branch for them to appear on the new-issue pag
 
 [.github/workflows/release.yml](.github/workflows/release.yml) triggers only on pushed `v*` tags,
 then requires the tag to **equal `v` + `package.json.version` exactly** and verifies both READMEs'
-installation/tarball versions. Package `0.5.4` needs `v0.5.4`; prerelease tags such as
-`v0.5.5-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
+installation/tarball versions. Package `0.5.5` needs `v0.5.5`; prerelease tags such as
+`v0.5.6-rc.1` need that exact prerelease package version. Mismatches fail: the workflow
 never rewrites versions or publishes to npm.
 
 It uses Node 24, pnpm 11.28.5 and SHA-pinned Actions. Current pnpm project configuration
@@ -1540,17 +1601,17 @@ Protect release tags and do not force-move tags that have already shipped.
 ### 16.3 Maintainer steps
 
 Choose an **unused** version and synchronize the package and both READMEs, then commit all code,
-workflow/templates, tests and lockfile. For current `0.5.4` (if already tagged, bump to a fresh version
+workflow/templates, tests and lockfile. For current `0.5.5` (if already tagged, bump to a fresh version
 and substitute it below):
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.4
+node scripts/release-check.mjs --tag v0.5.5
 # After passing, commit and push main yourself, then tag that commit:
-git tag -a v0.5.4 -m "Release v0.5.4"
-git push origin v0.5.4
+git tag -a v0.5.5 -m "Release v0.5.5"
+git push origin v0.5.5
 ```
 
 Inspect **Actions → Tagged plugin release**, then download assets from **Releases**.
@@ -1574,6 +1635,8 @@ scripts/release-checksum.mjs SHA256SUMS generation/verification
 src/index.ts              plugin entry (Config, apply, registrations, logging wiring)
 src/opencode-protocol.ts  gate constants, ids, headers, tools, multimodal message projection
 src/image-input.ts        official request-image preparation/targets/budgets/offload
+src/reasoning-policy.ts   host-only canonical completed-turn fingerprint fold/projection
+src/context-service.ts    live preference read/write, shared UI RPC and agent tool
 src/adapter.ts            LlmAdapter; tool batches, bounded retry and safe diagnostics
 src/http-errors.ts        HTTP status/type/reason and safe diagnostic conversion
 src/retry-after.ts        shared strict Retry-After duration/date parser
@@ -1598,6 +1661,8 @@ tests/http-errors.test.mjs HTTP conversion, hints and safe diagnostics
 tests/retry-integration.test.mjs strict cooldown/no-replay and Host contract simulation
 tests/image-input.test.mjs official reader/budget/offload/cancellation unit tests
 tests/image-adapter.test.mjs multimodal wire/snapshot/tool-group/log privacy tests
+tests/reasoning-policy.test.mjs canonical completed-turn and current-chain regressions
+tests/context-service.test.mjs live preference/RPC/tool/persistence failure checks
 tests/make-vision-fixtures.py synthetic random-code PNG fixtures (Pillow)
 tests/vision-compat-live.mjs opt-in bounded user/tool image OCR verification
 tests/reasoning-history.test.mjs reasoning projection/two-step/log privacy regressions

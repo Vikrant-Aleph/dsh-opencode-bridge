@@ -12,6 +12,8 @@ import type { AdapterRegistrationHandle, LlmDiscoveredModel } from '@deepseek-ai
 import { FreeModelCatalog, DEFAULT_MODEL_REFRESH_INTERVAL_MS, MAX_MODEL_REFRESH_INTERVAL_MS } from './catalog.js'
 import { DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
 import { OpenCodeFreeAdapter } from './adapter.js'
+import { ContextPreferencesService, registerContextAccess } from './context-service.js'
+import { completedReasoningForRequest, registerReasoningProjection } from './reasoning-policy.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
@@ -30,6 +32,8 @@ export { auditToolBridge, resolveToolCall, ToolBridgeError } from './tool-bridge
 export { createBridgeAuditTool } from './bridge-audit.js'
 export { ProxyPool, EgressCoolingError, retryAfterMs, normalizeEntry, redactProxyUrl, fetchWithPool } from './proxy-pool.js'
 export { ProxyService } from './proxy-service.js'
+export { ContextPreferencesService, createContextPreferenceTool, registerContextAccess } from './context-service.js'
+export { completedReasoningProjection, trimCompletedReasoning, reasoningFingerprint } from './reasoning-policy.js'
 
 export interface Config {
   /** OpenAI-compatible relay base. The free tier lives at /inference/v1. */
@@ -52,6 +56,8 @@ export interface Config {
   requestTimeoutMs: number
   /** Periodic catalog refresh; 0 disables background refresh, positive values clamp to at least 60s. */
   modelRefreshIntervalMs: number
+  /** Live preference: trim only confirmed successful completed turns; default full. */
+  trimCompletedReasoning: { get(): boolean }
   /** Maximum pixels in a prepared image; geometry matches DSH coordinate mapping. */
   requestImagePixelBudget: number
   /** Per-image encoded byte target for the official attachment request version. */
@@ -82,7 +88,7 @@ export interface Config {
   proxyStorePath: string
 }
 
-export const Config: Schema<Config> = Schema.object({
+export const Config = Schema.object({
   baseUrl: Schema.string().default('https://opencode.ai/inference/v1'),
   apiKey: Schema.string().default('public'),
   userAgent: Schema.string().default('opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'),
@@ -97,6 +103,7 @@ export const Config: Schema<Config> = Schema.object({
   requestImageMaxBytes: Schema.number().min(1).max(32 * 1024 * 1024).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxImageBytes),
   maxRequestImageBytes: Schema.number().min(1).max(128 * 1024 * 1024).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxRequestImageBytes),
   maxRequestImages: Schema.number().min(1).max(100).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxImages),
+  trimCompletedReasoning: Schema.boolean().default(false).volatile(),
   toolResultImages: Schema.boolean().default(true),
   toolFingerprint: Schema.boolean().default(true),
   toolTranslation: Schema.boolean().default(true),
@@ -134,6 +141,9 @@ export function apply(ctx: Context, config: Config): void {
     logLevel: logger.getLevel(),
   })
 
+  const preferences = new ContextPreferencesService(ctx, () => config.trimCompletedReasoning?.get?.() ?? false)
+  ctx.effect(() => registerContextAccess(ctx, preferences))
+  ctx.effect(() => registerReasoningProjection(ctx))
   const logService = new LogService(logger)
   ctx.effect(() => registerLogAccess(ctx, logService))
 
@@ -191,6 +201,7 @@ export function apply(ctx: Context, config: Config): void {
     toolTranslation: config.toolTranslation,
     getAttachments: () => typeof ctx.get === 'function' ? ctx.get('attachments') : undefined,
     toolImages: config.toolResultImages,
+    getCompletedReasoning: options => preferences.currentTrim() ? completedReasoningForRequest(ctx, options) : undefined,
     imagePolicy: {
       maxPixels: config.requestImagePixelBudget, maxImageBytes: config.requestImageMaxBytes,
       maxRequestImageBytes: config.maxRequestImageBytes, maxImages: config.maxRequestImages,

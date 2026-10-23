@@ -3,7 +3,8 @@
 [English](TECHNICAL.md) | 中文
 
 `dsh-opencode-bridge` 插件的工程文档：免费层闸门如何被逆向、线上协议如何被复刻、
-适配器如何映射到 DSH 的 LLM 契约，以及上游变化时该怎么办。
+适配器如何映射到 DSH 的 LLM 契约，以及上游变化时该怎么办；同时介绍可选的上下文精简
+（精简已完成轮次思考）及其兼容性保护。
 
 读者：本插件的维护者，以及想找一个"厂商线上协议型 `LlmAdapter`"完整范例的 DSH 插件作者。
 
@@ -544,6 +545,29 @@ finish{reason}
 图片、base64、文件名不记日志；不杜撰提供方视觉token公式，沿用SDK中性估算。
 开发/peer契约按0.2.1-rc.2验证，实际图片调用需要正式附件后台实现请求版本接口。
 
+#### 可选已完成轮次思考投影（0.5.5）
+
+默认仍完整回传。**设置 → OpenCode Bridge → 上下文精简**提供 trimCompletedReasoning，
+为 Schema.boolean().default(false).volatile() 实时偏好；UI与opencode_bridge_context工具
+共用ContextPreferencesService。保存经正式settings.update，使用当前实例真实entry namespace、
+单字段merge及revision检查，不由插件写profile文档。每个新请求只读一次稳定volatile引用，
+无需重启插件，也不改变已经执行的请求。保存失败明确显示，界面不提前假设成功，持久化由DSH负责。
+
+Host-only的opencodeBridgeCompletedReasoning会话投影增量折叠正式turn/start、assistant/message、
+ tool/result与turn/end。只有成功完成、有最终assistant回应、无待完成工具调用及不安全/中断面的轮次
+才有资格。绝不按user角色猜边界：上下文注入、目标续轮及工具图线上hoist都不是完成证据。
+seed边界放弃继承的未完工作；失败、中断、max-token、孤儿轮次及无法确认的历史完整保留。
+
+状态只含有界消息ID和SHA-256指纹，不存思考正文：8192个完成记录、512个待定记录、1024个待工具ID。
+溢出保守保留；待发送原思考指纹仍须吻合，复用/改写ID不能误删新内容。
+缺少session/agent/projection证据、无身份输入及辅助请求均完整回传。
+只作发送投影，不改本地消息/事件、正文、工具ID/原参数、图片或opaque replay state；
+被精简部分仍序列化reasoning_content:''，当前工具链保留。
+
+不覆盖token-meter或压缩钩子，只改变发往OpenCode的请求；DSH按原历史估算/触发压缩仍可能偏保守，
+上游本来也可能忽略旧思考，因此不保证可用上下文变大、计费token下降或回答质量不变。
+关闭后后续请求恢复完整回传。选项作用于此插件实例的全部路由/会话，不只当前打开的对话。
+
 #### Assistant 思考历史回传（0.5.3，Issue #2）
 
 assistant 历史不再丢弃 DSH 的 `reasoning` 块；按原块顺序用 `join('')` 拼接 `text`，
@@ -828,6 +852,7 @@ provider.api             → api             → 按请求覆盖对话端点
 | `extraModels` | string[] | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | number | `600000` | 单请求截止时间。 |
 | `modelRefreshIntervalMs` | number | `600000` | 模型定时刷新间隔（毫秒）；`0` 关闭后台轮询，正数小于 60000 按 60000 执行。配置须为 0–2147483647 的整数；TTL、重试与界面通知见第 7 章。 |
+| `trimCompletedReasoning` | live boolean | `false` | 可选精简已确认成功完成轮次；设置→OpenCode Bridge→上下文精简。DSH持久保存，仅影响新请求。 |
 | `requestImagePixelBudget` | integer | `4194304` | 请求图片像素，1–100000000；保持比例、不放大。 |
 | `requestImageMaxBytes` | integer | `1048576` | 单图字节目标，1–33554432；总预算仍按实际字节检查。 |
 | `maxRequestImageBytes` | integer | `20971520` | 总base64图片预算，1–134217728。 |
@@ -940,6 +965,21 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 `tests/wire-dump.mjs` 是离线转储，`tests/smoke.mjs` 才是消耗网络/额度的实时探针。
 存在测试或离线通过，不证明所有模型、真实工具分发或 Desktop 启动已通过。
 发布验证结果应单独记录，不把历史闸门观察改写成新一轮全量验收。
+
+### 0.5.5 上下文精简验证
+
+332/332测试通过：原298项加34项策略/服务/UI/展示文案用例。覆盖成功/失败/中断/继承轮次、待完成多工具链、
+复用ID与变化指纹、有界状态、真实volatile默认值、失败不假成功/串行写入、精确RPC信封、
+Agent/UI同操作，以及第三标签页默认关闭的无障碍开关/说明；保留既有思考/图片/工具安全、重试及生命周期回归。
+
+已安装原生工具完成read→write true→write false，当前恢复完整保留。
+另以只读Host检查对独立合成Session和真实已注册投影验证：只授权旧的已结束轮次，
+当前工具思考及本地记录保持；零配置写入、零模型调用，完成后移除。
+此前加载期可变检查失败并已移除，不计为成功证据。
+
+正式tokenMeter.measure对空首轮信封估算0 tokens，加入新674字节设置工具schema后为173。
+这是中性声明开销，不是实际提供方计费或思考精简节省保证。未用私人对话做测试。
+没有浏览器交互/截图控制；语法、组件回归及实时注册不等于已目视点击验收。
 
 ### 0.5.4 视觉验证（2026-10-22）
 
@@ -1113,6 +1153,7 @@ mock SSE 整批放行（含不完整结束）；[取消回归](tests/bridge-canc
 
 | 日期 | 版本 | 变更 | 影响章节 |
 |---|---|---|---|
+| 2026-10-23 | 0.5.5 | 默认完整思考回传，可选按正式完成轮次精简；Host-only指纹投影、保守保护当前工具链。新增上下文精简设置标签页、中英开关/说明、正式volatile持久化及同操作Agent工具。保留必要字段/本地历史，不改计数/压缩、不保证节省。 | 6.5、8、11、发布示例、README |
 | 2026-10-22 | 0.5.4 | **Issue #3视觉输入**：保留图片模态声明，以正式附件接口准备请求图、匹配坐标目标、预算/卸载及取消；编码原顺序用户文字/图片，并在整组工具结果后承载单独验证的工具图，保持ID/思考/权限。新增图片单元/接线/随机码OCR检查，SDK开发契约升至0.2.1-rc.2；保留文本降级、固定隐私安全错误，准备0.5.4。 | 3、6.5、8、10–16、README |
 | 2026-10-21 | 0.5.3 | **Issue #2思考回传**：按原文本顺序保留assistant思考块，始终发送reasoning_content（缺少则空字符串），保持正文/工具别名/ID/参数语义。新增23项离线历史/两步/日志隐私回归、有界按需兼容性及实际适配器合成夹具探针、严格探针reader检查。包/README/当前发布示例准备为0.5.3；Jev协议支持及已有重试/工具权限策略不变。 | 3、6.5、11、13–16、README |
 | 2026-10-19 | 0.5.2 | **429诊断与有界恢复**：新增严格 Retry-After 时长/日期解析与安全 HTTP 元数据，保留实际状态、日志不抄原始错误正文。拒绝冷却出口，不缩短服务端期限，避免重复出口及重排错位，探测跳过冷却。区分请求/后端错误与明确出口配额，按模型记住服务端等待，仅由 DSH 执行 normal 最多2次重试；输出后故障用 PARTIAL_STREAM_ERROR 防重放。补充辅助模块/集成回归，同步双语文档并准备0.5.2，不执行发布。 | 3、6.8–6.9、11、13–16、README |
@@ -1261,7 +1302,7 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 
 [.github/workflows/release.yml](.github/workflows/release.yml) 仅由推送 `v*` tag 触发，
 随后要求 tag **严格等于 `v` + `package.json.version`**，并验证两份 README 安装命令和 tarball 版本。
-例如包版本 `0.5.4` 对应 `v0.5.4`；`v0.5.5-rc.1` 这类预发行 tag 对应同名预发行包版本。
+例如包版本 `0.5.5` 对应 `v0.5.5`；`v0.5.6-rc.1` 这类预发行 tag 对应同名预发行包版本。
 错误 tag 会失败，不会自动修改源码版本，也不会发布 npm。
 
 工作流使用 Node 24、pnpm 11.28.5；按固定 SHA 引用 Actions。
@@ -1286,16 +1327,16 @@ UI 是纯浏览/复制操作（不改配置），因此未给 agent 暴露"改�
 ### 16.3 维护者操作
 
 先选**未使用**的版本号，同步包版本与两份 README；提交所有源码、工作流、模板、测试与锁文件。
-以当前 `0.5.4` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
+以当前 `0.5.5` 为例（若该 tag 已用，先升到新的版本再替换下面的值）：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
-node scripts/release-check.mjs --tag v0.5.4
+node scripts/release-check.mjs --tag v0.5.5
 # 通过后自行提交并推送 main，再创建并推送该提交的 tag：
-git tag -a v0.5.4 -m "Release v0.5.4"
-git push origin v0.5.4
+git tag -a v0.5.5 -m "Release v0.5.5"
+git push origin v0.5.5
 ```
 
 到 GitHub **Actions → Tagged plugin release** 看结果，再到 **Releases** 下载资产。
@@ -1318,6 +1359,8 @@ scripts/release-checksum.mjs SHA256SUMS 生成与验证
 src/index.ts              插件入口（Config、apply、注册、日志装配）
 src/opencode-protocol.ts  闸门常量、id、请求头、工具、多模态消息投影
 src/image-input.ts        正式请求图片预备/几何目标/预算/卸载
+src/reasoning-policy.ts   Host-only正式完成轮次指纹折叠/投影
+src/context-service.ts    实时偏好读写、共享UI RPC与Agent工具
 src/adapter.ts            LlmAdapter；工具批次、有界重试与安全诊断
 src/http-errors.ts        HTTP 状态/类型/reason 与安全诊断转换
 src/retry-after.ts        共用严格 Retry-After 时长/日期解析
@@ -1342,6 +1385,8 @@ tests/http-errors.test.mjs HTTP 转换、等待提示与安全诊断
 tests/retry-integration.test.mjs 严格冷却/防重放与宿主契约模拟
 tests/image-input.test.mjs 正式reader/预算/卸载/取消单元测试
 tests/image-adapter.test.mjs 多模态线上形状/快照/工具组/日志隐私测试
+tests/reasoning-policy.test.mjs 正式完成轮次与当前工具链回归
+tests/context-service.test.mjs 实时偏好/RPC/工具/持久失败检查
 tests/make-vision-fixtures.py 合成随机码PNG夹具（Pillow）
 tests/vision-compat-live.mjs 按需有界用户图/工具图OCR验证
 tests/reasoning-history.test.mjs 思考投影/两步/日志隐私回归

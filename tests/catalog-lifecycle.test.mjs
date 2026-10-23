@@ -129,7 +129,7 @@ test('schema defaults to 600000ms and apply starts exactly one immediate catalog
   assert.equal(f.fetches.length, 2)
   assert.equal(f.registrations.length, 1)
   assert.equal(f.replacements.length, 1)
-  assert.deepEqual(f.injections.map(entry => entry.services), [['connection'], ['connection'], ['tools']])
+  assert.deepEqual(f.injections.map(entry => entry.services), [['settings'], ['connection'], ['sessionProjections'], ['connection'], ['connection'], ['tools']])
   await f.tick(599_999)
   assert.equal(f.fetches.length, 2)
   await f.tick(1)

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "OpenCode Bridge",
-    "description": "Use OpenCode free models in DSH, with automatic model-list refresh and optional egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing."
+    "description": "Use OpenCode free models in DSH, with automatic model refresh, optional context trimming of completed-turn reasoning and egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing."
   }
 }

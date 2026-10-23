@@ -15,7 +15,7 @@ function loadFactory() {
   return loadFactoryWith(false)
 }
 
-function loadFactoryWith(nodes) {
+function loadFactoryWith(nodes, selectedTab = 'logs') {
   let captured = null
   const errors = []
   const sandbox = {
@@ -50,7 +50,7 @@ function loadFactoryWith(nodes) {
     createElement: nodes
       ? (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) })
       : () => null,
-    useState: (v) => [typeof v === 'function' ? v() : v, () => {}],
+    useState: (v) => [v === 'logs' ? selectedTab : typeof v === 'function' ? v() : v, () => {}],
     useEffect: () => {},
     useCallback: (fn) => fn,
     useRef: (v) => ({ current: v }),
@@ -122,6 +122,7 @@ test('settings page renders browser-style tabs with one panel', () => {
     pageIntro: 'intro',
     tabLogs: '诊断日志',
     tabProxies: '出口代理轮换（可选）',
+    tabContext: '上下文精简',
   }
   const t = (key) => labels[key] ?? key
   let component
@@ -148,9 +149,9 @@ test('settings page renders browser-style tabs with one panel', () => {
   walk(tree)
 
   const tabs = flat.filter((n) => n.props && n.props.role === 'tab')
-  assert.equal(tabs.length, 2, 'exactly two tabs')
-  assert.deepEqual(tabs.map((n) => n.children.join('')), ['诊断日志', '出口代理轮换（可选）'])
-  assert.deepEqual(tabs.map((n) => n.props['aria-selected']), [true, false])
+  assert.equal(tabs.length, 3, 'exactly three tabs')
+  assert.deepEqual(tabs.map((n) => n.children.join('')), ['诊断日志', '出口代理轮换（可选）', '上下文精简'])
+  assert.deepEqual(tabs.map((n) => n.props['aria-selected']), [true, false, false])
   assert.equal(tabs[0].props.className, 'ocf-tab is-active')
   assert.equal(tabs[1].props.className, 'ocf-tab')
 
@@ -160,6 +161,27 @@ test('settings page renders browser-style tabs with one panel', () => {
   assert.ok(panel, 'one shared panel below the tabs')
   assert.equal(panel.props.role, 'tabpanel')
   assert.equal(panel.props['aria-labelledby'], 'ocf-tab-logs')
+})
+
+test('context tab exposes a default-off accessible switch with bounded safety explanations', () => {
+  const { mod } = loadFactoryWith(true, 'context')
+  let component
+  mod.apply({ effect(fn) { fn(); return () => {} }, get() {}, locale: { register() {}, bind: () => key => key }, slots: { inject(_key, cb) { cb() }, register(_options, value) { component = value } } })
+  const tree = component({ t: key => key, rpc: null })
+  const nodes = []
+  const walk = node => { if (!node || typeof node !== 'object') return; nodes.push(node); for (const child of node.children ?? []) walk(child) }
+  walk(tree)
+  assert.equal(nodes.find(node => node.props.role === 'tabpanel').props['aria-labelledby'], 'ocf-tab-context')
+  const entry = nodes.find(node => typeof node.type === 'function' && node.type.name === 'ContextPanel')
+  assert.ok(entry)
+  nodes.length = 0
+  walk(entry.type(entry.props))
+  const toggle = nodes.find(node => node.props.role === 'switch')
+  assert.equal(toggle.props['aria-checked'], false)
+  assert.equal(toggle.props.disabled, true, 'cannot write before the service has loaded')
+  assert.equal(toggle.props['aria-describedby'], 'ocf-context-help')
+  const help = nodes.filter(node => node.type === 'li').map(node => node.children.join(''))
+  assert.deepEqual(help, ['contextDefault', 'contextSafety', 'contextLocal', 'contextLimits'])
 })
 
 test('hostile ctx: every service missing — apply still succeeds', () => {

@@ -10,12 +10,14 @@
 
 A plugin for using [OpenCode](https://opencode.ai) free models in
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
-No OpenCode account or API key is required by default.
+No OpenCode account or API key is required by default. Supports automatic model
+refresh, optional context trimming of completed-turn reasoning,
+and egress-proxy rotation, with a fail-closed tool bridge and offline agent-scoped auditing.
 
 ## Features
 
 - **Automatic model refresh**: fetches the free-model list at startup and every 10 minutes by default, adds/removes models as the upstream catalog changes, and retains the last successful list if a refresh fails.
-- **Declared image input**: models that advertise image support receive uploaded/pasted images through DSH's official attachment interface. Tool-output images are forwarded with their result association; text-only models keep a clear fallback.
+- **Optional context trimming**: clear only confirmed completed-turn reasoning, retain the current tool chain, and keep full replay by default.
 - **Streaming and tool calls**: preserves reasoning history across multi-step tool calls, adapts DSH's native tools, and rejects unverified conversions rather than treating Bash commands as PowerShell.
 - **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies, try another ready egress for explicit egress-quota errors or connection failures, and respect server-requested waits.
 
@@ -29,7 +31,7 @@ Image input requires DSH's attachment request-version API; this version is built
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@0.5.4
+   dsh-opencode-bridge@0.5.5
    ```
 
 3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
@@ -40,17 +42,23 @@ Image input requires DSH's attachment request-version API; this version is built
 Install from npm into your DSH profile:
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.4
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.5
 ```
 
 Replace `desktop` with the profile you use. If `dsh` is not available in your terminal, use:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.4
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.5
 ```
 
 After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
 Normal use requires no API key or manual configuration-file edits. List changes are announced to DSH's model picker without restarting the plugin. Advanced refresh-interval configuration is documented in the [configuration reference](TECHNICAL.md#8-configuration-reference).
+
+## Optional context trimming
+
+Open **Settings → OpenCode Bridge → Context trimming** to enable **Trim reasoning from completed turns**. It is off by default (full replay). Only reasoning from confirmed successful completed turns is cleared; the current tool chain and uncertain/interrupted history remain intact. Required `reasoning_content` fields are still sent.
+
+The setting is saved through DSH and applies to new requests without deleting local history or interrupting running requests. Savings depend on the upstream; DSH's local estimate may still include full history. Turn it off if continuity is affected.
 
 ## Optional proxy setup
 
@@ -104,7 +112,7 @@ Build output is not committed to Git. To install a local build in DSH:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.4.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.5.tgz
 ```
 
 </details>

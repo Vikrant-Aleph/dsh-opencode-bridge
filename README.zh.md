@@ -10,11 +10,13 @@
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中使用
 [OpenCode](https://opencode.ai) 免费模型的插件，默认无需 OpenCode 账号或 API Key。
+支持模型动态刷新、可选的上下文精简（精简已完成轮次思考）与代理出口轮换，
+并提供默认拒绝不安全转换的工具桥及离线、按 Agent 作用域的兼容性审计。
 
 ## 主要功能
 
 - **模型列表自动刷新**：启动时获取免费模型列表，默认每 10 分钟重新获取一次，跟随上游增删模型；刷新失败时保留上次成功的列表。
-- **按模型能力输入图片**：声明支持图片的模型通过 DSH 正式附件接口接收上传／粘贴的图片；工具返回图片也会保留结果关联后转发，纯文本模型保留明确的降级提示。
+- **可选上下文精简**：仅精简已确认完成轮次的思考，保留当前工具链；默认仍完整回传。
 - **流式对话与工具调用**：保留多步工具调用中的思考历史，适配 DSH 原生工具，拒绝无法验证的工具转换，避免将 Bash 命令直接当作 PowerShell 执行。
 - **可选代理轮换**：配置多个 HTTP(S) 或 SOCKS 代理，在明确的出口配额限制或连接失败时尝试其他可用出口，并遵守服务端等待提示。
 
@@ -28,7 +30,7 @@
 2. 在输入框中填写：
 
    ```text
-   dsh-opencode-bridge@0.5.4
+   dsh-opencode-bridge@0.5.5
    ```
 
 3. **安装源**建议选择 npm 官方源；如果使用镜像源，新版本可能需要等待同步。
@@ -39,17 +41,23 @@
 从 npm 安装到你的 DSH profile：
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.4
+dsh plugin --profile desktop add dsh-opencode-bridge@0.5.5
 ```
 
 `desktop` 是示例 profile 名称，请按实际使用的名称替换。如果终端找不到 `dsh`，可使用：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.4
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.5
 ```
 
 安装完成后，在模型选择器中选择 **OpenCode Bridge** 下的模型即可开始对话；如果未显示，请重启对应的 DSH profile。
 日常使用无需手动填写 API Key 或修改配置文件；列表变化会通知 DSH 模型选择器重新读取，无需重启插件。刷新间隔的高级配置见[配置参考](TECHNICAL.zh.md#8-配置参考)。
+
+## 可选上下文精简
+
+打开 **设置 → OpenCode Bridge → 上下文精简**，可开启 **精简已完成轮次的思考**。默认关闭，完整回传；仅清空已确认成功完成轮次的思考，保留当前工具链、无法确认或中断的历史，必要的 `reasoning_content` 字段仍会发送。
+
+选项通过 DSH 保存，对后续新请求生效，不删除本地会话、不打断正在执行的请求。节省效果取决于上游，DSH 本地估算仍可能按完整历史计算；若连贯性受影响可关闭。
 
 ## 可选代理配置
 
@@ -103,7 +111,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.4.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.5.tgz
 ```
 
 </details>

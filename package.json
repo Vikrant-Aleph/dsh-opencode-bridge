@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
-  "description": "Use OpenCode free models in DSH, with automatic model-list refresh and optional egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing.",
-  "version": "0.5.4",
+  "description": "Use OpenCode free models in DSH, with automatic model refresh, optional context trimming of completed-turn reasoning and egress-proxy rotation. Includes a tool bridge that rejects unsafe conversions by default, plus offline, agent-scoped compatibility auditing.",
+  "version": "0.5.5",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -73,8 +73,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2",
     "@deepseek-ai/dsh-attachment": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-projection": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": ">=0.2.1-rc.2",
     "@deepseek-ai/schemastery": "*"
   },
   "peerDependenciesMeta": {
@@ -89,13 +93,21 @@
     },
     "@deepseek-ai/schemastery": {
       "optional": true
-    }
+    },
+    "@deepseek-ai/dsh-agent": { "optional": true },
+    "@deepseek-ai/dsh-session": { "optional": true },
+    "@deepseek-ai/dsh-session-projection": { "optional": true },
+    "@deepseek-ai/dsh-settings": { "optional": true }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
     "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
     "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3",
@@ -103,6 +115,7 @@
   },
   "dependencies": {
     "socks": "^2.8.10",
-    "undici": "^7.30.1"
+    "undici": "^7.30.1",
+    "zod": "4.4.3"
   }
 }

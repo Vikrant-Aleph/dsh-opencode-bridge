@@ -21,6 +21,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
 import { prepareImageProjection, requestImageTarget, resolveImageInputPolicy, type ImageInputPolicy } from './image-input.js'
+import { trimCompletedReasoning, type ReasoningRecord } from './reasoning-policy.js'
 import type { FreeModelCatalog, FreeModel } from './catalog.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { noopLogger, type LoggerLike } from './logger.js'
@@ -57,6 +58,8 @@ export interface AdapterOptions {
   toolImages?: boolean
   /** Owned by the plugin context, in addition to caller cancellation/deadline. */
   lifetimeSignal?: AbortSignal
+  /** Canonical completed-turn evidence captured once when a request starts; absent means full. */
+  getCompletedReasoning?: (options: GenerateOptions) => readonly ReasoningRecord[] | undefined
 }
 
 interface ChatChunk {
@@ -164,6 +167,12 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
     try {
       options.signal?.throwIfAborted()
       this.options.lifetimeSignal?.throwIfAborted()
+      let completedReasoning: readonly ReasoningRecord[] | undefined
+      if (!options.purpose) {
+        try { completedReasoning = this.options.getCompletedReasoning?.(options) } catch { /* Fail safe: retain full history. */ }
+      }
+      const reasoningHistory = trimCompletedReasoning(options.messages, completedReasoning)
+      const projectedOptions = reasoningHistory.messages === options.messages ? options : { ...options, messages: reasoningHistory.messages }
       const requestWait = this.remainingRequestWait(options.model)
       if (requestWait > 0) throw new LlmError(`This model request is cooling down; retry after ${Math.ceil(requestWait / 1000)} seconds.`, 'REQUEST_COOLING', { providerRetryAfterMs: requestWait })
       const meta = snapshot === undefined ? (await this.catalog.list(options.signal)).find(model => model.id === options.model) : snapshot ?? undefined
@@ -173,13 +182,13 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       const signals = [AbortSignal.timeout(this.options.requestTimeoutMs), options.signal, this.options.lifetimeSignal].filter((value): value is AbortSignal => value !== undefined)
       const signal = AbortSignal.any(signals)
       signal.throwIfAborted()
-      const imageProjection = await prepareImageProjection(options.messages, {
+      const imageProjection = await prepareImageProjection(projectedOptions.messages, {
         supportsImages: meta?.inputModalities?.includes('image') === true,
         toolImages: this.options.toolImages ?? true,
         attachments: this.options.attachments ?? this.options.getAttachments?.(),
         policy: this.imagePolicy, signal,
       })
-      const messages = buildChatMessages(options, plan, imageProjection)
+      const messages = buildChatMessages(projectedOptions, plan, imageProjection)
       if (plan.decoys.size) {
         const nativeCommands = plan.tools.filter(tool => ['pwsh', 'bash', 'shell'].includes(plan.aliasToOriginal.get(tool.function.name) ?? tool.function.name) && !plan.decoys.has(tool.function.name)).map(tool => tool.function.name)
         const aliases = [...plan.aliasToOriginal].map(([wire, original]) => `${wire} = caller ${original}`).join('; ')

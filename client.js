@@ -1,6 +1,5 @@
-// Client half of dsh-opencode-bridge: a Settings page that views and copies the
-// plugin diagnostic log. Registers into the `settings.section` slot and talks
-// to the Host half over the package's `/api/opencode-bridge-logs/*` RPC routes.
+// OpenCode Bridge Settings: diagnostics, egress rotation and reasoning history.
+// One settings.section contribution uses the package's authenticated /api RPC routes.
 //
 // Robustness rules — the desktop treats a failed module activation as a fatal
 // web-boot error ("web boot: 1 entry did not activate"), so:
@@ -22,11 +21,25 @@ window.__ModuleLoader__.load({
     const RPC_CHANNEL = '/api';
     const RPC_NAMESPACE = 'opencode-bridge-logs';
     const PROXY_RPC_NAMESPACE = 'opencode-bridge-proxies';
+    const CONTEXT_RPC_NAMESPACE = 'opencode-bridge-context';
 
     const en = {
       nav: 'OpenCode Bridge',
       pageTitle: 'OpenCode Bridge',
-      pageIntro: 'Settings for the OpenCode free-model bridge: diagnostics and egress rotation.',
+      pageIntro: 'OpenCode free models with automatic refresh, optional context trimming of completed-turn reasoning and egress rotation. Includes a fail-closed tool bridge and offline, agent-scoped compatibility auditing.',
+      tabContext: 'Context trimming',
+      contextTitle: 'Context trimming',
+      contextToggle: 'Trim reasoning from completed turns',
+      contextFull: 'Full history (default)',
+      contextTrimmed: 'Trim completed turns',
+      contextDefault: 'Off by default: assistant reasoning is replayed in full.',
+      contextSafety: 'When enabled, only reasoning from confirmed successful completed DSH turns is cleared. The current tool chain, interrupted/failed turns and uncertain history remain intact. Required reasoning_content fields are still sent.',
+      contextLocal: 'Applies to new requests across this plugin instance, not just the open conversation. Local history is not deleted; turning it off restores full replay. Requests already running are not interrupted.',
+      contextLimits: 'Savings depend on upstream behavior; some providers already ignore old reasoning. DSH’s local context estimate may still include the full history. Turn this off if continuity is affected.',
+      contextSaved: 'Saved. Applies to new requests.',
+      contextUnavailable: 'Context trimming settings are unavailable.',
+      contextReadonly: 'Live settings cannot be changed in this profile.',
+      contextSaveFailed: 'Could not save. Refresh and try again.',
       tabLogs: 'Diagnostic log',
       tabProxies: 'Egress rotation (optional)',
       title: 'OpenCode Bridge — Diagnostic Log',
@@ -73,7 +86,20 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: 'OpenCode Bridge',
       pageTitle: 'OpenCode Bridge',
-      pageIntro: 'OpenCode 免费模型桥接插件的设置：诊断日志与出口代理。',
+      pageIntro: '在 DSH 中使用 OpenCode 免费模型，支持模型动态刷新、可选的上下文精简（精简已完成轮次思考）与代理出口轮换。提供默认拒绝不安全转换的工具桥与离线、按 Agent 作用域的兼容性审计。',
+      tabContext: '上下文精简',
+      contextTitle: '上下文精简',
+      contextToggle: '精简已完成轮次的思考',
+      contextFull: '完整保留（默认）',
+      contextTrimmed: '精简已完成轮次',
+      contextDefault: '默认关闭，完整回传 assistant 历史中的思考内容。',
+      contextSafety: '开启后，仅清空经 DSH 确认已成功完成轮次中的思考。当前工具调用链、中断／失败轮次及无法可靠确认的历史都会保留；仍发送必要的 reasoning_content 字段。',
+      contextLocal: '作用于此插件实例的后续新请求，不只当前打开的会话。不删除本地记录，关闭后恢复完整回传，不会中断正在执行的请求。',
+      contextLimits: '节省效果取决于上游，有些提供方本来就忽略旧思考；DSH 本地上下文估算仍可能按完整历史计算。若任务连贯性受到影响，可关闭此选项。',
+      contextSaved: '已保存，对后续新请求生效。',
+      contextUnavailable: '上下文精简设置不可用。',
+      contextReadonly: '当前 profile 无法修改实时设置。',
+      contextSaveFailed: '保存失败，请刷新后重试。',
       tabLogs: '诊断日志',
       tabProxies: '出口代理轮换（可选）',
       title: 'OpenCode Bridge — 诊断日志',
@@ -240,6 +266,17 @@ window.__ModuleLoader__.load({
         border-bottom-color: var(--dsw-alias-bg-layer-1, #ffffff);
       }
       .ocf-tab:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #2563eb); outline-offset: -3px; }
+      .ocf-context-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); }
+      .ocf-context-title { margin: 0; font-size: 14px; color: var(--dsw-alias-label-primary); }
+      .ocf-context-state { margin: 4px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+      .ocf-context-switch { flex: 0 0 auto; position: relative; width: 44px; height: 26px; padding: 3px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 16px; background: var(--dsw-alias-state-idle-primary); cursor: pointer; }
+      .ocf-context-switch[aria-checked=true] { background: var(--dsw-alias-brand-primary); }
+      .ocf-context-switch span { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--dsw-alias-bg-base); transform: translateX(0); transition: transform .12s ease; }
+      .ocf-context-switch[aria-checked=true] span { transform: translateX(17px); }
+      .ocf-context-switch:disabled { opacity: .5; cursor: not-allowed; }
+      .ocf-context-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
+      .ocf-context-help { margin: 0; padding-left: 20px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.65; }
+      .ocf-context-help li + li { margin-top: 8px; }
       .ocf-tabpanel {
         padding: 12px;
         background: var(--dsw-alias-bg-layer-1, #ffffff);
@@ -579,7 +616,55 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // One settings page with two tabs: the log viewer and the egress pool used
+    function ContextPanel(props) {
+      const t = (props && props.t) || ContextPanel.t || fallbackT;
+      const rpc = (props && props.rpc) || ContextPanel.rpc || null;
+      const [trim, setTrim] = useState(false);
+      const [ready, setReady] = useState(false);
+      const [writable, setWritable] = useState(false);
+      const [busy, setBusy] = useState(true);
+      const [error, setError] = useState('');
+      const [notice, setNotice] = useState('');
+      const alive = useRef(true);
+      useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+      const load = useCallback(async () => {
+        setBusy(true); setError(''); setNotice('');
+        try {
+          if (!rpc) throw new Error('offline');
+          const result = await rpc.call(RPC_CHANNEL, `${CONTEXT_RPC_NAMESPACE}/read`, {});
+          if (!result || !result.ok || typeof result.value?.trimCompletedReasoning !== 'boolean') throw new Error('unavailable');
+          if (!alive.current) return;
+          setTrim(result.value.trimCompletedReasoning); setWritable(result.value.writable === true); setReady(true);
+        } catch (e) { if (alive.current) { setReady(false); setWritable(false); setError(t('contextUnavailable')); } }
+        finally { if (alive.current) setBusy(false); }
+      }, [rpc, t]);
+      useEffect(() => { void load(); }, [load]);
+      const toggle = useCallback(async () => {
+        if (!rpc || !ready || !writable || busy) return;
+        setBusy(true); setError(''); setNotice('');
+        try {
+          const result = await rpc.call(RPC_CHANNEL, `${CONTEXT_RPC_NAMESPACE}/write`, { trimCompletedReasoning: !trim });
+          if (!result || !result.ok || typeof result.value?.trimCompletedReasoning !== 'boolean') throw new Error('save');
+          if (!alive.current) return;
+          setTrim(result.value.trimCompletedReasoning); setWritable(result.value.writable === true); setNotice(t('contextSaved'));
+        } catch (e) { if (alive.current) setError(t('contextSaveFailed')); }
+        finally { if (alive.current) setBusy(false); }
+      }, [rpc, ready, writable, busy, trim, t]);
+      return h('div', { className: 'ocf-log-wrap' },
+        h('h2', { className: 'ocf-context-title' }, t('contextTitle')),
+        h('div', { className: 'ocf-context-row' },
+          h('div', null, h('label', { id: 'ocf-context-toggle-label', htmlFor: 'ocf-context-toggle', className: 'ocf-context-title' }, t('contextToggle')),
+            h('p', { className: 'ocf-context-state', role: 'status' }, busy ? t('loading') : ready ? t(trim ? 'contextTrimmed' : 'contextFull') : t('contextUnavailable'))),
+          h('button', { type: 'button', id: 'ocf-context-toggle', role: 'switch', className: 'ocf-context-switch', 'aria-checked': trim, 'aria-labelledby': 'ocf-context-toggle-label', 'aria-describedby': 'ocf-context-help', disabled: busy || !ready || !writable, onClick: toggle }, h('span', { 'aria-hidden': true }))),
+        h('ul', { id: 'ocf-context-help', className: 'ocf-context-help' },
+          ['contextDefault', 'contextSafety', 'contextLocal', 'contextLimits'].map(key => h('li', { key }, t(key)))),
+        error ? h('p', { className: 'ocf-log-note ocf-error', role: 'alert' }, error) : null,
+        notice ? h('p', { className: 'ocf-log-note', role: 'status' }, notice) : null,
+        ready && !writable ? h('p', { className: 'ocf-log-note' }, t('contextReadonly')) : null,
+        h('div', { className: 'ocf-log-toolbar' }, h('button', { type: 'button', disabled: busy, onClick: load }, t('refresh'))));
+    }
+
+    // One settings page with three tabs: the log viewer and the egress pool used
     // to live in separate sections, which read as two unrelated plugins.
     function BridgePanel(props) {
       const t = (props && props.t) || BridgePanel.t || fallbackT;
@@ -644,11 +729,17 @@ window.__ModuleLoader__.load({
               },
               t('tabProxies'),
             ),
+            h('button', {
+              type: 'button', role: 'tab', id: 'ocf-tab-context',
+              'aria-selected': tab === 'context', 'aria-controls': 'ocf-tabpanel',
+              'data-active': tab === 'context', className: `ocf-tab${tab === 'context' ? ' is-active' : ''}`,
+              onClick: () => setTab('context'),
+            }, t('tabContext')),
           ),
           h(
             'div',
-            { className: 'ocf-tabpanel', id: 'ocf-tabpanel', role: 'tabpanel', 'aria-labelledby': tab === 'logs' ? 'ocf-tab-logs' : 'ocf-tab-proxies' },
-            tab === 'logs' ? h(LogPanel, { rpc, t }) : h(ProxyPanel, { rpc, t }),
+            { className: 'ocf-tabpanel', id: 'ocf-tabpanel', role: 'tabpanel', 'aria-labelledby': `ocf-tab-${tab}` },
+            tab === 'logs' ? h(LogPanel, { rpc, t }) : tab === 'proxies' ? h(ProxyPanel, { rpc, t }) : h(ContextPanel, { rpc, t }),
           ),
         ),
       );
@@ -703,12 +794,14 @@ window.__ModuleLoader__.load({
         LogPanel.rpc = rpc;
         ProxyPanel.t = t;
         ProxyPanel.rpc = rpc;
+        ContextPanel.t = t;
+        ContextPanel.rpc = rpc;
         BridgePanel.t = t;
         BridgePanel.rpc = rpc;
 
         // 3. Slot registration — guarded and optional-chained: the settings
         // slot may not be declared yet at activation time. One section only:
-        // the log viewer and the proxy pool are tabs inside it.
+        // diagnostics, proxies and context preferences are tabs inside it.
         try {
           if (ctx.slots && typeof ctx.slots.inject === 'function' && typeof ctx.slots.register === 'function') {
             ctx.slots.inject('settings.section', () =>

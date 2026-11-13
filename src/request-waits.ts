@@ -55,6 +55,8 @@ export class RequestWaitStore {
   private overflowUntil = 0
   private readonly file: string
   private signature = ''
+  /** True only when the state file is absent, so a clear is never undone by recovery. */
+  private recoverFromLogs = false
 
   constructor(
     file: string,
@@ -67,9 +69,9 @@ export class RequestWaitStore {
     // Reconcile valid legacy observations even when a state file already exists:
     // an earlier standalone check may have created it before the live instance
     // records a newer rejection. Only maximum deadlines are adopted.
-    const recovered = legacyRequestWaits(legacyLines, this.now())
+    const recovered = this.recoverFromLogs ? legacyRequestWaits(legacyLines, this.now()) : []
     for (const [model, until] of recovered) this.adopt(model, until)
-    if (!loaded || recovered.length) this.persist()
+    if (!loaded && recovered.length) this.persist()
     if (recovered.length) this.logger.info('retry', 'preserved observed model waits across upgrade', { models: recovered.length })
   }
 
@@ -144,9 +146,13 @@ export class RequestWaitStore {
   /** Load the state file, replacing the in-memory copy. Returns false when absent. */
   private load(): boolean {
     this.signature = this.fileSignature()
+    let exists = true
     try {
       if (fs.statSync(this.file).size > 100_000) throw new Error('Oversized state')
-      const data = JSON.parse(fs.readFileSync(this.file, 'utf8'))
+      // A byte-order mark is tolerated: Windows editors add one, and treating it as
+      // corruption would resurrect cleared waits from the log.
+      const raw = fs.readFileSync(this.file, 'utf8').replace(/^\uFEFF/, '')
+      const data = JSON.parse(raw)
       const rows = data?.waits
       if (data?.version !== 1 && data?.version !== 2) throw new Error('Invalid state')
       if (!Array.isArray(rows) || rows.length > 1000) throw new Error('Invalid state')
@@ -163,11 +169,14 @@ export class RequestWaitStore {
       for (const wait of parsed) this.adopt(wait.model, wait.until, wait.egress)
       return true
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.logger.warn('retry', 'request-wait state unavailable; recovering conservative observed waits')
-      }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') exists = false
+      else this.logger.warn('retry', 'request-wait state unreadable; ignoring it instead of recovering from logs')
       this.waits = new Map()
       this.overflowUntil = 0
+      // Only a missing file justifies recovery: an existing but unreadable file is
+      // evidence the user (or a corruption) changed it deliberately, and rebuilding
+      // waits from the log would undo a clear.
+      this.recoverFromLogs = !exists
       return false
     }
   }

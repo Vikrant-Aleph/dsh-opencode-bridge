@@ -42,13 +42,30 @@ test('first upgrade recovers the affected model from old redacted diagnostics, n
   assert.doesNotMatch(text, /request|http|message|auth|key|bearer/i)
 })
 
-test('corrupt state recovers conservatively without logging its contents or path', t => {
+test('an unreadable state file is ignored, never rebuilt from the log, and its contents stay out of the log', t => {
   const file = fixture(t)
   fs.writeFileSync(file, '{"version":1,"waits":["SECRET_BAD_ROW"],"overflowUntil":0}')
   const messages = [], logger = { warn: (...args) => messages.push(args), info() {}, debug() {}, error() {} }
   const store = new RequestWaitStore(file, logger, [log(record)], () => epoch)
-  assert.equal(store.remaining(record.model), 61_330_000)
+  // Rebuilding waits from the log would undo a deliberate clear, so a present but
+  // unreadable file wins over recovery.
+  assert.equal(store.remaining(record.model), 0)
   assert.doesNotMatch(JSON.stringify(messages), /SECRET_BAD_ROW|request-waits-test-|state\.json/)
+})
+
+test('a missing state file still recovers observed waits from the log', t => {
+  const file = fixture(t)
+  const store = new RequestWaitStore(file, undefined, [log(record)], () => epoch)
+  assert.equal(store.remaining(record.model), 61_330_000)
+})
+
+test('a byte-order mark does not make the state file unreadable', t => {
+  const file = fixture(t)
+  fs.writeFileSync(file, '\uFEFF' + JSON.stringify({ version: 2, waits: [['fixture-free', epoch + 60_000, 'direct (this machine)']], overflowUntil: 0 }))
+  const store = new RequestWaitStore(file, undefined, [log(record)], () => epoch)
+  assert.equal(store.remaining('fixture-free', ['direct (this machine)']), 60_000)
+  // A BOM-prefixed file is valid state, so the log is not consulted.
+  assert.equal(store.remaining(record.model), 0)
 })
 
 test('state capacity conservatively preserves overflow waits across reload', t => {
@@ -60,12 +77,13 @@ test('state capacity conservatively preserves overflow waits across reload', t =
   assert.ok(reloaded.remaining('fixture-0') >= 60000)
 })
 
-test('a pre-existing state file reconciles later live observations without dropping either model', t => {
+test('an existing state file is authoritative over the log', t => {
   const file = fixture(t), now = () => epoch
   new RequestWaitStore(file, undefined, [], now).remember('glm-free', 90000)
-  const upgraded = new RequestWaitStore(file, undefined, [log(record)], now)
-  assert.equal(upgraded.remaining('glm-free'), 90000)
-  assert.equal(upgraded.remaining(record.model), 61_330_000)
+  // The file exists and is valid, so it wins: recovery cannot resurrect a cleared wait.
+  const reopened = new RequestWaitStore(file, undefined, [log(record)], now)
+  assert.equal(reopened.remaining('glm-free'), 90000)
+  assert.equal(reopened.remaining(record.model), 0)
 })
 
 test('provider/key scope is stable, isolated and never a credential filename', () => {

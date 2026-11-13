@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-13T09:33:45.082Z",
+  "model": "glm-5.3-flash-free",
+  "results": [
+    {
+      "label": "single-custom-tool-no-read",
+      "callerTools": [
+        "dsh_probe_tool"
+      ],
+      "terminalKind": "stop",
+      "ok": true,
+      "answerMatches": true
+    }
+  ]
+}

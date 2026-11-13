@@ -8,6 +8,13 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
+import { existsSync } from 'node:fs'
+import os from 'node:os'
+import { join as joinPath } from 'node:path'
+import path from 'node:path'
+import { RequestWaitStore, requestWaitScope } from './request-waits.js'
+import { projectIdentityFor } from './project-identity.js'
+import { createBunFetch } from './bun-transport.js'
 import type { AdapterRegistrationHandle, LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { FreeModelCatalog, DEFAULT_MODEL_REFRESH_INTERVAL_MS, MAX_MODEL_REFRESH_INTERVAL_MS } from './catalog.js'
 import { DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
@@ -15,9 +22,9 @@ import { OpenCodeFreeAdapter } from './adapter.js'
 import { ContextPreferencesService, registerContextAccess } from './context-service.js'
 import { completedReasoningForRequest, registerReasoningProjection } from './reasoning-policy.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
-import { registerBridgeAudit } from './bridge-audit.js'
 import { ProxyPool, defaultProxyStorePath, dispatcherFor, clearDispatchers, loadProxyStore } from './proxy-pool.js'
 import { ProxyService, registerProxyAccess } from './proxy-service.js'
 
@@ -28,8 +35,6 @@ export type { ImageInputPolicy } from './image-input.js'
 export * from './opencode-protocol.js'
 export { PluginLogger, defaultLogDir } from './logger.js'
 export { LogService } from './log-service.js'
-export { auditToolBridge, resolveToolCall, ToolBridgeError } from './tool-bridge.js'
-export { createBridgeAuditTool } from './bridge-audit.js'
 export { ProxyPool, EgressCoolingError, retryAfterMs, normalizeEntry, redactProxyUrl, fetchWithPool } from './proxy-pool.js'
 export { ProxyService } from './proxy-service.js'
 export { ContextPreferencesService, createContextPreferenceTool, registerContextAccess } from './context-service.js'
@@ -40,12 +45,24 @@ export interface Config {
   baseUrl: string
   /** Credential sent as `Bearer <key>`; the signed-out client sentinel is `public`. */
   apiKey: string
-  /** User-Agent of the simulated client; must contain `opencode/<version>`. */
+  /** Protocol compatibility User-Agent; DSH attribution is retained when building requests. */
   userAgent: string
-  /** `x-opencode-client` value (official client reports `cli` or `desktop`). */
+  /** `x-opencode-client` value; the captured official 2.2.0 client sends `cli`. */
   client: string
-  /** `x-opencode-project` value; the official default project is `global`. */
+  /** Send `x-opencode-request` (1.x only; OpenCode 2.x prepares none). */
+  requestIdHeader: boolean
+  /** Send `strict: false` on tool declarations, matching OpenCode's OpenAI Chat lowering. */
+  toolStrict: boolean
+  /** Raise small caller output budgets to the official catalog default (32000). */
+  minOutputTokens: number
+  /** Append the DSH attribution token to User-Agent; off by default because the free-tier gate compares the UA. */
+  userAgentAttribution: boolean
+  /** Attach the official `b3`/`traceparent` tracing pair on every request. */
+  tracing: boolean
+  /** Explicit `x-opencode-project`; `global` is the legacy bridge default, not a discovered project identity. */
   project: string
+  /** Working directory used to derive the official project id; empty uses the process cwd. */
+  projectDirectory: string
   /** Provider routes this adapter serves. */
   providers: string[]
   /** Offer models the registry marks deprecated when the relay still lists them. */
@@ -68,10 +85,6 @@ export interface Config {
   maxRequestImages: number
   /** Forward tool output images via associated user image parts on vision routes. */
   toolResultImages: boolean
-  /** Send the OpenCode tool fingerprint the free-tier gate requires. */
-  toolFingerprint: boolean
-  /** Allow schema-checked read/search decoy mapping. Executable decoys are always rejected. */
-  toolTranslation: boolean
   /** Minimum log level written to disk: `debug` | `info` | `warn` | `error` | `off`. */
   logLevel: string
   /** Log directory; empty means the profile default (`<profile>/logs/dsh-opencode-bridge`). */
@@ -86,14 +99,22 @@ export interface Config {
   proxyCooldownMs: number
   /** Pool store written by the Settings page; empty means the profile data dir. */
   proxyStorePath: string
+  /** Use the Bun-shaped TLS transport (wreq-js) when its native binding is available. */
+  bunTransport: boolean
 }
 
 export const Config = Schema.object({
   baseUrl: Schema.string().default('https://opencode.ai/inference/v1'),
   apiKey: Schema.string().default('public'),
-  userAgent: Schema.string().default('opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'),
+  userAgent: Schema.string().default(DEFAULT_PROTOCOL_USER_AGENT),
   client: Schema.string().default('cli'),
+  requestIdHeader: Schema.boolean().default(false),
+  toolStrict: Schema.boolean().default(true),
+  minOutputTokens: Schema.number().min(0).default(32_000),
+  userAgentAttribution: Schema.boolean().default(false),
+  tracing: Schema.boolean().default(true),
   project: Schema.string().default('global'),
+  projectDirectory: Schema.string().default(''),
   providers: Schema.array(Schema.string()).default(['opencode-bridge']),
   includeDeprecated: Schema.boolean().default(false),
   extraModels: Schema.array(Schema.string()).default([]),
@@ -105,8 +126,6 @@ export const Config = Schema.object({
   maxRequestImages: Schema.number().min(1).max(100).step(1).default(DEFAULT_IMAGE_INPUT_POLICY.maxImages),
   trimCompletedReasoning: Schema.boolean().default(false).volatile(),
   toolResultImages: Schema.boolean().default(true),
-  toolFingerprint: Schema.boolean().default(true),
-  toolTranslation: Schema.boolean().default(true),
   logLevel: Schema.string().default('warn'),
   logDir: Schema.string().default(''),
   logMaxBytes: Schema.number().default(512 * 1024),
@@ -114,6 +133,7 @@ export const Config = Schema.object({
   proxies: Schema.array(Schema.string()).default([]),
   proxyCooldownMs: Schema.number().default(60_000),
   proxyStorePath: Schema.string().default(''),
+  bunTransport: Schema.boolean().default(true),
 })
 
 export const name = 'dsh-opencode-bridge'
@@ -159,12 +179,24 @@ export function apply(ctx: Context, config: Config): void {
     entries: pool.health().map((entry) => entry.display).join(', '),
   })
 
+  // Official client derives a real project id from the working directory
+  // (verified: sha1("directory:"+path) for non-git, sha1("git-remote:"+remote)
+  // for git). Discover once at start; the user's explicit config still wins.
+  let discoveredProject: string | undefined
+  if (config.project === 'global') {
+    try {
+      const directory = config.projectDirectory || process.cwd()
+      discoveredProject = projectIdentityFor(directory)
+      if (discoveredProject) logger.info('protocol', 'project identity derived from working directory')
+    } catch { /* Keep the configured value. */ }
+  }
+
   const recipe: HeaderRecipe = {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     userAgent: config.userAgent,
     client: config.client,
-    project: config.project,
+    project: discoveredProject ?? config.project,
     extraHeaders: {},
   }
   let registration: AdapterRegistrationHandle | undefined
@@ -190,15 +222,31 @@ export function apply(ctx: Context, config: Config): void {
     },
     logger,
   )
-  registerBridgeAudit(ctx, { fingerprint: config.toolFingerprint, translateDecoys: config.toolTranslation })
   const lifetime = new AbortController()
   ctx.effect(() => () => lifetime.abort(new DOMException('OpenCode Bridge was unloaded', 'AbortError')))
+  const waitScope = requestWaitScope(config.baseUrl, config.apiKey)
+  const requestWaitState = new RequestWaitStore(
+    path.join(path.dirname(proxyStorePath), `request-waits-${waitScope}.json`),
+    logger, logger.read({ level: 'warn', limit: 5000 }).lines,
+  )
+  // The gateway's free lane distinguishes the official client's TLS stack from
+  // Node's. The Bun-shaped transport resolves asynchronously (native module
+  // import), so requests before it settles use plain fetch and then switch over.
+  // A missing binding never breaks the plugin.
+  //
+  // The transport is created once and reused for the whole plugin lifetime so
+  // its connection pool persists across turns, matching the official client.
+  const transportHolder: { current?: typeof fetch & { close?: () => Promise<void> } } = {}
   const adapter = new OpenCodeFreeAdapter(catalog, {
+    requestWaitState,
     providerRoute: config.providers[0] ?? 'opencode-bridge',
     recipe,
     requestTimeoutMs: config.requestTimeoutMs,
-    toolFingerprint: config.toolFingerprint,
-    toolTranslation: config.toolTranslation,
+    requestIdHeader: config.requestIdHeader,
+    toolStrict: config.toolStrict,
+    minOutputTokens: config.minOutputTokens,
+    userAgentAttribution: config.userAgentAttribution,
+    tracing: config.tracing,
     getAttachments: () => typeof ctx.get === 'function' ? ctx.get('attachments') : undefined,
     toolImages: config.toolResultImages,
     getCompletedReasoning: options => preferences.currentTrim() ? completedReasoningForRequest(ctx, options) : undefined,
@@ -211,6 +259,26 @@ export function apply(ctx: Context, config: Config): void {
     pool,
     dispatcherFor,
   })
+
+  if (config.bunTransport) {
+    // The adapter awaits this promise before its first request, so an early turn
+    // cannot silently use the plain-fetch fallback.
+    adapter.setTransport(
+      createBunFetch({ timeoutMs: config.requestTimeoutMs }).then(
+        (impl) => {
+          transportHolder.current = impl as typeof fetch & { close?: () => Promise<void> }
+          logger.info('transport', 'using Bun-shaped TLS transport')
+          return impl
+        },
+        (error) => {
+          logger.warn('transport', 'Bun-shaped transport unavailable; using plain fetch', { reason: String(error).slice(0, 120) })
+          return undefined
+        },
+      ),
+    )
+    // Release pooled connections when the plugin unloads.
+    ctx.effect(() => () => { void transportHolder.current?.close?.() })
+  }
 
   try {
     registration = ctx.llm.registerAdapter(providers, adapter)

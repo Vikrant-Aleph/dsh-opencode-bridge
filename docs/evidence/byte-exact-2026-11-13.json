@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-13T08:33:15.756Z",
+  "officialBytes": 23073,
+  "pluginBytes": 951,
+  "identicalHeaders": false,
+  "officialHead": "POST /v1/chat/completions HTTP/1.1\r\nAuthorization: Bearer public\r\nContent-Type: application/json\r\nUser-Agent: opencode/latest/2.2.0/cli\r\nb3: X\r\ntraceparent: X\r\nx-opencode-client: cli\r\nx-opencode-project: e3efb2120f2bda1984f403cf544a533322ca638d\r\nx-opencode-session: ses_X\r\nx-opencode-session-id: ses_X\r\nx-session-affinity: ses_X\r\nx-session-id: ses_X\r\nConnection: keep-alive\r\nAccept: */*\r\nHost: X\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nContent-Length: N",
+  "pluginHead": "POST /v1/chat/completions HTTP/1.1\r\nAuthorization: Bearer public\r\nContent-Type: application/json\r\nUser-Agent: opencode/latest/2.2.0/cli\r\nb3: X\r\ntraceparent: X\r\nx-opencode-client: cli\r\nx-opencode-project: de71bf4428472077d6f1269acd0ce09cd86948a8\r\nx-opencode-session: ses_X\r\nx-opencode-session-id: ses_X\r\nx-session-affinity: ses_X\r\nx-session-id: ses_X\r\nConnection: keep-alive\r\nAccept: */*\r\nHost: X\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nContent-Length: N",
+  "headerDiffs": [
+    {
+      "line": 7,
+      "official": "x-opencode-project: e3efb2120f2bda1984f403cf544a533322ca638d",
+      "plugin": "x-opencode-project: de71bf4428472077d6f1269acd0ce09cd86948a8"
+    }
+  ]
+}

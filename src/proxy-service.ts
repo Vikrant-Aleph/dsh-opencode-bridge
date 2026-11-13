@@ -9,6 +9,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { noopLogger, type LoggerLike } from './logger.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 import {
   ProxyPool,
   normalizeEntry,
@@ -138,7 +139,7 @@ export class ProxyService {
         timeout.throwIfAborted()
         response = await fetch(`${this.options.baseUrl.replace(/\/$/, '')}/models`, {
           method: 'GET',
-          headers: { 'user-agent': 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' },
+          headers: { 'user-agent': DEFAULT_PROTOCOL_USER_AGENT },
           signal: timeout,
           ...(dispatcher ? { dispatcher } : {}),
         } as RequestInit)

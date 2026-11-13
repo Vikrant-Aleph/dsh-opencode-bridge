@@ -77,12 +77,14 @@ export async function httpError(
     ? Math.min(Number.MAX_SAFE_INTEGER - Math.max(0, Math.ceil(now)), Math.ceil(minimum)) : undefined
   const hint = parsed === undefined ? floor : floor === undefined ? parsed : Math.max(parsed, floor)
   const id = requestId(response.headers.get('x-opencode-log-id'))
+  const classification = reason(rawMessage, type)
   const code = response.status === 401 ? 'AUTH'
     : response.status === 403 && type === 'FreeTierError' ? 'FREE_TIER_GATE'
-      : response.status === 429 ? 'RATE_LIMIT' : 'PROVIDER_HTTP_ERROR'
+      : response.status === 429 && type === 'FreeUsageLimitError' && classification === 'quota_exceeded' ? 'FREE_USAGE_LIMIT'
+        : response.status === 429 ? 'RATE_LIMIT' : 'PROVIDER_HTTP_ERROR'
   return new UpstreamHttpError(message, code, {
     status: response.status,
-    reason: reason(rawMessage, type),
+    reason: classification,
     ...(type ? { upstreamType: type } : {}),
     ...(hint !== undefined ? { retryAfterMs: hint } : {}),
     ...(id ? { requestId: id } : {}),

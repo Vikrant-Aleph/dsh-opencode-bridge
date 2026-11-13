@@ -17,7 +17,7 @@ const request = messages => ({ provider: 'offline', model: 'fixture', sessionId:
 const images = row => Array.isArray(row.content) ? row.content.filter(p => p.type === 'image_url') : []
 const urls = rows => rows.flatMap(images).map(p => p.image_url.url)
 function adapter(extra = {}, catalog = { list: async () => [vision()] }) {
-  return new OpenCodeFreeAdapter(catalog, { providerRoute: 'offline', recipe: { baseUrl: 'https://fallback.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} }, requestTimeoutMs: 1000, toolFingerprint: false, toolTranslation: true, ...extra })
+  return new OpenCodeFreeAdapter(catalog, { providerRoute: 'offline', recipe: { baseUrl: 'https://fallback.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} }, requestTimeoutMs: 1000, environment: '', ...extra })
 }
 function fake(t) {
   const posts = []
@@ -75,8 +75,8 @@ test('pure text retains ordinary string body shape and controls', async t => {
   const posts = fake(t), service = reader()
   await run(adapter({ attachments: service }), { ...request([user([text('one'), text('two')])]), temperature: 0, maxTokens: 42, stop: ['END'] })
   const b = posts[0].body
-  assert.deepEqual(b.messages, [{ role: 'user', content: 'one\ntwo' }]); assert.deepEqual(b.tools, [])
-  assert.equal(b.stream, true); assert.equal(b.tool_choice, 'auto'); assert.equal(b.temperature, 0); assert.equal(b.max_tokens, 42); assert.deepEqual(b.stop, ['END']); assert.equal(service.reads.length, 0)
+  assert.deepEqual(b.messages, [{ role: 'user', content: 'one\ntwo' }]); assert.deepEqual(b.tools.map((t) => t.function.name), ['read'])
+  assert.equal(b.stream, true); assert.equal(Object.hasOwn(b, 'tool_choice'), false); assert.deepEqual(b.stream_options, { include_usage: true }); assert.equal(b.temperature, 0); assert.equal(b.max_completion_tokens, 42); assert.equal(Object.hasOwn(b, 'max_tokens'), false); assert.deepEqual(b.stop, ['END']); assert.equal(service.reads.length, 0)
 })
 test('offloaded image is a placeholder with no reader and no bytes', async t => {
   const posts = fake(t), service = reader()
@@ -122,10 +122,11 @@ for (const ending of ['end', 'real-user', 'dropped-developer']) test(`tool image
   const posts = fake(t), service = reader()
   const input = history(ending === 'dropped-developer' ? [{ role: 'developer', content: [text('dropped')] }] : [])
   if (ending === 'real-user') input.push(user([text('actual user')]))
-  await run(adapter({ attachments: service, toolImages: true, toolFingerprint: true }), { ...request(input), tools: [callerRead] })
+  await run(adapter({ attachments: service, toolImages: true }), { ...request(input), tools: [callerRead] })
   const rows = posts[0].body.messages.filter(m => m.role !== 'system')
   assert.deepEqual(rows.map(m => m.role), ['assistant', 'tool', 'tool', 'tool', 'user', ...(ending === 'real-user' ? ['user'] : [])])
-  assert.deepEqual(rows[0].tool_calls.map(c => [c.id, c.function.name]), [['A', 'read_client'], ['B', 'read_client'], ['C', 'read_client']])
+  assert.deepEqual(rows[0].tool_calls.map(c => [c.id, c.function.name]), [['A', 'read'], ['B', 'read'], ['C', 'read']])
+  // An explicitly empty reasoning block is real history, so the field is kept (official lowering).
   assert.equal(rows[0].reasoning_content, ''); assert.equal(rows[0].tool_calls[0].function.arguments, '{ "synthetic" : true }\n')
   assert.deepEqual(rows.slice(1, 4).map(m => m.tool_call_id), ['A', 'B', 'C'])
   assert.ok(rows[1].content.startsWith(' A \t')); assert.equal(rows[2].content, ' B\r\n '); assert.ok(rows[3].content.startsWith(' C '))

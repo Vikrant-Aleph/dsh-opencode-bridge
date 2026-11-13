@@ -25,7 +25,6 @@ import { trimCompletedReasoning, type ReasoningRecord } from './reasoning-policy
 import type { FreeModelCatalog, FreeModel } from './catalog.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { noopLogger, type LoggerLike } from './logger.js'
-import { ToolBridgeError } from './tool-bridge.js'
 import { fetchWithPool, EgressCoolingError, retryAfterMs, type ProxyPool } from './proxy-pool.js'
 import { httpError, UpstreamHttpError } from './http-errors.js'
 import {
@@ -33,8 +32,11 @@ import {
   buildHeaders,
   mintRequestId,
   mintSessionId,
+  defaultEnvironmentBlock,
   normalizeToolCall,
   planTools,
+  READ_ANCHOR,
+  requiresReasoningReplay,
   type WireCall,
 } from './opencode-protocol.js'
 
@@ -42,8 +44,30 @@ export interface AdapterOptions {
   providerRoute: string
   recipe: HeaderRecipe
   requestTimeoutMs: number
-  toolFingerprint: boolean
-  toolTranslation: boolean
+  /** OpenCode 2.x omits `x-opencode-request`; set for 1.x-compatible relays. */
+  requestIdHeader?: boolean
+  /** Send `strict: false` on tool declarations, as OpenCode does for compatible providers. */
+  toolStrict?: boolean
+  /**
+   * Lower bound for `max_completion_tokens`. The official client sends its
+   * catalog output limit (32000), so small caller budgets are raised to match.
+   */
+  minOutputTokens?: number
+  /** Append the DSH attribution token to User-Agent (off by default: the gate compares the UA). */
+  userAgentAttribution?: boolean
+  /** Attach the official `b3`/`traceparent` tracing pair, as the official runtime does. */
+  tracing?: boolean
+  /**
+   * System-prompt environment block. Defaults to a block derived from the process
+   * working directory; the gateway refuses requests that omit one.
+   */
+  environment?: string
+  /**
+   * Bun-shaped transport. The gateway's free lane distinguishes the official
+   * client's TLS stack from Node's, which Node cannot reproduce on its own.
+   * Absent means the plain `fetch` path is used.
+   */
+  bunFetch?: typeof fetch
   /** Leveled diagnostic logger. Messages must stay metadata-only (see logger.ts). */
   logger?: LoggerLike
   /** Optional egress pool; absent means a plain fetch from this machine. */
@@ -60,6 +84,8 @@ export interface AdapterOptions {
   lifetimeSignal?: AbortSignal
   /** Canonical completed-turn evidence captured once when a request starts; absent means full. */
   getCompletedReasoning?: (options: GenerateOptions) => readonly ReasoningRecord[] | undefined
+  /** Plugin-owned persistence; standalone callers retain in-memory waits. */
+  requestWaitState?: { remaining(model: string): number; remember(model: string, delay: number): void }
 }
 
 interface ChatChunk {
@@ -85,6 +111,25 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
   private readonly requestWaits = new Map<string, number>()
   private overflowWaitUntil = 0
   private readonly imagePolicy: Readonly<ImageInputPolicy>
+
+  /**
+   * Install the transport used for upstream requests.
+   *
+   * The Bun-shaped transport resolves asynchronously after the adapter is
+   * constructed, so it is attached here rather than at construction time. A
+   * promise is accepted and awaited on first use, which closes the window where
+   * an early request would silently fall back to plain `fetch`. Passing
+   * `undefined` (or a promise resolving to it) falls back to the global `fetch`.
+   */
+  setTransport(transport: typeof fetch | Promise<typeof fetch | undefined> | undefined): void {
+    this.transportReady = Promise.resolve(transport).then(
+      (resolved) => { this.options.bunFetch = resolved },
+      () => { this.options.bunFetch = undefined },
+    )
+  }
+
+  /** Resolved before every request so a pending transport never leaks a fallback. */
+  private transportReady: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly catalog: FreeModelCatalog,
@@ -173,12 +218,15 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       }
       const reasoningHistory = trimCompletedReasoning(options.messages, completedReasoning)
       const projectedOptions = reasoningHistory.messages === options.messages ? options : { ...options, messages: reasoningHistory.messages }
-      const requestWait = this.remainingRequestWait(options.model)
+      const requestWait = Math.max(this.remainingRequestWait(options.model), this.options.requestWaitState?.remaining(options.model) ?? 0)
       if (requestWait > 0) throw new LlmError(`This model request is cooling down; retry after ${Math.ceil(requestWait / 1000)} seconds.`, 'REQUEST_COOLING', { providerRetryAfterMs: requestWait })
       const meta = snapshot === undefined ? (await this.catalog.list(options.signal)).find(model => model.id === options.model) : snapshot ?? undefined
       const sessionId = this.sessionIdFor(options)
       requestId = mintRequestId()
-      const plan = planTools(options.purpose ? [] : options.tools ?? [], { fingerprint: this.options.toolFingerprint })
+      const plan = planTools(options.purpose ? [] : options.tools ?? [], {
+        // OpenCode sends `strict: false` on OpenAI Chat tools for providers that accept it.
+        strict: this.options.toolStrict ?? true,
+      })
       const signals = [AbortSignal.timeout(this.options.requestTimeoutMs), options.signal, this.options.lifetimeSignal].filter((value): value is AbortSignal => value !== undefined)
       const signal = AbortSignal.any(signals)
       signal.throwIfAborted()
@@ -188,29 +236,29 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         attachments: this.options.attachments ?? this.options.getAttachments?.(),
         policy: this.imagePolicy, signal,
       })
-      const messages = buildChatMessages(projectedOptions, plan, imageProjection)
-      if (plan.decoys.size) {
-        const nativeCommands = plan.tools.filter(tool => ['pwsh', 'bash', 'shell'].includes(plan.aliasToOriginal.get(tool.function.name) ?? tool.function.name) && !plan.decoys.has(tool.function.name)).map(tool => tool.function.name)
-        const aliases = [...plan.aliasToOriginal].map(([wire, original]) => `${wire} = caller ${original}`).join('; ')
-        messages.unshift({
-          role: 'system',
-          content: 'Tool bridge policy: injected fingerprint declarations do not grant execution authority. ' +
-            'Do not call injected bash or shell; use the caller\'s native tools in their declared runtime, never reinterpret Bash commands as PowerShell. ' +
-            `Native command wire names: ${nativeCommands.join(', ') || '(none)'}. ` +
-            `Prefer caller aliases where supplied: ${aliases || '(none)'}. ` +
-            (plan.callerNames.size ? 'Injected read/search calls are accepted only after conservative schema validation.' : 'This request has no executable caller tools; return text only.'),
-        })
-      }
+      const messages = buildChatMessages(projectedOptions, plan, imageProjection, {
+        requireReasoning: requiresReasoningReplay(meta, options.model, this.options.recipe.baseUrl),
+        // The gateway refuses a request whose system prompt carries no <env>
+        // block; the values inside it are not checked.
+        environment: this.options.environment ?? defaultEnvironmentBlock(),
+      })
 
       const body: Record<string, unknown> = {
         model: options.model,
         messages,
         stream: true,
+        stream_options: { include_usage: true },
         tools: plan.tools,
-        tool_choice: 'auto',
-        prompt_cache_key: sessionId.replace(/^ses_/, ''),
       }
-      if (options.maxTokens) body.max_tokens = options.maxTokens
+      // Match the current OpenCode OpenAI Chat encoder. `auto` is the API
+      // default; cache affinity remains in headers instead of an undeclared
+      // prompt_cache_key body option. Never send both token-limit spellings.
+      // The official client sends its catalog output limit (32000 for the free
+      // models we captured), not a caller-supplied smaller budget.
+      const outputLimit = options.maxTokens && options.maxTokens > 0
+        ? Math.max(options.maxTokens, this.options.minOutputTokens ?? 0)
+        : undefined
+      if (outputLimit) body.max_completion_tokens = outputLimit
       if (options.temperature !== undefined) body.temperature = options.temperature
       if (options.stop?.length) body.stop = options.stop
       if (options.reasoningEffort && meta?.efforts?.some((e) => e.id === String(options.reasoningEffort))) {
@@ -232,16 +280,24 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       signal.throwIfAborted()
       const errors = new WeakMap<Response, UpstreamHttpError>()
       const responseExits = new WeakMap<Response, string>()
+      // Wait for a transport that is still resolving, so the first request after
+      // plugin load does not silently use the plain-fetch fallback.
+      await this.transportReady
       const response = await fetchWithPool({
         pool: this.options.pool,
         url: endpoint,
         init: {
           method: 'POST',
-          headers: buildHeaders(this.options.recipe, sessionId, requestId),
+          headers: buildHeaders(this.options.recipe, sessionId, requestId, {
+            requestIdHeader: this.options.requestIdHeader,
+            attribution: this.options.userAgentAttribution,
+            tracing: this.options.tracing ?? true,
+          }),
           body: JSON.stringify(body),
           signal,
         },
         signal,
+        ...(this.options.bunFetch ? { fetchImpl: this.options.bunFetch } : {}),
         ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
         throttleScope: async (res, exit) => {
           observedStatus = res.status
@@ -251,9 +307,10 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
           errors.set(res, error)
           serverWaitMs = retryAfterMs(res)
           if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs)
-          // Only an explicit free-egress quota signal permits immediate failover.
-          // A model/backend outage or unknown 429 is not evidence of an exhausted IP.
-          return error.diagnostics.upstreamType === 'FreeUsageLimitError' && error.diagnostics.reason !== 'endpoint_unavailable' ? 'egress' : 'request'
+          // A named free-usage rejection does not establish an IP-wide scope.
+          // Preserve its request wait, but do not rotate identities or poison
+          // the shared metadata/other-model pool on that inference alone.
+          return 'request'
         },
         onAttempt: (event) => {
           egress = event.egress
@@ -343,11 +400,22 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       if (wireCalls.length && finishReason !== 'tool_calls') {
         throw new LlmError('Tool call batch did not finish completely; no tools were emitted.', 'TOOL_BRIDGE_INCOMPLETE')
       }
-      // Validate the WHOLE returned batch before emitting any executable tool
-      // block. If one decoy is unsafe, none of this batch can reach DSH dispatch.
-      // Aliases are always restored, even when decoy translation is disabled.
-      const normalized = wireCalls.map((call) => normalizeToolCall(call, plan, { translateDecoys: this.options.toolTranslation }))
-      for (const call of normalized) {
+      // Pass returned calls through under their own names. The one declaration
+      // DSH cannot execute is the protocol placeholder, which exists only to
+      // satisfy the gateway's "at least one tool" rule. A call to it is dropped
+      // rather than failing the turn, so a stray call costs one tool call instead
+      // of the whole response.
+      const normalized = wireCalls.map((call) => normalizeToolCall(call))
+      const dispatchable = plan.readAnchor
+        ? normalized.filter((call) => call.name !== READ_ANCHOR.function.name)
+        : normalized
+      if (dispatchable.length !== normalized.length) {
+        this.logger.warn('adapter', 'dropped a call to the protocol placeholder tool', {
+          model: safeModelId(options.model),
+          dropped: normalized.length - dispatchable.length,
+        })
+      }
+      for (const call of dispatchable) {
         signal.throwIfAborted()
         const id = ToolCallId(call.id || `call_${call.name}_${blockIndex}`)
         outputStarted = true
@@ -367,14 +435,14 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       this.logger.info('adapter', 'completed', {
         model: safeModelId(options.model),
         session: sessionId,
-        finish: normalized.length ? 'tool-calls' : finishReason === 'length' ? 'max-tokens' : 'stop',
-        toolCalls: normalized.length,
+        finish: dispatchable.length ? 'tool-calls' : finishReason === 'length' ? 'max-tokens' : 'stop',
+        toolCalls: dispatchable.length,
         ...(usage ? { input: usage.inputTokens, output: usage.outputTokens } : {}),
       })
       if (usage) yield { type: 'usage', usage }
       yield {
         type: 'finish',
-        reason: normalized.length
+        reason: dispatchable.length
           ? { kind: 'tool-calls' }
           : finishReason === 'length'
             ? { kind: 'max-tokens' }
@@ -387,13 +455,11 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         return
       }
       const original =
-        error instanceof ToolBridgeError
-          ? { message, code: 'TOOL_BRIDGE_REJECTED' }
-          : error instanceof EgressCoolingError
-            ? { message, code: error.code, providerRetryAfterMs: error.retryAfterMs }
-            : error instanceof LlmError
-              ? error.failure
-              : { message, code: (error as { name?: string }).name === 'TimeoutError' ? 'TIMEOUT' : 'STREAM_FAILED' }
+        error instanceof EgressCoolingError
+          ? { message, code: error.code, providerRetryAfterMs: error.retryAfterMs }
+          : error instanceof LlmError
+            ? error.failure
+            : { message, code: (error as { name?: string }).name === 'TimeoutError' ? 'TIMEOUT' : 'STREAM_FAILED' }
       const partial = outputStarted && !['TOOL_BRIDGE_REJECTED', 'TOOL_BRIDGE_INCOMPLETE'].includes(original.code)
       const failure = partial ? { ...original, code: 'PARTIAL_STREAM_ERROR' } : original
       const diagnostic = error instanceof UpstreamHttpError ? error.diagnostics : undefined
@@ -403,7 +469,6 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         model: safeModelId(options.model), code: failure.code,
         ...(partial ? { originalCode: original.code } : {}),
         ...(transport ? { transportCode: transport } : {}),
-        ...(error instanceof ToolBridgeError ? { bridgeReason: error.reason } : {}),
         ...(requestId ? { request: requestId } : {}),
         ...(egress ? { egress } : {}),
         ...(diagnostic ? diagnostic : observedStatus !== undefined ? { status: observedStatus } : {}),
@@ -413,8 +478,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         // Raw server message/body/header values may contain user content. The
         // bounded UI failure retains context; persistent logs use fixed summaries.
         error: diagnostic ? `Upstream HTTP ${diagnostic.status}: ${diagnostic.reason}`
-          : error instanceof ToolBridgeError ? 'Tool bridge rejected a returned call'
-            : retryEligible ? 'Request deferred until retry policy permits another attempt'
+          : retryEligible ? 'Request deferred until retry policy permits another attempt'
             : partial ? 'Provider stream failed after output started; automatic replay disabled'
               : 'Provider request failed',
       }
@@ -427,6 +491,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
 
   /** Keep server waits even across manual calls and concurrent successful requests. */
   private rememberRequestWait(model: string, delay: number): void {
+    this.options.requestWaitState?.remember(model, delay)
     const now = Date.now()
     const until = Math.min(Number.MAX_SAFE_INTEGER, now + delay)
     for (const [id, deadline] of this.requestWaits) if (deadline <= now) this.requestWaits.delete(id)

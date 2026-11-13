@@ -8,97 +8,192 @@
 
 [中文](README.zh.md) | English
 
-A plugin for using [OpenCode](https://opencode.ai) free models in
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
-No OpenCode account or API key is required by default. Supports automatic model
-refresh, optional context trimming of completed-turn reasoning,
-and egress-proxy rotation, with a fail-closed tool bridge and offline agent-scoped auditing.
+Use [OpenCode](https://opencode.ai)'s free models in
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no
+OpenCode account or API key needed. Optional context trimming and egress rotation are
+included.
 
 ## Features
 
-- **Automatic model refresh**: fetches the free-model list at startup and every 10 minutes by default, adds/removes models as the upstream catalog changes, and retains the last successful list if a refresh fails.
-- **Optional context trimming**: clear only confirmed completed-turn reasoning, retain the current tool chain, and keep full replay by default.
-- **Streaming and tool calls**: preserves reasoning history across multi-step tool calls, adapts DSH's native tools, and rejects unverified conversions rather than treating Bash commands as PowerShell.
-- **Optional proxy failover**: configure multiple HTTP(S) or SOCKS proxies, try another ready egress for explicit egress-quota errors or connection failures, and respect server-requested waits.
+**Impersonates the official OpenCode client so DSH can use OpenCode's free models.**
 
-## Install and get started
+Concretely, it reproduces the official client's request headers, the request shape the
+gateway requires, and the TLS and HTTP fingerprints. It is an `LlmAdapter`, so it plugs
+into DSH's existing loop: the agent loop, permissions and tool
+execution stay with DSH, and DSH resolves every tool call itself. What the gateway does
+and does not check is described [below](#how-opencode-identifies-a-client).
 
-Image input requires DSH's attachment request-version API; this version is built and verified against DSH SDK 0.2.1-rc.2.
+Also included:
 
-### Install in DSH Desktop
+- **Automatic model refresh** — reads the free-model list at startup and every 10 minutes, adding and removing models as the upstream catalog changes and keeping the last good list when a refresh fails.
+- **Streaming with reasoning continuity** — streams responses and preserves reasoning across multi-step tool calls, including the `reasoning_content` field some models require on replay.
+- **Optional context trimming** — clears reasoning only from confirmed completed turns, off by default.
+- **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, failing over on explicit egress-quota errors or connection failures and always honouring server-requested waits.
+
+## How OpenCode identifies a client
+
+Everything below was measured — one variable at a time, from a single runtime, against
+the real gateway.
+
+### What is checked
+
+| Requirement | What we measured |
+|---|---|
+| `User-Agent` | Must be the official token, `opencode/latest/2.2.0/cli`. A different token is refused even when everything else matches. |
+| **At least one declared tool** | The name does not matter: a lone tool called anything passes. An empty `tools` array is refused. |
+| **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but that block passes. The same prompt without it is refused. |
+
+The last two are the interesting ones. Both are present in the official client no
+matter how a user configures it, which is why they work as a client check: a user can
+rewrite the system prompt and prune the tool list, but the client still appends an
+`<env>` block and still declares at least one tool.
+
+### What is not checked
+
+Each of these was assumed necessary at some point, then disproved:
+
+- **The official tool manifest.** A custom agent with a single tool passes.
+- **The official system prompt.** A user's own prompt passes.
+- **The values inside `<env>`.** Anything works.
+- **The Code Mode catalogue.** A catalogue synthesised from different tool names passes.
+- **The runtime.** Bun 1.4.4 sending a zero-tool body is refused exactly like Node, so this is not a Bun versus Node.js issue.
+- **The TLS fingerprint alone.** Aligning it byte for byte (cipher suites, curves, extension order, signature algorithms) did **not** fix the refusal — the real cause was the `<env>` block.
+
+### Caveats
+
+All of the above are dated observations from 2026-11-13. The full
+evidence trail and the hypotheses that were ruled out are in the
+[camouflage policy](CAMOUFLAGE.md).
+
+## TLS and HTTP fingerprint camouflage
+
+**Status: aligned; necessity unproven.**
+
+It exists to cover fingerprint checks that may be added later, and to make this traffic
+indistinguishable from the official client at those layers.
+
+### TLS fingerprint
+
+Node cannot express the official handshake: OpenSSL orders extensions itself and offers
+no post-quantum key share, producing a different hello (roughly 270 bytes against 1482).
+The plugin therefore delegates the handshake to
+[`wreq-js`](https://github.com/sqdshguy/wreq-js), a Rust engine on BoringSSL — the same
+underlying TLS library the official client uses.
+
+| Element | Value |
+|---|---|
+| Cipher suites | The captured 17, in capture order, starting `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256` |
+| Supported groups | `X25519MLKEM768`, `X25519`, `P-256`, `P-384` — the default profile also offers a bare `MLKEM768` group; the official client does not have it, so it is removed |
+| Signature algorithms | The captured 11, in order. Two are easy to get wrong: `0x0807` is **ed25519**, not `rsa_pss_pss_sha256` (that is `0x0809`), and `0x0603` is `ecdsa_secp521r1_sha512`, written `ECDSA+SHA512` by BoringSSL |
+| Extensions | The captured 12, in capture order, with GREASE, ECH and ALPS disabled |
+| ALPN | `http/1.1` only — the official client never offers `h2`, so HTTP/2 settings are not part of its fingerprint |
+| Result | A 1482-byte `ClientHello`; byte-identical to the capture once random fields, session id and key-share payloads are normalised |
+
+### HTTP fingerprint
+
+| Element | Detail |
+|---|---|
+| Header names and casing | `Authorization`, `Content-Type`, `User-Agent`, `Connection`, `Accept`, `Host`, `Accept-Encoding`, `Content-Length` are capitalised as captured; the custom `b3`, `traceparent` and `x-opencode-*` headers stay lowercase |
+| Header order | The captured order, including `Host`, `Accept-Encoding` and `Content-Length` in positions 14–16 — supplied explicitly, because the transport would otherwise append them at the end |
+| `Accept-Encoding` | `gzip, deflate, br, zstd`, Bun's default; Node's default omits `br` and `zstd` |
+| `Connection` | `keep-alive`, over a persistent pooled connection reused across turns |
+| Deliberately absent | No `sec-ch-ua*`, `sec-fetch-*`, `priority` or `accept-language` — browser emulation adds these by default and the official client never sends them, so they are explicitly suppressed |
+
+The result is byte-identical to the captured request apart from `x-opencode-project`,
+which is derived from the working directory.
+
+`wreq-js` is an **optional** dependency. Without its native binding the plugin falls back
+to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups
+plain `fetch` cannot connect at all, so the transport has value beyond fingerprinting.
+
+## Install
+
+### In DSH Desktop
 
 1. Open **Plugins** in the sidebar, then click **Add plugin** in the top-right corner.
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@0.5.5
+   dsh-opencode-bridge@1.0.0
    ```
 
-3. Prefer the official npm registry under **Installation source**. Mirrors may take time to sync new versions.
+3. Prefer the official npm registry under **Installation source**; mirrors may lag.
 4. Click **Install** and wait for completion.
 
-### Install from the command line
-
-Install from npm into your DSH profile:
+### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@0.5.5
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.0
 ```
 
-Replace `desktop` with the profile you use. If `dsh` is not available in your terminal, use:
+Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@0.5.5
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.0
 ```
 
-After installation, select a model under **OpenCode Bridge** in the model picker. If it does not appear, restart the corresponding DSH profile.
-Normal use requires no API key or manual configuration-file edits. List changes are announced to DSH's model picker without restarting the plugin. Advanced refresh-interval configuration is documented in the [configuration reference](TECHNICAL.md#8-configuration-reference).
+Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
+restart that DSH profile.
+
+No API key or hand-edited configuration is needed. Model-list changes reach the picker
+without restarting the plugin. Refresh intervals and the rest of the configuration are
+in the [configuration reference](TECHNICAL.md#7-configuration).
 
 ## Optional context trimming
 
-Open **Settings → OpenCode Bridge → Context trimming** to enable **Trim reasoning from completed turns**. It is off by default (full replay). Only reasoning from confirmed successful completed turns is cleared; the current tool chain and uncertain/interrupted history remain intact. Required `reasoning_content` fields are still sent.
+Open **Settings → OpenCode Bridge → Context trimming** and enable **Trim reasoning from
+completed turns**. Off by default (full replay).
 
-The setting is saved through DSH and applies to new requests without deleting local history or interrupting running requests. Savings depend on the upstream; DSH's local estimate may still include full history. Turn it off if continuity is affected.
+Only reasoning from confirmed successful turns is cleared; the current tool chain and
+uncertain or interrupted history stay intact, and required `reasoning_content` fields
+are still sent. The setting affects new requests only, leaves local history untouched, and
+does not interrupt a running request. Savings depend on the upstream, and DSH's local
+estimate may still count the full history — turn it off if continuity suffers.
 
-## Optional proxy setup
+## Optional egress rotation
 
-Without proxy configuration, the plugin uses a direct connection from your machine.
+Without configuration the plugin connects directly.
 
 1. Open **Settings → OpenCode Bridge → Egress rotation (optional)**.
-2. Add your existing proxy addresses one at a time, such as `http://127.0.0.1:7890` or `socks5h://127.0.0.1:1080`. You can keep `direct` (this machine) as an egress.
-3. Use **Test all** to check connectivity. Cooling entries are skipped to avoid early requests. Adding or removing an entry saves and applies the change automatically.
+2. Add proxies one at a time, such as `http://127.0.0.1:7890` or `socks5h://127.0.0.1:1080`. `direct` (this machine) can stay in the list.
+3. Use **Test all** to check connectivity. Cooling entries are skipped so no early request is made. Adding or removing an entry saves and applies immediately.
 
-The plugin prefers ready entries in list order. Explicit egress-quota errors or connection failures temporarily cool an entry. A server-requested wait prevents immediate failover, and a fully cooling pool sends no early requests. Model-backend unavailability and unexplained 429s are not automatically treated as exhausted proxy quota.
+Entries are tried in list order. Explicit egress-quota errors and connection failures
+cool an entry temporarily; a server-requested wait prevents immediate failover, and a
+fully cooling pool sends nothing early. Model-backend trouble and unexplained 429s are
+*not* treated as exhausted proxy quota.
 
-DSH centrally performs at most two automatic retries; excessive waits return an error for you to retry later. Replies that have started streaming are not automatically replayed.
+DSH performs at most two automatic retries; long waits return an error for you to retry
+later. Replies that have already started streaming are never replayed.
 
-**HTTP(S), SOCKS4/4a and SOCKS5/5h** proxies are supported. Use only authorized proxies and respect upstream service limits.
+**HTTP(S), SOCKS4/4a and SOCKS5/5h** are supported.
 
 ## Important notes
 
-- **Unofficial project**: not affiliated with OpenCode or DeepSeek. Upstream protocols, models and free quotas may change; continued availability is not guaranteed.
-- **Third-party processing**: model requests are sent to OpenCode's service and, when configured, traverse your proxy. Do not send content you would not entrust to those third parties.
-- **Attachments**: image input follows each model's declared capability. DSH prepares request versions and applies image budgets/offload decisions; ordinary files remain text handles rather than native file inputs. Image bytes and data URLs are not written to diagnostic logs.
-- **Credentials and logs**: proxy passwords are stored in plaintext locally. SOCKS username/password authentication is not encrypted by SOCKS itself; use trusted proxies and networks. Do not publish the configuration file; inspect logs and screenshots for sensitive information before sharing.
+- **Unofficial project.** Not affiliated with OpenCode or DeepSeek. Upstream protocols, models and free quotas can change; continued availability is not guaranteed.
+- **Third-party processing.** Model requests go to OpenCode's service and, if configured, through your proxy. Do not send content you would not entrust to those parties.
+- **Attachments.** Image input follows each model's declared capability. DSH prepares request versions and applies the image budgets and offload decisions; ordinary files travel as text handles. Image bytes and data URLs never reach the diagnostic logs.
+- **Credentials and logs.** Proxy passwords are stored in plaintext locally. SOCKS authentication is not encrypted by SOCKS itself — use proxies and networks you trust, do not publish the configuration file, and check logs and screenshots before sharing them.
 
 ## Troubleshooting
 
 | Problem | What to try |
 |---|---|
-| No models after installation | Check the target profile, confirm the plugin is enabled, restart DSH and check network connectivity. |
-| Thinking mode fails after a tool result with missing reasoning_content | Update the plugin; 0.5.3 restores the required assistant-history field, including empty reasoning. |
-| HTTP 429 | Retry later. If proxies are configured, inspect their status in Settings. |
-| HTTP 403 or 503 | Check for plugin updates and upstream service issues, then retry later. These errors do not trigger proxy failover. Report persistent problems. |
-| Tool calls fail | Check the **Diagnostic log** tab, or ask the agent to run `opencode_bridge_audit` for tool compatibility. |
+| No models after installation | Check the target profile, confirm the plugin is enabled, restart DSH, verify network access. |
+| HTTP 429 | Retry later. With proxies configured, check their status in Settings. A 429 also appears when the egress quota is spent, which no request shape can change. |
+| HTTP 403 or 503 | Check for plugin updates and upstream status, then retry. These do not trigger proxy failover. Report persistent cases. |
+| Tool calls fail | Check the **Diagnostic log** tab; a call DSH never declared cannot be dispatched. |
 
-For bugs or feature requests, [choose an Issue form](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose) and fill in the requested versions, reproduction steps and expected/actual behavior. Redact logs first; do not include API keys, proxy passwords or private conversations.
+For bugs or feature requests, [choose an Issue form](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose)
+and include versions, reproduction steps and expected versus actual behaviour. Redact
+logs first — never include API keys, proxy passwords or private conversations.
 
-## Development and technical documentation
+## Development and documentation
 
 <details>
-<summary>Develop and install from source</summary>
+<summary>Build and install from source</summary>
 
-Requires **Node.js ≥ 20.18.1** and pnpm. Node.js 22 or 24 LTS is recommended.
+Requires **Node.js ≥ 20.18.1** and pnpm; Node.js 22 or 24 LTS is recommended.
 
 ```sh
 git clone https://github.com/Vikrant-Aleph/dsh-opencode-bridge.git
@@ -108,19 +203,22 @@ pnpm build
 pnpm test
 ```
 
-Build output is not committed to Git. To install a local build in DSH:
+Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-0.5.5.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.0.tgz
 ```
 
 </details>
 
-See the [technical documentation](TECHNICAL.md) ([中文](TECHNICAL.zh.md)) for implementation details, full configuration, testing and maintenance rules.
+[Technical documentation](TECHNICAL.md) ([中文](TECHNICAL.zh.md)) covers the wire
+protocol, module layout, full configuration, testing and maintenance rules.
 
 ## Credits and license
 
-Protocol research drew on the official OpenCode source and open-source projects including sub2api, 9router, hermes-oc-free-provider and cpa-plugin-opencodezen. Sources and comparison records are documented in the technical documentation.
+Protocol research drew on the official OpenCode client, its public source, and
+community projects that documented the same restriction. The captures and the policies
+derived from them are summarised in the [camouflage policy](CAMOUFLAGE.md).
 
 Licensed under [MIT](LICENSE).

@@ -24,7 +24,7 @@ function makeAdapter(t, pool, behaviour) {
   const logs = []
   const logger = Object.fromEntries(['debug', 'info', 'warn', 'error'].map((level) => [level, (...args) => logs.push(args)]))
   const adapter = new OpenCodeFreeAdapter({ list: async () => [] }, {
-    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: true, logger, pool,
+    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000, logger, pool,
     dispatcherFor: (url) => ({ url }),
   })
   return { adapter, seen, logs }
@@ -36,21 +36,18 @@ async function run(adapter) {
   return { chunks, text: chunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join(''), terminal: chunks.at(-1) }
 }
 
-test('an explicit egress quota without a server wait rotates to a ready proxy', async (t) => {
+test('free usage rejection without a server wait never rotates identities or infers IP scope', async (t) => {
   const pool = new ProxyPool(['direct', 'http://proxy-a:8080', 'http://proxy-b:8080'], { cooldownMs: 60_000 })
-  const { adapter, seen, logs } = makeAdapter(t, pool, (egress) =>
-    egress === 'direct'
-      ? new Response('{"error":{"type":"FreeUsageLimitError","message":"Usage limit exceeded"}}', { status: 429 })
-      : new Response(streamOf('ROTATED'), { status: 200 }))
+  const { adapter, seen, logs } = makeAdapter(t, pool, () =>
+    new Response('{"error":{"type":"FreeUsageLimitError","message":"Usage limit exceeded"}}', { status: 429 }))
   const result = await run(adapter)
-  assert.equal(result.text, 'ROTATED')
-  assert.equal(result.terminal.reason.kind, 'stop')
-  assert.deepEqual(seen, ['direct', 'http://proxy-a:8080'])
-  const health = pool.health()
-  assert.equal(health[0].state, 'cooling')
-  assert.ok(health[0].coolingUntil > Date.now() + 50_000, 'fallback cooldown must keep the throttled exit retired')
-  assert.equal(health[1].state, 'ready')
+  assert.equal(result.text, '')
+  assert.equal(result.terminal.reason.kind, 'error')
+  assert.equal(result.terminal.reason.failure.code, 'FREE_USAGE_LIMIT')
+  assert.deepEqual(seen, ['direct'])
+  assert.ok(pool.health().every(entry => entry.state === 'ready'))
   assert.ok(logs.some((entry) => String(entry[1]).includes('egress attempt')))
+  assert.equal(adapter.providerRetryPolicy(options.provider).retryableCodes.includes('FREE_USAGE_LIMIT'), false)
 })
 
 test('rotation never duplicates streamed text when the first egress fails mid-stream', async (t) => {
@@ -79,13 +76,13 @@ test('rotation never duplicates streamed text when the first egress fails mid-st
   assert.equal(result.terminal.reason.kind, 'error')
 })
 
-test('all egresses throttled surfaces the rate limit instead of hanging', async (t) => {
+test('free usage denial is surfaced once instead of exhausting every configured egress', async (t) => {
   const pool = new ProxyPool(['direct', 'http://proxy-a:8080'], { cooldownMs: 60_000 })
   const { adapter, seen } = makeAdapter(t, pool, () => new Response('{"error":{"type":"FreeUsageLimitError","message":"Usage limit exceeded"}}', { status: 429 }))
   const result = await run(adapter)
-  assert.deepEqual(seen.length, 2)
+  assert.equal(seen.length, 1)
   assert.equal(result.terminal.reason.kind, 'error')
-  assert.equal(result.terminal.reason.failure.code, 'RATE_LIMIT')
+  assert.equal(result.terminal.reason.failure.code, 'FREE_USAGE_LIMIT')
   assert.equal(result.text, '')
 })
 
@@ -120,7 +117,7 @@ test('without a pool the adapter still uses a plain fetch', async (t) => {
     return new Response(streamOf('PLAIN'), { status: 200 })
   })
   const adapter = new OpenCodeFreeAdapter({ list: async () => [] }, {
-    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: true,
+    providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 5000,
   })
   const result = await run(adapter)
   assert.equal(result.text, 'PLAIN')

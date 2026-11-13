@@ -1,0 +1,281 @@
+{
+  "at": "2026-11-13T08:20:58.002Z",
+  "recordBytes": {
+    "official": 1482,
+    "plugin": 1482
+  },
+  "sessionIdBytes": {
+    "official": 16,
+    "plugin": 16
+  },
+  "compLen": {
+    "official": 1,
+    "plugin": 1
+  },
+  "ciphersEqual": true,
+  "extensionRows": [
+    {
+      "index": 0,
+      "officialType": "0x0017",
+      "pluginType": "0x0017",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 0,
+      "pluginLen": 0,
+      "officialDecoded": {
+        "extendedMasterSecret": "empty"
+      },
+      "pluginDecoded": {
+        "extendedMasterSecret": "empty"
+      }
+    },
+    {
+      "index": 1,
+      "officialType": "0xff01",
+      "pluginType": "0xff01",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 1,
+      "pluginLen": 1,
+      "officialDecoded": {
+        "serverName": 1
+      },
+      "pluginDecoded": {
+        "serverName": 1
+      }
+    },
+    {
+      "index": 2,
+      "officialType": "0x000a",
+      "pluginType": "0x000a",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 10,
+      "pluginLen": 10,
+      "officialDecoded": {
+        "groups": [
+          "0x11ec",
+          "0x1d",
+          "0x17",
+          "0x18"
+        ]
+      },
+      "pluginDecoded": {
+        "groups": [
+          "0x11ec",
+          "0x1d",
+          "0x17",
+          "0x18"
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "officialType": "0x000b",
+      "pluginType": "0x000b",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 2,
+      "pluginLen": 2,
+      "officialDecoded": {
+        "ecPointFormats": [
+          0
+        ]
+      },
+      "pluginDecoded": {
+        "ecPointFormats": [
+          0
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "officialType": "0x0023",
+      "pluginType": "0x0023",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 0,
+      "pluginLen": 0,
+      "officialDecoded": {
+        "sessionTicket": "empty"
+      },
+      "pluginDecoded": {
+        "sessionTicket": "empty"
+      }
+    },
+    {
+      "index": 5,
+      "officialType": "0x0010",
+      "pluginType": "0x0010",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 11,
+      "pluginLen": 11,
+      "officialDecoded": {
+        "alpn": [
+          "http/1.1"
+        ]
+      },
+      "pluginDecoded": {
+        "alpn": [
+          "http/1.1"
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "officialType": "0x0005",
+      "pluginType": "0x0005",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 5,
+      "pluginLen": 5,
+      "officialDecoded": {
+        "statusRequest": [
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "pluginDecoded": {
+        "statusRequest": [
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "index": 7,
+      "officialType": "0x000d",
+      "pluginType": "0x000d",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 24,
+      "pluginLen": 24,
+      "officialDecoded": {
+        "sigalgs": [
+          "0x403",
+          "0x804",
+          "0x401",
+          "0x503",
+          "0x805",
+          "0x501",
+          "0x806",
+          "0x601",
+          "0x807",
+          "0x603",
+          "0x201"
+        ]
+      },
+      "pluginDecoded": {
+        "sigalgs": [
+          "0x403",
+          "0x804",
+          "0x401",
+          "0x503",
+          "0x805",
+          "0x501",
+          "0x806",
+          "0x601",
+          "0x807",
+          "0x603",
+          "0x201"
+        ]
+      }
+    },
+    {
+      "index": 8,
+      "officialType": "0x0012",
+      "pluginType": "0x0012",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 0,
+      "pluginLen": 0,
+      "officialDecoded": {
+        "sct": "empty"
+      },
+      "pluginDecoded": {
+        "sct": "empty"
+      }
+    },
+    {
+      "index": 9,
+      "officialType": "0x0033",
+      "pluginType": "0x0033",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 1258,
+      "pluginLen": 1258,
+      "officialDecoded": {
+        "keyShares": [
+          {
+            "group": "0x11ec",
+            "keyBytes": 1216
+          },
+          {
+            "group": "0x1d",
+            "keyBytes": 32
+          }
+        ]
+      },
+      "pluginDecoded": {
+        "keyShares": [
+          {
+            "group": "0x11ec",
+            "keyBytes": 1216
+          },
+          {
+            "group": "0x1d",
+            "keyBytes": 32
+          }
+        ]
+      }
+    },
+    {
+      "index": 10,
+      "officialType": "0x002d",
+      "pluginType": "0x002d",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 2,
+      "pluginLen": 2,
+      "officialDecoded": {
+        "pskModes": [
+          1
+        ]
+      },
+      "pluginDecoded": {
+        "pskModes": [
+          1
+        ]
+      }
+    },
+    {
+      "index": 11,
+      "officialType": "0x002b",
+      "pluginType": "0x002b",
+      "typeMatch": true,
+      "lenMatch": true,
+      "officialLen": 5,
+      "pluginLen": 5,
+      "officialDecoded": {
+        "versions": [
+          "0304",
+          "0303"
+        ]
+      },
+      "pluginDecoded": {
+        "versions": [
+          "0304",
+          "0303"
+        ]
+      }
+    }
+  ],
+  "mismatched": []
+}

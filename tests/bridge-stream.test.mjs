@@ -6,7 +6,7 @@ const callerRead = { name: 'read', description: 'Host text reader', parameters: 
 const callerPwsh = { name: 'pwsh', description: 'Host PowerShell', parameters: { type: 'object', properties: { command: { type: 'string' } } } }
 const base = {
   providerRoute: 'opencode-bridge', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
-  requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true,
+  requestTimeoutMs: 5000,
 }
 const options = { provider: 'opencode-bridge', model: 'fixture-free', messages: [], tools: [callerRead, callerPwsh] }
 const finish = { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }
@@ -29,24 +29,23 @@ async function collect(t, events, input = options) {
 }
 const blocks = chunks => chunks.filter(c => c.type === 'block-end' && c.block.type === 'tool-call').map(c => c.block)
 
-test('fragmented names and UTF-8 arguments are assembled before validation', async t => {
-  const { chunks } = await collect(t, [delta(0, 're', '{"path":'), delta(0, 'ad', '"测试.txt"}'), finish])
+test('fragmented names and UTF-8 arguments are assembled into one call', async t => {
+  const { chunks } = await collect(t, [delta(0, 're', '{"file_path":'), delta(0, 'ad', '"测试.txt"}'), finish])
   assert.deepEqual(blocks(chunks).map(b => [b.name, JSON.parse(b.arguments)]), [['read', { file_path: '测试.txt' }]])
 })
-test('out-of-order wire slots still emit in slot order after whole-batch validation', async t => {
-  const { chunks } = await collect(t, [delta(1, 'read_client', '{"file_path":"b"}'), delta(0, 'read_client', '{"file_path":"a"}'), finish])
-  assert.deepEqual(blocks(chunks).map(b => JSON.parse(b.arguments).file_path), ['a', 'b'])
+test('out-of-order wire slots still emit in slot order', async t => {
+  const { chunks } = await collect(t, [delta(1, 'pwsh', '{"command":"b"}'), delta(0, 'read', '{"file_path":"a"}'), finish])
+  assert.deepEqual(blocks(chunks).map(b => b.name), ['read', 'pwsh'])
 })
-test('native malformed second call cannot partially dispatch the first native call', async t => {
-  const { chunks } = await collect(t, [delta(0, 'pwsh', '{"command":"SECRET_COMMAND"}'), delta(1, 'pwsh', '{SECRET_BROKEN'), finish])
+test('a stream that ends before the tool batch is complete emits nothing', async t => {
+  // No finish_reason: the batch never completed, so nothing may be dispatched.
+  const { chunks } = await collect(t, [delta(0, 'pwsh', '{"command":"SECRET_COMMAND"}')])
   assert.equal(blocks(chunks).length, 0)
-  assert.equal(chunks.at(-1).reason.failure.code, 'TOOL_BRIDGE_REJECTED')
+  assert.equal(chunks.at(-1).reason.failure.code, 'TOOL_BRIDGE_INCOMPLETE')
   assert.doesNotMatch(JSON.stringify(chunks), /SECRET/)
 })
-test('policy guidance exposes safe native names, never invents a shell executor', async t => {
+test('no tool guidance is injected: declarations speak for themselves', async t => {
   const { payload } = await collect(t, [finish])
-  assert.match(payload.messages[0].content, /Native command wire names: pwsh/)
-  assert.match(payload.messages[0].content, /read_client = caller read/)
-  assert.match(payload.messages[0].content, /never reinterpret Bash commands as PowerShell/)
-  assert.equal(payload.tools.filter(t => t.function.name === 'pwsh').length, 1)
+  assert.deepEqual(payload.tools.map(t => t.function.name), ['read', 'pwsh'])
+  assert.ok(!payload.messages.some(m => m.role === 'system' && /Tool bridge policy|caller alias/i.test(String(m.content ?? ''))))
 })

@@ -1,0 +1,29 @@
+{
+  "at": "2026-11-12T16:07:02.500Z",
+  "mechanismA_configAgents": {
+    "label": "A-config-agents",
+    "captured": 1,
+    "toolCount": 12,
+    "systemLength": 6970,
+    "markerPresent": true,
+    "systemHead": "YOU_ARE_DSH_NOT_OPENCODE_MARKER\n# Your Model\n- Name: DeepSeek V4.1 Flash Free\n- Provider ID: opencode\n- Model ID: deepse"
+  },
+  "mechanismB_markdownGlobal": {
+    "label": "B-markdown-global",
+    "captured": 1,
+    "toolCount": 12,
+    "systemLength": 6970,
+    "markerPresent": true,
+    "systemHead": "YOU_ARE_DSH_NOT_OPENCODE_MARKER\n# Your Model\n- Name: DeepSeek V4.1 Flash Free\n- Provider ID: opencode\n- Model ID: deepse"
+  },
+  "mechanismC_markdownProject": {
+    "label": "C-markdown-project",
+    "captured": 1,
+    "toolCount": 12,
+    "systemLength": 6970,
+    "markerPresent": true,
+    "systemHead": "YOU_ARE_DSH_NOT_OPENCODE_MARKER\n# Your Model\n- Name: DeepSeek V4.1 Flash Free\n- Provider ID: opencode\n- Model ID: deepse"
+  },
+  "anyMechanismReplacedSystem": true,
+  "fileAgentsDiscovered": false
+}

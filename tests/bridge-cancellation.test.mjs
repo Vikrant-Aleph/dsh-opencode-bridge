@@ -5,7 +5,7 @@ import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 function adapter() {
   return new OpenCodeFreeAdapter({ list: async () => [] }, {
     providerRoute: 'opencode-bridge', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
-    requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true,
+    requestTimeoutMs: 5000,
   })
 }
 const native = { name: 'pwsh', description: 'Host PowerShell', parameters: { type: 'object' } }

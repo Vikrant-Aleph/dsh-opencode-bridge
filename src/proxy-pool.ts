@@ -398,7 +398,13 @@ export async function fetchWithPool(input: PooledFetchInput): Promise<Response> 
         const dispatcher = entry.url ? await (input.dispatcherFor ?? dispatcherFor)(entry.url) : undefined
         if (entry.url && !dispatcher) throw new Error('Proxy dispatcher unavailable')
         signal?.throwIfAborted()
-        response = await doFetch(input.url, { ...init, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
+        // `dispatcher` is undici-specific. The URL travels alongside it so a
+        // non-undici transport (the Bun-shaped one) can apply the same egress.
+        response = await doFetch(input.url, {
+          ...init,
+          ...(dispatcher ? { dispatcher } : {}),
+          ...(entry.url ? { proxyUrl: entry.url } : {}),
+        } as RequestInit)
       } catch (error) {
         if (signal?.aborted) throw error
         const code = transportCode(error)

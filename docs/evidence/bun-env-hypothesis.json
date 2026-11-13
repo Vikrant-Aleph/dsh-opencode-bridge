@@ -1,0 +1,35 @@
+{
+  "at": "2026-11-13T09:14:02.765Z",
+  "results": [
+    {
+      "label": "bare-prompt-plus-env",
+      "systemBytes": 207,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "env-only",
+      "systemBytes": 177,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "code-mode-plus-env",
+      "systemBytes": 215,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "bare-prompt-no-env",
+      "systemBytes": 29,
+      "status": 429,
+      "retryAfter": "53152",
+      "errorType": "FreeUsageLimitError",
+      "ok": false,
+      "answerMatches": false
+    }
+  ]
+}

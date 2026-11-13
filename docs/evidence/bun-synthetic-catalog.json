@@ -1,0 +1,21 @@
+{
+  "at": "2026-11-13T09:13:26.296Z",
+  "results": [
+    {
+      "label": "no-env-padded",
+      "systemBytes": 6437,
+      "status": 429,
+      "retryAfter": "53191",
+      "errorType": "FreeUsageLimitError",
+      "ok": false,
+      "answerMatches": false
+    },
+    {
+      "label": "synthetic-dsh-catalog",
+      "systemBytes": 4613,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    }
+  ]
+}

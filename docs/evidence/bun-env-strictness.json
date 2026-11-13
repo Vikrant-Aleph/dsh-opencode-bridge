@@ -1,0 +1,19 @@
+{
+  "at": "2026-11-13T09:12:38.049Z",
+  "results": [
+    {
+      "label": "paths-rewritten",
+      "systemBytes": 6408,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "git-flag-flipped",
+      "systemBytes": 6409,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    }
+  ]
+}

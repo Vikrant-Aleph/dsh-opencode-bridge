@@ -69,7 +69,7 @@ test('only reasoning is projected: text, tool arguments, aliases, images and rep
   assert.deepEqual(projected.content, m.content.filter(x => x.type !== 'reasoning'))
   assert.equal(projected.source, m.source)
   const wire = buildChatMessages({ messages: [projected] }, planTools([{ name: 'read', description: 'fixture', parameters: { type: 'object' } }]))
-  assert.equal(wire[0].reasoning_content, '')
+  assert.equal(Object.hasOwn(wire[0], 'reasoning_content'), false)
   assert.equal(wire[0].tool_calls[0].id, 'tool-x')
   assert.equal(wire[0].tool_calls[0].function.arguments, '{}')
 })
@@ -105,13 +105,13 @@ test('adapter defaults to full and snapshots trimming once without deleting orig
   const posts = []
   t.mock.method(globalThis, 'fetch', async (_url, init) => { posts.push(JSON.parse(init.body)); return new Response('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n') })
   let enabled = false, reads = 0
-  const a = new OpenCodeFreeAdapter({ list: async () => [] }, { providerRoute: 'offline', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} }, requestTimeoutMs: 1000, toolFingerprint: false, toolTranslation: true, getCompletedReasoning() { reads++; return enabled ? completed().completed : undefined } })
+  const a = new OpenCodeFreeAdapter({ list: async () => [] }, { providerRoute: 'offline', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} }, requestTimeoutMs: 1000, environment: '', getCompletedReasoning() { reads++; return enabled ? completed().completed : undefined } })
   const options = { provider: 'offline', model: 'fixture', messages: [old, current], tools: [] }
   for await (const _ of a.stream(options)) {}
   enabled = true
   for await (const _ of a.stream(options)) {}
   assert.equal(posts[0].messages[0].reasoning_content, 'SYNTHETIC_PRIVATE_OLD')
-  assert.equal(posts[1].messages[0].reasoning_content, '')
+  assert.equal(Object.hasOwn(posts[1].messages[0], 'reasoning_content'), false)
   assert.equal(posts[1].messages[1].reasoning_content, 'SYNTHETIC_CURRENT')
   assert.equal(old.content[0].type, 'reasoning')
   assert.equal(reads, 2)

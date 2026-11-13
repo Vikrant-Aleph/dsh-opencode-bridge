@@ -22,7 +22,7 @@ function fixture(t, config = {}) {
   t.mock.method(Date, 'now', () => clock)
   const logs = []
   const logger = Object.fromEntries(['debug', 'info', 'warn', 'error'].map(level => [level, (...args) => logs.push({ level, args })]))
-  const adapter = new OpenCodeFreeAdapter({ list: async () => [] }, { providerRoute: input.provider, recipe, requestTimeoutMs: 5000, toolFingerprint: false, toolTranslation: false, logger, dispatcherFor: () => ({}), ...config })
+  const adapter = new OpenCodeFreeAdapter({ list: async () => [] }, { providerRoute: input.provider, recipe, requestTimeoutMs: 5000, logger, dispatcherFor: () => ({}), ...config })
   return { adapter, logs, advance(ms) { clock += ms }, now: () => clock }
 }
 function pool(now = () => epoch, extra = {}) {
@@ -115,10 +115,13 @@ test('positive server hint ends even explicitly egress-scoped failover', async (
   await fetchWithPool({ pool: p, url: 'https://offline.invalid', init: {}, throttleScope: async () => 'egress', fetchImpl: async () => { sent++; return rejected('FreeUsageLimitError', 'Quota exceeded', { 'retry-after': '60' }) } })
   assert.equal(sent, 1); assert.equal(p.waitAt(0), 60000); assert.equal(p.waitAt(1), 0)
 })
-test('explicit no-hint egress quota can fail over to a ready exit once', async t => {
+test('free usage rejection is non-retryable and does not infer an egress quota', async t => {
   const p = pool(); const f = fixture(t, { pool: p }); let sent = 0
-  t.mock.method(globalThis, 'fetch', async () => ++sent === 1 ? rejected('FreeUsageLimitError', 'Quota exceeded') : ok())
-  assert.equal(terminal(await collect(f.adapter)).kind, 'stop'); assert.equal(sent, 2); assert.equal(p.waitAt(0), 60000)
+  t.mock.method(globalThis, 'fetch', async () => { sent++; return rejected('FreeUsageLimitError', 'Quota exceeded') })
+  const out = await normalContract(f.adapter, f.advance)
+  assert.equal(out.reason.failure.code, 'FREE_USAGE_LIMIT'); assert.equal(sent, 1)
+  assert.equal(out.calls, 1); assert.deepEqual(out.delays, [])
+  assert.ok(p.health().every(entry => entry.state === 'ready'))
 })
 for (const [label, type, message] of [['unknown', 'UnknownError', 'unknown upstream condition'], ['endpoint', 'FreeUsageLimitError', 'Endpoint is unavailable.']]) {
   test(`${label} 429 does not rotate or punish egress`, async t => {

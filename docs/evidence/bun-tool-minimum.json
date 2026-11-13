@@ -1,0 +1,66 @@
+{
+  "at": "2026-11-13T09:06:45.800Z",
+  "model": "glm-5.3-flash-free",
+  "results": [
+    {
+      "label": "read-only",
+      "toolNames": [
+        "read"
+      ],
+      "toolCount": 1,
+      "bodyBytes": 7986,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "question+read",
+      "toolNames": [
+        "question",
+        "read"
+      ],
+      "toolCount": 2,
+      "bodyBytes": 9446,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "read+execute",
+      "toolNames": [
+        "read",
+        "execute"
+      ],
+      "toolCount": 2,
+      "bodyBytes": 9167,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "all-four",
+      "toolNames": [
+        "question",
+        "read",
+        "skill",
+        "execute"
+      ],
+      "toolCount": 4,
+      "bodyBytes": 11135,
+      "status": 200,
+      "ok": true,
+      "answerMatches": true
+    },
+    {
+      "label": "none",
+      "toolNames": [],
+      "toolCount": 0,
+      "bodyBytes": 6996,
+      "status": 429,
+      "retryAfter": "53589",
+      "errorType": "FreeUsageLimitError",
+      "ok": false,
+      "answerMatches": false
+    }
+  ]
+}

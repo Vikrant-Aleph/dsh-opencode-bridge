@@ -91,7 +91,10 @@ test('publish job alone can write and refuses tag drift or overwriting an existi
   assert.match(runs, /Remote tag moved/)
   assert.match(runs, /Release already exists/)
   assert.match(runs, /gh release create/)
-  assert.match(runs, /--verify-tag --generate-notes/)
+  // The release body comes from CHANGELOG.md, not GitHub's commit summary.
+  assert.match(runs, /--verify-tag --notes-file/)
+  assert.match(runs, /release-notes\.mjs "\$\{RELEASE_TAG#v\}"/)
+  assert.doesNotMatch(runs, /--generate-notes/)
   assert.match(runs, /--prerelease --latest=false/)
   assert.doesNotMatch(runs, /\b(?:npm|pnpm)\s+publish\b/)
   assert.equal(publish.steps.find(step => step.env?.GH_TOKEN)?.env.GH_TOKEN, '${{ github.token }}')

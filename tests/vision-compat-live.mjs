@@ -79,7 +79,7 @@ async function run(model, mode) {
   const logger = Object.fromEntries(['debug', 'info', 'warn', 'error'].map(level => [level, (_scope, _message, data = {}) => {
     if (level === 'warn' || level === 'error') row.diagnostics.push(Object.fromEntries(Object.entries(data).filter(([key]) => ['code', 'status', 'reason', 'upstreamType', 'retryAfterMs'].includes(key))))
   }]))
-  const adapter = new OpenCodeFreeAdapter({ list: async () => models }, { providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 60_000, toolFingerprint: true, toolTranslation: true, attachments, toolImages: mode === 'tool', logger })
+  const adapter = new OpenCodeFreeAdapter({ list: async () => models }, { providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 60_000, attachments, toolImages: mode === 'tool', logger })
   let text = '', terminal
   try {
     for await (const chunk of adapter.stream(optionsFor(model, mode))) {

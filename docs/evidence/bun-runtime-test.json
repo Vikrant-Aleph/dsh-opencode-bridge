@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-13T09:05:22.241Z",
+  "runtime": "bun 1.4.4",
+  "model": "glm-5.3-flash-free",
+  "bodyBytes": 294,
+  "tools": 0,
+  "status": 429,
+  "retryAfter": "53670",
+  "errorType": "FreeUsageLimitError",
+  "ok": false,
+  "answerMatches": false,
+  "textSample": null,
+  "snippet": "{\"type\":\"error\",\"error\":{\"type\":\"FreeUsageLimitError\",\"message\":\"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to Open"
+}

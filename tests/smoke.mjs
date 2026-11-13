@@ -55,8 +55,6 @@ const adapter = new OpenCodeFreeAdapter(catalog, {
     extraHeaders: {},
   },
   requestTimeoutMs: 120_000,
-  toolFingerprint: true,
-  toolTranslation: true,
   logger,
 })
 

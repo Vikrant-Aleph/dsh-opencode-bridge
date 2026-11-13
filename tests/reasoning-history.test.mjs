@@ -24,19 +24,20 @@ function deepFreeze(value) {
   return value
 }
 
-test('text-only assistant explicitly replays empty reasoning and joins text with newlines', () => {
+test('text-only assistant omits reasoning and joins text without a separator', () => {
   assert.deepEqual(wire([assistant([text(' first '), text('second\n')])]), [
-    { role: 'assistant', content: ' first \nsecond\n', reasoning_content: '' },
+    { role: 'assistant', content: ' first second\n' },
   ])
 })
-test('reasoning-only assistant preserves whitespace, Unicode and CRLF without a body', () => {
+test('reasoning-only assistant preserves whitespace, Unicode and CRLF with an empty body', () => {
+  // Official lowering sets content to null only when tool calls exist without text.
   assert.deepEqual(wire([assistant([reasoning(' \t思考🙂\r\n ')])]), [
-    { role: 'assistant', content: null, reasoning_content: ' \t思考🙂\r\n ' },
+    { role: 'assistant', content: '', reasoning_content: ' \t思考🙂\r\n ' },
   ])
 })
-test('tool-only assistant has explicit empty reasoning and null body', () => {
+test('tool-only assistant sends no optional reasoning and null body', () => {
   const [message] = wire([assistant([call()])])
-  assert.equal(message.reasoning_content, '')
+  assert.equal(own(message, 'reasoning_content'), false)
   assert.equal(message.content, null)
   assert.equal(message.tool_calls.length, 1)
 })
@@ -46,13 +47,18 @@ test('explicitly empty reasoning is retained as an own empty field', () => {
   assert.equal(message.reasoning_content, '')
   assert.equal(message.content, 'answer')
 })
-test('empty assistant remains an assistant with null body and explicit empty reasoning', () => {
-  assert.deepEqual(wire([assistant([])]), [{ role: 'assistant', content: null, reasoning_content: '' }])
+test('reasoning without text blocks has an empty body, not null', () => {
+  const [message] = wire([assistant([reasoning('thought')])])
+  assert.equal(message.content, '')
+  assert.equal(message.reasoning_content, 'thought')
 })
-test('body still uses join-newline-or-null rather than trimming', () => {
+test('empty assistant remains an assistant with null body and no reasoning field', () => {
+  assert.deepEqual(wire([assistant([])]), [{ role: 'assistant', content: '' }])
+})
+test('body uses no-separator joining and never trims', () => {
   const messages = wire([assistant([text('')]), assistant([text(''), text('')]), assistant([text('  ')])])
-  assert.deepEqual(messages.map(m => m.content), [null, '\n', '  '])
-  assert.deepEqual(messages.map(m => m.reasoning_content), ['', '', ''])
+  assert.deepEqual(messages.map(m => m.content), ['', '', '  '])
+  assert.deepEqual(messages.map(m => own(m, 'reasoning_content')), [false, false, false])
 })
 test('mixed reasoning, text and tools preserve block order and all original string bytes', () => {
   const argsA = ' { "file_path" : "a\\\\b.txt", "n":1e+2 }\r\n'
@@ -62,17 +68,16 @@ test('mixed reasoning, text and tools preserve block order and all original stri
     reasoning('\tR2🙂'), text(' T2 '), call('id-二', 'read', argsB), reasoning('\nEND '),
   ])])
   assert.deepEqual(message, {
-    role: 'assistant', content: 'T1\n\n T2 ', reasoning_content: ' \r\nR1\tR2🙂\nEND ',
+    role: 'assistant', content: 'T1\n T2 ', reasoning_content: ' \r\nR1\tR2🙂\nEND ',
     tool_calls: [
-      { id: 'id-一', type: 'function', function: { name: 'read_client', arguments: argsA } },
-      { id: 'id-二', type: 'function', function: { name: 'read_client', arguments: argsB } },
+      { id: 'id-一', type: 'function', function: { name: 'read', arguments: argsA } },
+      { id: 'id-二', type: 'function', function: { name: 'read', arguments: argsB } },
     ],
   })
 })
 test('each assistant owns its reasoning field without borrowing adjacent history', () => {
   const messages = wire([assistant([reasoning('A')]), { role: 'user', content: [text('next')] }, assistant([text('plain')]), assistant([reasoning('B'), reasoning('C')]), assistant([])])
-  assert.deepEqual(messages.filter(m => m.role === 'assistant').map(m => m.reasoning_content), ['A', '', 'BC', ''])
-  for (const message of messages.filter(m => m.role === 'assistant')) assert.equal(own(message, 'reasoning_content'), true)
+  assert.deepEqual(messages.filter(m => m.role === 'assistant').map(m => own(m, 'reasoning_content') ? m.reasoning_content : '(absent)'), ['A', '(absent)', 'BC', '(absent)'])
 })
 test('non-assistant roles never acquire reasoning_content and developer is still omitted', () => {
   const messages = wire([
@@ -93,20 +98,20 @@ test('deep-frozen options, blocks and caller schemas are not mutated', () => {
   const options = deepFreeze({ system: 'fixed', tools: [structuredClone(callerRead)], messages: [assistant([reasoning(' r '), text('body'), call()]), { role: 'tool', toolCallId: 'call-raw', content: [text('result')] }] })
   const before = structuredClone(options)
   const plan = planTools(options.tools)
-  const aliasesBefore = [...plan.aliasToOriginal]
+  const namesBefore = [...plan.callerNames]
   assert.doesNotThrow(() => buildChatMessages(options, plan))
   assert.deepEqual(options, before)
-  assert.deepEqual([...plan.aliasToOriginal], aliasesBefore)
+  assert.deepEqual([...plan.callerNames], namesBefore)
 })
-test('read history uses read_client while preserving id and arguments', () => {
+test('read history preserves the caller name, id and arguments', () => {
   const original = call('unaltered/id', 'read', '\n{ "file_path":"a", "value": 1.00 }\t')
   const [message] = wire([assistant([reasoning('r'), original])])
-  assert.deepEqual(message.tool_calls[0], { id: original.id, type: 'function', function: { name: 'read_client', arguments: original.arguments } })
+  assert.deepEqual(message.tool_calls[0], { id: original.id, type: 'function', function: { name: 'read', arguments: original.arguments } })
 })
-test('read_client collisions replay distinct caller names in either declaration order', () => {
+test('distinct caller names replay unchanged in either declaration order', () => {
   for (const tools of [[callerRead, callerOther], [callerOther, callerRead]]) {
     const [message] = wire([assistant([reasoning('r'), call('a', 'read'), call('b', 'read_client')])], tools)
-    assert.deepEqual(message.tool_calls.map(c => c.function.name), ['read_client2', 'read_client'])
+    assert.deepEqual(message.tool_calls.map(c => c.function.name), ['read', 'read_client'])
     assert.deepEqual(message.tool_calls.map(c => c.id), ['a', 'b'])
     assert.equal(message.reasoning_content, 'r')
   }
@@ -145,7 +150,7 @@ function sse(events) {
 function makeAdapter(logger, meta = model) {
   return new OpenCodeFreeAdapter({ list: async () => [meta] }, {
     providerRoute: 'opencode-bridge', recipe: { baseUrl: 'https://offline.invalid/v1', apiKey: 'public', userAgent: 'opencode/1.19.0', client: 'cli', project: 'global', extraHeaders: {} },
-    requestTimeoutMs: 5000, toolFingerprint: true, toolTranslation: true, logger,
+    requestTimeoutMs: 5000, logger,
   })
 }
 async function collect(adapter, options) {
@@ -163,8 +168,8 @@ async function twoSteps(t, { withReasoning = true, logger, effort = 'high', meta
     if (posts.length === 2) return sse([delta({ content: 'OK' }), finish('stop')])
     return sse([
       ...(withReasoning ? [delta({ reasoning_content: fragments[0] }), delta({ reasoning_content: fragments[1] }), delta({ content: 'before tool' }), delta({ reasoning_content: fragments[2] })] : []),
-      delta({ tool_calls: [{ index: 0, id: callId, function: { name: 'read_', arguments: rawArguments.slice(0, 9) } }] }),
-      delta({ tool_calls: [{ index: 0, function: { name: 'client', arguments: rawArguments.slice(9) } }] }), finish('tool_calls'),
+      delta({ tool_calls: [{ index: 0, id: callId, function: { name: 're', arguments: rawArguments.slice(0, 9) } }] }),
+      delta({ tool_calls: [{ index: 0, function: { name: 'ad', arguments: rawArguments.slice(9) } }] }), finish('tool_calls'),
     ])
   })
   const adapter = makeAdapter(logger, meta)
@@ -181,13 +186,13 @@ async function twoSteps(t, { withReasoning = true, logger, effort = 'high', meta
   assert.equal(second.at(-1).reason.kind, 'stop')
   assert.deepEqual(second.filter(c => c.type === 'block-end').map(c => c.block), [text('OK')])
   const replay = posts[1].messages.find(m => m.role === 'assistant')
-  assert.equal(own(replay, 'reasoning_content'), true)
-  assert.equal(replay.reasoning_content, withReasoning ? fragments.join('') : '')
+  assert.equal(own(replay, 'reasoning_content'), withReasoning)
+  if (withReasoning) assert.equal(replay.reasoning_content, fragments.join(''))
   assert.equal(replay.content, withReasoning ? 'before tool' : null)
-  assert.deepEqual(replay.tool_calls, [{ id: callId, type: 'function', function: { name: 'read_client', arguments: rawArguments } }])
+  assert.deepEqual(replay.tool_calls, [{ id: callId, type: 'function', function: { name: 'read', arguments: rawArguments } }])
   assert.deepEqual(posts[1].messages.find(m => m.role === 'tool'), { role: 'tool', tool_call_id: callId, content: RESULT_SENTINEL })
   for (const post of posts) {
-    assert.equal(post.tools.some(t => t.function.name === 'read_client'), true)
+    assert.equal(post.tools.some(t => t.function.name === 'read'), true)
     for (const message of post.messages.filter(m => m.role !== 'assistant')) assert.equal(own(message, 'reasoning_content'), false)
   }
   return { posts, first }
@@ -199,15 +204,15 @@ test('two-step high-effort fake SSE replays completed reasoning fragments, alias
   assert.deepEqual(first.filter(c => c.type === 'block-end' && c.block.type === 'reasoning').map(c => c.block.text), [fragments[0] + fragments[1], fragments[2]])
   assert.deepEqual(posts.map(p => p.reasoning_effort), ['high', 'high'])
 })
-test('two-step high-effort tool call without incoming reasoning replays an explicit empty field', async t => {
+test('two-step high-effort tool call without incoming reasoning omits the optional field', async t => {
   const { posts, first } = await twoSteps(t, { withReasoning: false })
   assert.equal(first.some(c => c.type === 'reasoning-delta'), false)
   assert.deepEqual(posts.map(p => p.reasoning_effort), ['high', 'high'])
 })
-test('ordinary non-thinking history still sends empty reasoning without reasoning_effort', async t => {
+test('ordinary non-thinking history omits reasoning without reasoning_effort', async t => {
   const { posts } = await twoSteps(t, { withReasoning: false, effort: null })
   for (const post of posts) assert.equal(own(post, 'reasoning_effort'), false)
-  assert.equal(posts[1].messages.find(m => m.role === 'assistant').reasoning_content, '')
+  assert.equal(own(posts[1].messages.find(m => m.role === 'assistant'), 'reasoning_content'), false)
 })
 test('unsupported effort is omitted while synthetic reasoning history is still replayed', async t => {
   const { posts } = await twoSteps(t, { effort: 'high', meta: { id: model.id, name: model.name } })

@@ -35,8 +35,6 @@ const adapter = new OpenCodeFreeAdapter(catalog, {
   providerRoute: 'opencode-bridge',
   recipe: { baseUrl, apiKey: 'public', userAgent: 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14', client: 'cli', project: 'global', extraHeaders: {} },
   requestTimeoutMs: 120_000,
-  toolFingerprint: true,
-  toolTranslation: true,
   logger: silent,
   pool,
   dispatcherFor,

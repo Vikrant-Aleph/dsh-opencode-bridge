@@ -118,8 +118,11 @@ jobs:
           if [[ "$PRERELEASE" == true ]]; then
             args+=(--prerelease --latest=false)
           fi
+          # The release notes are the CHANGELOG section for this version, so the
+          # published page always matches the changelog instead of a commit list.
+          node scripts/release-notes.mjs "${RELEASE_TAG#v}" --out "$RUNNER_TEMP/release-notes.md"
           # gh create also fails if a release appeared after the existence check.
           gh release create "$RELEASE_TAG" \
             "$RUNNER_TEMP/release-assets/"*.tgz \
             "$RUNNER_TEMP/release-assets/SHA256SUMS" \
-            --verify-tag --generate-notes "${args[@]}"
+            --verify-tag --notes-file "$RUNNER_TEMP/release-notes.md" "${args[@]}"

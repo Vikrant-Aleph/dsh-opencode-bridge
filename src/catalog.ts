@@ -5,6 +5,7 @@
  */
 import { noopLogger, type LoggerLike } from './logger.js'
 import { fetchWithPool, type ProxyPool } from './proxy-pool.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 
 export interface FreeModel {
   id: string
@@ -241,7 +242,7 @@ export class FreeModelCatalog {
     const response = await fetchWithPool({
       pool: this.options.pool,
       url: `${this.baseUrl.replace(/\/$/, '')}/models`,
-      init: { headers: { 'user-agent': 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' }, signal },
+      init: { headers: { 'user-agent': DEFAULT_PROTOCOL_USER_AGENT }, signal },
       signal,
       ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
     })

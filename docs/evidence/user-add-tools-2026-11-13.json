@@ -1,0 +1,53 @@
+{
+  "at": "2026-11-12T16:17:40.052Z",
+  "captured": 1,
+  "toolCount": 14,
+  "toolNames": [
+    "dsh_custom_alpha",
+    "edit",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write",
+    "zzz_arbitrary",
+    "execute"
+  ],
+  "inventedAdded": true,
+  "inventedSchemas": [
+    {
+      "name": "dsh_custom_alpha",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "thing": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "thing"
+        ]
+      },
+      "description": "A tool that the official client never ships."
+    },
+    {
+      "name": "zzz_arbitrary",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "number"
+          }
+        }
+      },
+      "description": "Another invented name with an invented schema."
+    }
+  ],
+  "officialSetIntact": true,
+  "conclusion": "If inventedAdded is true, a user can add arbitrary tool names and schemas, so the tool list carries no identity."
+}

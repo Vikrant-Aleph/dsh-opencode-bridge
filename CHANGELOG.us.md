@@ -9,6 +9,18 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-14
+
+### Fixed
+
+- The gateway's `Retry-After` points at UTC midnight, but it serves again within
+  minutes. The plugin used to lock the model for the stated duration, turning a
+  transient refusal into hours of downtime. It now retries with an exponential backoff:
+  60 seconds, doubling, capped at 15 minutes. The server's deadline is still recorded,
+  but only as an upper bound and for diagnostics.
+- The cooldown message now says the pause is this client's own backoff rather than the
+  server's requested wait, and reports when the next automatic attempt is allowed.
+
 ## [1.0.2] - 2026-11-14
 
 ### Fixed

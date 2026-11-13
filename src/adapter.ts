@@ -89,7 +89,7 @@ export interface AdapterOptions {
     /** `activeEgresses` lets a wait recorded on a removed egress stop applying. */
     remaining(model: string, activeEgresses?: readonly string[]): number
     /** The wait that currently applies, for diagnostics. */
-    describe?(model: string, activeEgresses?: readonly string[]): { until: number; egress?: string } | undefined
+    describe?(model: string, activeEgresses?: readonly string[]): { until: number; probeAt: number; attempts: number; egress?: string } | undefined
     remember(model: string, delay: number, egress?: string): void
   }
   /** Egress labels currently configured, so stale per-egress waits can be ignored. */
@@ -234,12 +234,13 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       if (requestWait > 0) {
         const observed = this.options.requestWaitState?.describe?.(options.model, activeEgresses)
         const seconds = Math.ceil(requestWait / 1000)
-        // Say plainly that nothing was sent, and where the wait came from, so a stale
-        // cooldown is not mistaken for a live rejection.
+        // Say plainly that nothing was sent, and that the pause is this client's own
+        // backoff rather than the server's stated deadline, so it is not mistaken for
+        // a live rejection or for a lockout lasting hours.
         const where = observed?.egress ? ` on ${observed.egress}` : ''
-        const when = observed?.until ? ` (recorded against a 429 that expires at ${new Date(observed.until).toISOString()}${where})` : ''
+        const serverDeadline = observed?.until ? ` The server asked for a longer pause (until ${new Date(observed.until).toISOString()}${where}), but this client retries sooner because the gateway recovers before then.` : ''
         throw new LlmError(
-          `No request was sent: this model is cooling down after an earlier server rejection${when}. Retry after ${seconds} seconds, or clear the cooldown in Settings if you have changed egress.`,
+          `No request was sent: this model is backing off after an earlier server rejection. The next automatic attempt is allowed in ${seconds} seconds.${serverDeadline} Clear the cooldown in Settings to try immediately.`,
           'REQUEST_COOLING',
           { providerRetryAfterMs: requestWait },
         )

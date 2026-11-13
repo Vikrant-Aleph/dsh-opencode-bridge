@@ -20,24 +20,48 @@ test('only observed actual HTTP waits migrate; global egress guesses and expired
   assert.deepEqual(legacyRequestWaits(lines, now), [['mimo-v2.6-flash-free',epoch+61_330_000]])
 })
 
-test('model server deadlines survive reload without shortening or inventing unrelated waits', t => {
+test('a recorded backoff survives reload, doubles per rejection, and never blocks another model', t => {
   const file = fixture(t); let now = epoch
   const a = new RequestWaitStore(file, undefined, [], () => now)
-  a.remember('fixture-free', 60000); a.remember('fixture-free', 1000)
+  // A short server deadline is honoured as-is: there is no reason to wait longer.
+  a.remember('fixture-free', 60000)
+  assert.equal(a.remaining('fixture-free'), 60000)
+  now += 60000
+  assert.equal(a.remaining('fixture-free'), 0)
+  // A long deadline is replaced by a doubling probe delay well below it.
+  a.remember('fixture-free', 25_000_000)
+  assert.equal(a.remaining('fixture-free'), 60000)
+  a.remember('fixture-free', 25_000_000)
+  assert.equal(a.remaining('fixture-free'), 120000)
+  a.remember('fixture-free', 25_000_000)
+  assert.equal(a.remaining('fixture-free'), 240000)
   now += 1000
   const b = new RequestWaitStore(file, undefined, [], () => now)
-  assert.equal(b.remaining('fixture-free'), 59000)
+  assert.equal(b.remaining('fixture-free'), 239000)
   assert.equal(b.remaining('other-free'), 0)
-  now += 59000
+  now += 239000
   assert.equal(b.remaining('fixture-free'), 0)
+})
+
+test('a long server deadline does not block for hours: the probe delay is capped', t => {
+  const file = fixture(t)
+  const store = new RequestWaitStore(file, undefined, [], () => epoch)
+  // The gateway asks for ~7 hours; the client probes again within minutes.
+  store.remember('fixture-free', 25_000_000)
+  assert.equal(store.remaining('fixture-free'), 60_000)
+  for (let i = 0; i < 10; i++) store.remember('fixture-free', 25_000_000)
+  assert.equal(store.remaining('fixture-free'), 15 * 60_000)
+  // The stated deadline is still recorded for diagnostics.
+  assert.equal(store.describe('fixture-free')?.until, epoch + 25_000_000)
 })
 
 test('first upgrade recovers the affected model from old redacted diagnostics, not pool-wide lockout', t => {
   const file = fixture(t), now = epoch + 2000
   const store = new RequestWaitStore(file, undefined, [log(record)], () => now)
-  assert.equal(store.remaining(record.model), 61_328_000)
+  // Recovered rows start at the first probe delay, not the server deadline.
+  assert.equal(store.remaining(record.model), 60_000)
   assert.equal(store.remaining('glm-free'), 0)
-  assert.equal(new RequestWaitStore(file, undefined, [], () => now).remaining(record.model), 61_328_000)
+  assert.equal(new RequestWaitStore(file, undefined, [], () => now).remaining(record.model), 60_000)
   const text = fs.readFileSync(file, 'utf8')
   assert.doesNotMatch(text, /request|http|message|auth|key|bearer/i)
 })
@@ -56,7 +80,7 @@ test('an unreadable state file is ignored, never rebuilt from the log, and its c
 test('a missing state file still recovers observed waits from the log', t => {
   const file = fixture(t)
   const store = new RequestWaitStore(file, undefined, [log(record)], () => epoch)
-  assert.equal(store.remaining(record.model), 61_330_000)
+  assert.equal(store.remaining(record.model), 60_000)
 })
 
 test('a byte-order mark does not make the state file unreadable', t => {
@@ -73,8 +97,9 @@ test('state capacity conservatively preserves overflow waits across reload', t =
   const store = new RequestWaitStore(file, undefined, [], now)
   for (let i = 0; i < 257; i++) store.remember(`fixture-${i}`, 60000+i)
   const reloaded = new RequestWaitStore(file, undefined, [], now)
-  assert.ok(reloaded.remaining('fixture-256') >= 60256)
-  assert.ok(reloaded.remaining('fixture-0') >= 60000)
+  // The model that did not fit is still blocked for the probe delay.
+  assert.ok(reloaded.remaining('fixture-256') >= 60_000)
+  assert.ok(reloaded.remaining('fixture-0') >= 60_000)
 })
 
 test('an existing state file is authoritative over the log', t => {
@@ -82,7 +107,7 @@ test('an existing state file is authoritative over the log', t => {
   new RequestWaitStore(file, undefined, [], now).remember('glm-free', 90000)
   // The file exists and is valid, so it wins: recovery cannot resurrect a cleared wait.
   const reopened = new RequestWaitStore(file, undefined, [log(record)], now)
-  assert.equal(reopened.remaining('glm-free'), 90000)
+  assert.equal(reopened.remaining('glm-free'), 60_000)
   assert.equal(reopened.remaining(record.model), 0)
 })
 

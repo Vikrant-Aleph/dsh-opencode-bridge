@@ -271,6 +271,8 @@ batch yields `TOOL_BRIDGE_INCOMPLETE` and dispatches nothing.
 - **Free-usage rejections**: a typed `FreeUsageLimitError` becomes
   `FREE_USAGE_LIMIT` — non-retryable, and **not** treated as proof that the whole
   egress is exhausted. Local guesses are never recorded as server waits. The state file is re-read before every check, so an external clear applies immediately; a wait whose egress is no longer configured stops applying; and Settings offers **Clear cooldowns**.
+
+**Probe policy**: the gateway's `Retry-After` points at UTC midnight, but it serves again within minutes (refused at 17:24, the same model served at 17:27). A cooldown therefore blocks only an exponential probe window -- 60 seconds, doubling, capped at 15 minutes -- not the duration the server claims. The server deadline is still recorded, as an upper bound and for diagnostics.
 - **Cancellation**: checked before the POST, after buffering and before each
   tool chunk.
 
@@ -408,6 +410,6 @@ an explicit `--run`, and refuse to overwrite an earlier report.
 | **gate** | The upstream check that decides whether a request from a non-official client is served. This project treats it as a dated observation. |
 | **identity header** | A header the official client always sends and a user cannot change (§3). |
 | **placeholder** | A tool declaration sent only when the caller declares none, to satisfy the gateway's "at least one tool" rule. |
-| **server wait** | A `Retry-After` observed from upstream; never shortened locally, scoped to the egress that produced it, and clearable on demand. |
+| **server wait** | A `Retry-After` observed from upstream; scoped to the egress that produced it, blocking only a capped probe window, and clearable on demand. |
 | **egress** | One configured route to upstream (`direct` or a proxy). |
 | **Bun-shaped transport** | The wreq-js handshake reproducing the official client's `ClientHello`. |

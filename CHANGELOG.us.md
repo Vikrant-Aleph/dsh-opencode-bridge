@@ -9,6 +9,16 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-14
+
+### Fixed
+
+- A byte-order mark made the state file look corrupt, after which the store rebuilt
+  cooldowns from the log and undid a clear. A BOM is now tolerated when reading.
+- An unreadable state file no longer rebuilds cooldowns from the log. Recovery runs only
+  when the file is genuinely absent; an existing file is authoritative, so a clear cannot
+  be reverted by the log.
+
 ## [1.0.1] - 2026-11-14
 
 ### Fixed
@@ -21,10 +31,6 @@ the matching section of this file.
   the model.
 - The cooldown error now states that no request was sent and reports when and on which
   egress the rejection was recorded, so it cannot be mistaken for a live 429.
-- A byte-order mark made the state file look corrupt, which rebuilt cooldowns from the
-  log and undid a clear. A BOM is now tolerated when reading.
-- An unreadable state file no longer rebuilds cooldowns from the log. Recovery runs only
-  when the file is genuinely absent, so a clear cannot be reverted by the log.
 
 ### Added
 

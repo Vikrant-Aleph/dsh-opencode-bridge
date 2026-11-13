@@ -114,7 +114,7 @@ plain `fetch` cannot connect at all, so the transport has value beyond fingerpri
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.0.1
+   dsh-opencode-bridge@1.0.2
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -123,13 +123,13 @@ plain `fetch` cannot connect at all, so the transport has value beyond fingerpri
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.1
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.2
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.1
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.2
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
@@ -207,7 +207,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.1.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.2.tgz
 ```
 
 </details>

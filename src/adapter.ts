@@ -85,7 +85,15 @@ export interface AdapterOptions {
   /** Canonical completed-turn evidence captured once when a request starts; absent means full. */
   getCompletedReasoning?: (options: GenerateOptions) => readonly ReasoningRecord[] | undefined
   /** Plugin-owned persistence; standalone callers retain in-memory waits. */
-  requestWaitState?: { remaining(model: string): number; remember(model: string, delay: number): void }
+  requestWaitState?: {
+    /** `activeEgresses` lets a wait recorded on a removed egress stop applying. */
+    remaining(model: string, activeEgresses?: readonly string[]): number
+    /** The wait that currently applies, for diagnostics. */
+    describe?(model: string, activeEgresses?: readonly string[]): { until: number; egress?: string } | undefined
+    remember(model: string, delay: number, egress?: string): void
+  }
+  /** Egress labels currently configured, so stale per-egress waits can be ignored. */
+  activeEgresses?: () => readonly string[]
 }
 
 interface ChatChunk {
@@ -218,8 +226,24 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       }
       const reasoningHistory = trimCompletedReasoning(options.messages, completedReasoning)
       const projectedOptions = reasoningHistory.messages === options.messages ? options : { ...options, messages: reasoningHistory.messages }
-      const requestWait = Math.max(this.remainingRequestWait(options.model), this.options.requestWaitState?.remaining(options.model) ?? 0)
-      if (requestWait > 0) throw new LlmError(`This model request is cooling down; retry after ${Math.ceil(requestWait / 1000)} seconds.`, 'REQUEST_COOLING', { providerRetryAfterMs: requestWait })
+      const activeEgresses = this.options.activeEgresses?.()
+      const requestWait = Math.max(
+        this.remainingRequestWait(options.model),
+        this.options.requestWaitState?.remaining(options.model, activeEgresses) ?? 0,
+      )
+      if (requestWait > 0) {
+        const observed = this.options.requestWaitState?.describe?.(options.model, activeEgresses)
+        const seconds = Math.ceil(requestWait / 1000)
+        // Say plainly that nothing was sent, and where the wait came from, so a stale
+        // cooldown is not mistaken for a live rejection.
+        const where = observed?.egress ? ` on ${observed.egress}` : ''
+        const when = observed?.until ? ` (recorded against a 429 that expires at ${new Date(observed.until).toISOString()}${where})` : ''
+        throw new LlmError(
+          `No request was sent: this model is cooling down after an earlier server rejection${when}. Retry after ${seconds} seconds, or clear the cooldown in Settings if you have changed egress.`,
+          'REQUEST_COOLING',
+          { providerRetryAfterMs: requestWait },
+        )
+      }
       const meta = snapshot === undefined ? (await this.catalog.list(options.signal)).find(model => model.id === options.model) : snapshot ?? undefined
       const sessionId = this.sessionIdFor(options)
       requestId = mintRequestId()
@@ -306,7 +330,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
           const error = await httpError(res)
           errors.set(res, error)
           serverWaitMs = retryAfterMs(res)
-          if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs)
+          if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs, egress)
           // A named free-usage rejection does not establish an IP-wide scope.
           // Preserve its request wait, but do not rotate identities or poison
           // the shared metadata/other-model pool on that inference alone.
@@ -329,7 +353,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         let error = errors.get(response) ?? await httpError(response)
         if (response.status === 429) {
           serverWaitMs = retryAfterMs(response)
-          if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs)
+          if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs, egress)
           const wait = Math.max(error.diagnostics.retryAfterMs ?? 0, this.options.pool?.waitMs() ?? 0)
           if (wait > 0) error = new UpstreamHttpError(
             `${error.message} Retry after at least ${Math.ceil(wait / 1000)} seconds.`, error.failure.code,
@@ -490,8 +514,8 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
   }
 
   /** Keep server waits even across manual calls and concurrent successful requests. */
-  private rememberRequestWait(model: string, delay: number): void {
-    this.options.requestWaitState?.remember(model, delay)
+  private rememberRequestWait(model: string, delay: number, egress?: string): void {
+    this.options.requestWaitState?.remember(model, delay, egress)
     const now = Date.now()
     const until = Math.min(Number.MAX_SAFE_INTEGER, now + delay)
     for (const [id, deadline] of this.requestWaits) if (deadline <= now) this.requestWaits.delete(id)

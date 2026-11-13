@@ -9,6 +9,15 @@ export function requestWaitScope(baseUrl: string, apiKey: string): string {
 }
 const validModel = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(value)
 const validDeadline = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+const validEgress = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 200
+
+/** One observed server wait, with the egress it was observed on. */
+export interface RequestWaitSnapshot {
+  model: string
+  until: number
+  /** Redacted egress label the rejection came from; absent on recovered legacy rows. */
+  egress?: string
+}
 
 /** Recover only observed HTTP 429 waits, never local EGRESS_COOLING guesses. */
 export function legacyRequestWaits(lines: readonly string[], now: number): Array<[string, number]> {
@@ -30,10 +39,23 @@ export function legacyRequestWaits(lines: readonly string[], now: number): Array
   return [...out]
 }
 
+/**
+ * Persisted per-model server waits.
+ *
+ * A wait is recorded with the egress that produced it. When the caller passes the
+ * currently configured egresses, a wait recorded on an egress that is no longer
+ * configured stops applying — changing the proxy list must not strand a model for
+ * the rest of the day.
+ *
+ * The file is re-read whenever it changes on disk, so clearing it externally (or
+ * through {@link clear}) takes effect immediately instead of after a restart.
+ */
 export class RequestWaitStore {
-  private readonly waits = new Map<string, number>()
+  private waits = new Map<string, RequestWaitSnapshot>()
   private overflowUntil = 0
   private readonly file: string
+  private signature = ''
+
   constructor(
     file: string,
     private readonly logger: LoggerLike = noopLogger,
@@ -41,19 +63,7 @@ export class RequestWaitStore {
     private readonly now: () => number = Date.now,
   ) {
     this.file = path.resolve(file)
-    let loaded = false
-    try {
-      if (fs.statSync(this.file).size > 100_000) throw new Error('Oversized state')
-      const data = JSON.parse(fs.readFileSync(this.file, 'utf8'))
-      if (data?.version !== 1 || !Array.isArray(data.waits) || data.waits.length > 1000
-        || !Number.isSafeInteger(data.overflowUntil) || data.overflowUntil < 0
-        || data.waits.some((row: unknown) => !Array.isArray(row) || row.length !== 2 || !validModel(row[0]) || !validDeadline(row[1]))) throw new Error('Invalid state')
-      this.overflowUntil = data.overflowUntil
-      for (const [model, until] of data.waits as Array<[string, number]>) this.adopt(model, until)
-      loaded = true
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') this.logger.warn('retry', 'request-wait state unavailable; recovering conservative observed waits')
-    }
+    const loaded = this.load()
     // Reconcile valid legacy observations even when a state file already exists:
     // an earlier standalone check may have created it before the live instance
     // records a newer rejection. Only maximum deadlines are adopted.
@@ -62,30 +72,132 @@ export class RequestWaitStore {
     if (!loaded || recovered.length) this.persist()
     if (recovered.length) this.logger.info('retry', 'preserved observed model waits across upgrade', { models: recovered.length })
   }
-  remaining(model: string): number {
-    return Math.max(0, Math.ceil(Math.max(this.waits.get(model) ?? 0, this.overflowUntil) - this.now()))
+
+  /**
+   * Remaining wait for a model.
+   *
+   * `activeEgresses` is the set of egress labels currently configured. A wait whose
+   * egress is no longer in that set is ignored, and rows recovered from logs (which
+   * carry no egress) always apply. An overflow wait applies to every model, because
+   * it exists precisely for the models that did not fit in the table.
+   */
+  remaining(model: string, activeEgresses?: readonly string[]): number {
+    this.reloadIfChanged()
+    const now = this.now()
+    for (const [key, wait] of this.waits) if (wait.until <= now) this.waits.delete(key)
+    const wait = this.waits.get(model)
+    const applicable = wait && (!wait.egress || !activeEgresses || activeEgresses.includes(wait.egress))
+    const until = Math.max(applicable ? wait!.until : 0, this.overflowUntil)
+    return Math.max(0, Math.ceil(until - now))
   }
-  remember(model: string, delay: number): void {
+
+  /** The per-model wait that currently applies, for diagnostics and messages. */
+  describe(model: string, activeEgresses?: readonly string[]): RequestWaitSnapshot | undefined {
+    this.reloadIfChanged()
+    const now = this.now()
+    for (const [key, wait] of this.waits) if (wait.until <= now) this.waits.delete(key)
+    const wait = this.waits.get(model)
+    if (!wait) return undefined
+    if (wait.egress && activeEgresses && !activeEgresses.includes(wait.egress)) return undefined
+    return wait
+  }
+
+  remember(model: string, delay: number, egress?: string): void {
     if (!validModel(model) || !validDeadline(Math.ceil(delay))) return
-    this.adopt(model, Math.min(Number.MAX_SAFE_INTEGER, this.now() + Math.ceil(delay)))
+    const until = Math.min(Number.MAX_SAFE_INTEGER, this.now() + Math.ceil(delay))
+    this.adopt(model, until, validEgress(egress) ? egress : undefined)
     this.persist()
   }
-  private adopt(model: string, until: number): void {
-    const now = this.now()
-    for (const [key, end] of this.waits) if (end <= now) this.waits.delete(key)
-    if (until <= now) return
-    if (this.waits.has(model) || this.waits.size < 256) this.waits.set(model, Math.max(this.waits.get(model) ?? 0, until))
-    else this.overflowUntil = Math.max(this.overflowUntil, until)
+
+  /** Drop every stored wait; returns how many were removed. */
+  clear(): number {
+    this.reloadIfChanged()
+    const removed = this.waits.size + (this.overflowUntil > 0 ? 1 : 0)
+    this.waits.clear()
+    this.overflowUntil = 0
+    this.persist()
+    return removed
   }
+
+  /** Current waits, oldest deadline first. */
+  snapshot(): RequestWaitSnapshot[] {
+    this.reloadIfChanged()
+    const now = this.now()
+    return [...this.waits.values()].filter((wait) => wait.until > now).sort((a, b) => a.until - b.until)
+  }
+
+  private adopt(model: string, until: number, egress?: string): void {
+    const now = this.now()
+    for (const [key, wait] of this.waits) if (wait.until <= now) this.waits.delete(key)
+    if (until <= now) return
+    if (this.waits.has(model) || this.waits.size < 256) {
+      const previous = this.waits.get(model)
+      this.waits.set(model, {
+        model,
+        until: Math.max(previous?.until ?? 0, until),
+        // Keep the egress that produced the longest deadline.
+        ...((until >= (previous?.until ?? 0) ? egress : previous?.egress) ? { egress: (until >= (previous?.until ?? 0) ? egress : previous?.egress)! } : {}),
+      })
+    } else this.overflowUntil = Math.max(this.overflowUntil, until)
+  }
+
+  /** Load the state file, replacing the in-memory copy. Returns false when absent. */
+  private load(): boolean {
+    this.signature = this.fileSignature()
+    try {
+      if (fs.statSync(this.file).size > 100_000) throw new Error('Oversized state')
+      const data = JSON.parse(fs.readFileSync(this.file, 'utf8'))
+      const rows = data?.waits
+      if (data?.version !== 1 && data?.version !== 2) throw new Error('Invalid state')
+      if (!Array.isArray(rows) || rows.length > 1000) throw new Error('Invalid state')
+      if (!Number.isSafeInteger(data.overflowUntil) || data.overflowUntil < 0) throw new Error('Invalid state')
+      const parsed: RequestWaitSnapshot[] = []
+      for (const row of rows) {
+        if (!Array.isArray(row) || (row.length !== 2 && row.length !== 3)) throw new Error('Invalid state')
+        if (!validModel(row[0]) || !validDeadline(row[1])) throw new Error('Invalid state')
+        if (row.length === 3 && !validEgress(row[2])) throw new Error('Invalid state')
+        parsed.push({ model: row[0], until: row[1], ...(row.length === 3 ? { egress: row[2] } : {}) })
+      }
+      this.waits = new Map()
+      this.overflowUntil = data.overflowUntil
+      for (const wait of parsed) this.adopt(wait.model, wait.until, wait.egress)
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger.warn('retry', 'request-wait state unavailable; recovering conservative observed waits')
+      }
+      this.waits = new Map()
+      this.overflowUntil = 0
+      return false
+    }
+  }
+
+  private fileSignature(): string {
+    try {
+      const stat = fs.statSync(this.file)
+      return `${stat.mtimeMs}:${stat.size}`
+    } catch {
+      return 'absent'
+    }
+  }
+
+  /** Pick up an external edit (a manual clear, another instance) without a restart. */
+  private reloadIfChanged(): void {
+    if (this.fileSignature() === this.signature) return
+    this.load()
+  }
+
   private persist(): void {
     const dir = path.dirname(this.file)
     const temporary = path.join(dir, `.request-waits-${randomUUID()}.tmp`)
     try {
       fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(temporary, JSON.stringify({ version: 1, waits: [...this.waits], overflowUntil: this.overflowUntil }) + '\n', { flag: 'wx' })
+      const waits = [...this.waits.values()].map((wait) => (wait.egress ? [wait.model, wait.until, wait.egress] : [wait.model, wait.until]))
+      fs.writeFileSync(temporary, JSON.stringify({ version: 2, waits, overflowUntil: this.overflowUntil }) + '\n', { flag: 'wx' })
       // Both paths are resolved in the single plugin-owned state directory.
       if (path.dirname(path.resolve(temporary)) !== dir || path.dirname(this.file) !== dir) throw new Error('Unexpected state target')
       fs.renameSync(temporary, this.file)
+      this.signature = this.fileSignature()
     } catch {
       this.logger.warn('retry', 'could not persist request waits; active in-memory waits remain enforced')
       // Do not delete any computed path after a failed state write.

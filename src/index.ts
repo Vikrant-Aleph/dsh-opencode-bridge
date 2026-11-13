@@ -172,7 +172,16 @@ export function apply(ctx: Context, config: Config): void {
   const storedProxies = loadProxyStore(proxyStorePath)
   const pool = new ProxyPool(storedProxies.urls ?? config.proxies, { cooldownMs: config.proxyCooldownMs })
   ctx.effect(() => () => clearDispatchers())
-  const proxyService = new ProxyService(pool, { storePath: proxyStorePath, baseUrl: config.baseUrl, logger, dispatcherFor })
+  // Filled once the wait store exists; the Settings page clears cooldowns through it.
+  const cooldownStore: { current?: RequestWaitStore } = {}
+  const proxyService = new ProxyService(pool, {
+    storePath: proxyStorePath,
+    baseUrl: config.baseUrl,
+    logger,
+    dispatcherFor,
+    // The wait store is created below; the hook resolves it lazily.
+    clearCooldowns: () => cooldownStore.current?.clear() ?? 0,
+  })
   ctx.effect(() => registerProxyAccess(ctx, proxyService))
   logger.info('proxy', 'egress pool ready', {
     source: storedProxies.urls ? 'settings-store' : 'plugin-config',
@@ -229,6 +238,7 @@ export function apply(ctx: Context, config: Config): void {
     path.join(path.dirname(proxyStorePath), `request-waits-${waitScope}.json`),
     logger, logger.read({ level: 'warn', limit: 5000 }).lines,
   )
+  cooldownStore.current = requestWaitState
   // The gateway's free lane distinguishes the official client's TLS stack from
   // Node's. The Bun-shaped transport resolves asynchronously (native module
   // import), so requests before it settles use plain fetch and then switch over.
@@ -239,6 +249,8 @@ export function apply(ctx: Context, config: Config): void {
   const transportHolder: { current?: typeof fetch & { close?: () => Promise<void> } } = {}
   const adapter = new OpenCodeFreeAdapter(catalog, {
     requestWaitState,
+    // A wait is tied to the egress that produced it; removing a proxy retires it.
+    activeEgresses: () => (pool && pool.size > 0 ? pool.egressLabels() : ['direct (this machine)']),
     providerRoute: config.providers[0] ?? 'opencode-bridge',
     recipe,
     requestTimeoutMs: config.requestTimeoutMs,

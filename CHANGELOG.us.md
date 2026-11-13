@@ -9,6 +9,25 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-14
+
+### Fixed
+
+- A stored cooldown was read once at startup, so clearing the file had no effect until a
+  restart. The store now re-reads it before every check, and an external clear applies
+  immediately.
+- Cooldowns are recorded with the egress that produced them and stop applying once that
+  egress is no longer configured. Previously a wait from a removed proxy kept blocking
+  the model.
+- The cooldown error now states that no request was sent and reports when and on which
+  egress the rejection was recorded, so it cannot be mistaken for a live 429.
+
+### Added
+
+- Settings → Egress rotation → **Clear cooldowns**, which retires stale records without
+  a restart.
+
+
 ## [1.0.0] - 2026-11-13
 
 The release that answers the question the project was built around: what does the free

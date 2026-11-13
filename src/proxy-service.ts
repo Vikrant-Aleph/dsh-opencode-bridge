@@ -23,7 +23,7 @@ import {
 
 export const PROXY_RPC_NAMESPACE = 'opencode-bridge-proxies'
 const RPC_CHANNEL = '/api'
-const RPC_ENDPOINTS = ['read', 'write', 'test'] as const
+const RPC_ENDPOINTS = ['read', 'write', 'test', 'clear-cooldowns'] as const
 type RpcEndpoint = (typeof RPC_ENDPOINTS)[number]
 
 export interface ProxyView {
@@ -50,6 +50,13 @@ export interface ProxyServiceOptions {
   probeTimeoutMs?: number
   dispatcherFor?: (url: string) => Promise<unknown> | unknown
   logger?: LoggerLike
+  /**
+   * Drop persisted per-model server waits and return how many were removed.
+   *
+   * A wait is tied to the egress that produced it, so a user who changes egress
+   * outside the plugin needs a way to retire them without editing files.
+   */
+  clearCooldowns?: () => number
 }
 
 export class ProxyService {
@@ -62,6 +69,11 @@ export class ProxyService {
   ) {
     this.logger = options.logger ?? noopLogger
     this.probeTimeoutMs = Math.max(1000, options.probeTimeoutMs ?? 8000)
+  }
+
+  /** Retire every persisted server wait; returns how many were dropped. */
+  clearCooldowns(): number {
+    return this.options.clearCooldowns?.() ?? 0
   }
 
   read(): ProxyView {
@@ -225,6 +237,7 @@ export function registerProxyAccess(ctx: Context, service: ProxyService): () => 
           try {
             if (endpoint === 'read') return reply({ ok: true, value: service.read() })
             if (endpoint === 'write') return reply({ ok: true, value: service.write(envelope.payload) })
+            if (endpoint === 'clear-cooldowns') return reply({ ok: true, value: { cleared: service.clearCooldowns() } })
             return reply({ ok: true, value: await service.test() })
           } catch (error) {
             return failure('internal', error instanceof Error ? error.message : String(error))

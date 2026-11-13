@@ -77,7 +77,7 @@ test('proxy routes are registered with the documented fetch contract', async () 
     const service = new ProxyService(new ProxyPool(['direct']), { storePath: join(dir, 'proxies.json'), baseUrl: 'https://relay.invalid/v1' })
     const { ctx, routes } = harness()
     registerProxyAccess(ctx, service)
-    assert.equal(routes.length, 3)
+    assert.equal(routes.length, 4)
     for (const route of routes) assertRouteShape(route, '/api/opencode-bridge-proxies/')
 
     const read = routes.find((r) => r.path.endsWith('/read'))
@@ -110,6 +110,33 @@ test('an endpoint rejects a mismatched method name', async () => {
     assertEnvelope(body, 'r3')
     assert.equal(body.result.ok, false)
     assert.equal(body.result.error.code, 'bad-request')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the clear-cooldowns route retires persisted waits and reports the count', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ocf-rpc-'))
+  try {
+    let cleared = 0
+    const service = new ProxyService(new ProxyPool(['direct']), {
+      storePath: join(dir, 'proxies.json'),
+      baseUrl: 'https://relay.invalid/v1',
+      clearCooldowns: () => { cleared += 1; return 3 },
+    })
+    const { ctx, routes } = harness()
+    registerProxyAccess(ctx, service)
+    const route = routes.find((r) => r.path.endsWith('/clear-cooldowns'))
+    assert.ok(route, 'the clear-cooldowns route must be registered')
+    const response = await route.fetch(new Request('http://host/api/opencode-bridge-proxies/clear-cooldowns', {
+      method: 'POST',
+      body: JSON.stringify({ rpcId: 'r4', method: 'opencode-bridge-proxies/clear-cooldowns', payload: {} }),
+    }))
+    const body = await response.json()
+    assertEnvelope(body, 'r4')
+    assert.equal(body.result.ok, true)
+    assert.equal(body.result.value.cleared, 3)
+    assert.equal(cleared, 1)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

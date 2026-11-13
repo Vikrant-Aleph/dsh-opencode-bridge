@@ -226,6 +226,16 @@ export class ProxyPool {
     return Math.min(...this.slots.map((slot) => slot.coolingUntil)) - now
   }
 
+  /**
+   * Redacted labels of the currently configured egresses.
+   *
+   * A stored server wait is tied to the egress that produced it, so removing a proxy
+   * from the list also retires the waits recorded on it.
+   */
+  egressLabels(): string[] {
+    return this.slots.map((slot) => redactProxyUrl(slot.entry.url))
+  }
+
   succeeded(index: number): void {
     const slot = this.slots[index]
     // An earlier request or metadata probe cannot erase a concurrent throttle.

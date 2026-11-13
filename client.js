@@ -66,6 +66,10 @@ window.__ModuleLoader__.load({
       proxyAdd: 'Add',
       proxyRemove: 'Remove',
       proxyTest: 'Test all',
+      proxyClearCooldowns: 'Clear cooldowns',
+      proxyClearingCooldowns: 'Clearing…',
+      proxyCooldownsCleared: 'Cooldowns cleared.',
+      proxyCooldownFailed: 'Could not clear cooldowns.',
       proxyTesting: 'Testing…',
       proxyRefresh: 'Refresh',
       proxyReady: 'ready',
@@ -126,6 +130,10 @@ window.__ModuleLoader__.load({
       proxyAdd: '添加',
       proxyRemove: '删除',
       proxyTest: '测试全部',
+      proxyClearCooldowns: '清除冷却',
+      proxyClearingCooldowns: '清除中…',
+      proxyCooldownsCleared: '冷却已清除。',
+      proxyCooldownFailed: '清除冷却失败。',
       proxyTesting: '测试中…',
       proxyRefresh: '刷新',
       proxyReady: '就绪',
@@ -515,6 +523,21 @@ window.__ModuleLoader__.load({
         setDraft('');
       }, [draft, submit]);
 
+      const clearCooldowns = useCallback(async () => {
+        setBusy(true);
+        setError('');
+        setMessage(t('proxyClearingCooldowns'));
+        try {
+          const value = await call('clear-cooldowns', {});
+          const cleared = typeof value.cleared === 'number' ? value.cleared : 0;
+          setMessage(cleared > 0 ? `${t('proxyCooldownsCleared')} (${cleared})` : t('proxyCooldownsCleared'));
+        } catch (e) {
+          setError(`${t('proxyCooldownFailed')} ${String(e && e.message ? e.message : e)}`);
+        } finally {
+          setBusy(false);
+        }
+      }, [call, t]);
+
       const testAll = useCallback(async () => {
         setBusy(true);
         setError('');
@@ -584,6 +607,7 @@ window.__ModuleLoader__.load({
           }),
           h('button', { type: 'button', onClick: add, disabled: busy || !draft.trim() }, t('proxyAdd')),
           h('button', { type: 'button', onClick: testAll, disabled: busy }, busy ? t('proxyTesting') : t('proxyTest')),
+          h('button', { type: 'button', onClick: clearCooldowns, disabled: busy }, t('proxyClearCooldowns')),
           h('button', { type: 'button', onClick: load, disabled: busy }, t('proxyRefresh')),
         ),
         h('p', { className: 'ocf-log-note' }, t('proxyHint')),

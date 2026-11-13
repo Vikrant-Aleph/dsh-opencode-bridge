@@ -16,7 +16,7 @@ function fixture(t, version = '1.2.3') {
     name: 'dsh-opencode-bridge', version, main: 'lib/index.js', types: 'lib/index.d.ts',
     scripts: { prepack: 'echo fixture-prepack', build: 'echo fixture-build' },
     exports: { '.': { default: './lib/index.js', types: './lib/index.d.ts' }, './client': './client.js', './locale/*.json': './locale/*.json' },
-    files: ['lib', 'client.js', 'locale/*.json', 'icon.svg', 'cordis.patch.yml', 'README.md', 'README.zh.md', 'LICENSE'],
+    files: ['lib', 'client.js', 'locale/*.json', 'icon.svg', 'cordis.patch.yml', 'README.us.md', 'README.md', 'LICENSE'],
     dsh: { bundle: { patch: './cordis.patch.yml' } },
   }
   const files = new Map(Object.entries({
@@ -24,8 +24,8 @@ function fixture(t, version = '1.2.3') {
     'lib/index.js': 'export const plugin = true\n', 'lib/index.d.ts': 'export declare const plugin: boolean\n',
     'client.js': 'export {}\n', 'locale/en.json': '{}\n', 'locale/zh.json': '{}\n',
     'icon.svg': '<svg/>', 'cordis.patch.yml': 'plugins: []\n', LICENSE: 'MIT\n',
+    'README.us.md': `add dsh-opencode-bridge@${version}\nadd ./dsh-opencode-bridge-${version}.tgz\n`,
     'README.md': `add dsh-opencode-bridge@${version}\nadd ./dsh-opencode-bridge-${version}.tgz\n`,
-    'README.zh.md': `add dsh-opencode-bridge@${version}\nadd ./dsh-opencode-bridge-${version}.tgz\n`,
   }))
   for (const [name, content] of files) {
     mkdirSync(dirname(resolve(root, name)), { recursive: true })
@@ -76,8 +76,8 @@ test('rejects mismatched, missing and unprefixed tags', () => {
 test('metadata validates fixture and catches README drift', (t) => {
   const f = fixture(t)
   assert.equal(checkMetadata(f.root, f.tag).version, f.pkg.version)
-  writeFileSync(resolve(f.root, 'README.zh.md'), 'dsh-opencode-bridge@0.0.1\ndsh-opencode-bridge-0.0.1.tgz')
-  assert.throws(() => checkMetadata(f.root, f.tag), /README.zh.md/)
+  writeFileSync(resolve(f.root, 'README.md'), 'dsh-opencode-bridge@0.0.1\ndsh-opencode-bridge-0.0.1.tgz')
+  assert.throws(() => checkMetadata(f.root, f.tag), /README.md/)
 })
 test('frozen lock settings mismatch is an explicit blocker', (t) => {
   const f = fixture(t)
@@ -125,8 +125,8 @@ test('rejects credential-bearing content even inside an allowed resource', (t) =
 test('allows only exact public documentation credential placeholders', (t) => {
   const f = fixture(t)
   const example = 'http://user:password@host:port socks5://user:password@proxy.example:1080'
-  f.files.set('README.md', example)
-  writeFileSync(resolve(f.root, 'README.md'), example)
+  f.files.set('README.us.md', example)
+  writeFileSync(resolve(f.root, 'README.us.md'), example)
   writeFileSync(f.archive, tar(f.files))
   assert.equal(checkArchive(f.root, f.tag, f.archive).files, f.files.size)
 })

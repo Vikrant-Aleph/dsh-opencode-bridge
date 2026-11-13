@@ -1,7 +1,7 @@
 # Evidence
 
-Dated captures behind the claims in [TECHNICAL.md](../../TECHNICAL.md) and the
-[camouflage policy](../../CAMOUFLAGE.md). Every file here is a raw measurement, so a reader can check a claim
+Dated captures behind the claims in [TECHNICAL.us.md](../../TECHNICAL.us.md) and the
+[camouflage policy](../../CAMOUFLAGE.us.md). Every file here is a raw measurement, so a reader can check a claim
 for themselves.
 
 **These are dated observations.** The free tier changes; a capture from

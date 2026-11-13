@@ -1,142 +1,114 @@
-# Changelog
+# 变更日志
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+本文件记录本项目所有重要变更。格式遵循
+[Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
+[语义化版本](https://semver.org/lang/zh-CN/)。
 
-Releases are published from `v*` tags, and the notes on the release page are taken from
-the matching section of this file.
+发布由 `v*` 标签触发，发布页正文取自本文件对应版本的一节（中英双语）。
 
-## [Unreleased]
+## [未发布]
 
 ## [1.0.0] - 2026-11-13
 
-The release that answers the question the project was built around: what does the free
-tier actually check?
+这个版本回答了项目创建时的核心问题：免费档究竟在检查什么。
 
-### Found
+### 发现
 
-Measured against the real gateway, one variable at a time from a single runtime. Three
-things are checked:
+对真实网关实测，同一运行时下每次只改一个变量。结论是三项检查：
 
-- The `User-Agent` must be `opencode/latest/2.2.0/cli`.
-- **At least one tool must be declared.** The name does not matter; an empty array is
-  refused.
-- **The system prompt must contain an `<env>` block.** A 177-byte prompt containing
-  nothing else passes.
+- `User-Agent` 必须是 `opencode/latest/2.2.0/cli`。
+- **至少声明一个工具。** 名字无所谓，空数组会被拒。
+- **系统提示必须包含 `<env>` 块。** 仅含该块的 177 字节提示即可通过。
 
-The last two were the missing pieces. The plugin declared only the caller's tools — often
-none — and sent DSH's prompt unchanged, so every request was refused with
-`FreeUsageLimitError` however closely the headers matched.
+后两项正是缺失的部分。此前插件只声明调用方的工具——常常一个都没有——并原样发送 DSH 的提示，
+所以无论请求头多接近，每次请求都会被 `FreeUsageLimitError` 拒绝。
 
-### Added
+### 新增
 
-- `src/bun-transport.ts`: reproduces the official client's TLS handshake through the
-  optional `wreq-js` dependency — cipher suites, supported groups, signature algorithms
-  (including `ed25519` as `0x0807` and `ecdsa_secp521r1_sha512` as `0x0603`), extension
-  order, and `http/1.1`-only ALPN. The `ClientHello` matches the capture byte for byte
-  once random fields are normalised.
-- HTTP framing alignment: header names, casing and order, `accept-encoding`,
-  `keep-alive`, and a persistent connection pool reused across turns.
-- An environment block generated from the real working directory and appended after the
-  DSH prompt.
-- `docs/evidence/`: the captures behind every claim, published so a reader can check
-  them. Guarded by `tests/evidence-links.test.mjs` and `tests/doc-links.test.mjs`.
-- `scripts/clean.mjs`, run before every build, so removed modules cannot leave compiled
-  output behind.
-- `CHANGELOG.md`, with the release page generated from it.
+- `src/bun-transport.ts`：通过可选依赖 `wreq-js` 复刻官方客户端的 TLS 握手——加密套件、
+  支持的曲线组、签名算法（含 `ed25519` 写作 `0x0807`、`ecdsa_secp521r1_sha512` 写作
+  `0x0603`）、扩展顺序，以及仅 `http/1.1` 的 ALPN。归一化随机字段后，`ClientHello`
+  与抓包逐字节一致。
+- HTTP 分帧对齐：请求头名称、大小写与顺序，`accept-encoding`，`keep-alive`，以及跨轮次
+  复用的持久连接池。
+- 由真实工作目录生成的环境块，追加在 DSH 提示之后。
+- `docs/evidence/`：每个结论背后的抓包，随仓库发布以便核查。由
+  `tests/evidence-links.test.mjs` 与 `tests/doc-links.test.mjs` 守护。
+- `scripts/clean.mjs`：每次构建前运行，避免已删除模块留下编译产物。
+- `CHANGELOG.md` 与 `CHANGELOG.us.md`：发布页正文由 `scripts/release-notes.mjs`
+  从这两份文件生成。
+- 中文成为主文档语言：`README.md`、`TECHNICAL.md`、`CAMOUFLAGE.md` 为中文，
+  英文版带 `.us` 后缀。
 
-### Changed
+### 变更
 
-- Tool declarations are exactly the caller's tools. A placeholder is added only when the
-  caller declares none; its description says not to call it, and a call that happens
-  anyway is dropped with a `warn` log entry instead of failing the turn.
-- The adapter waits for a transport that is still resolving, so the first request after
-  plugin load no longer falls back silently to plain `fetch`.
-- The egress pool's selected proxy URL now reaches non-undici transports, so rotation
-  works while the Bun-shaped transport is active.
+- 工具声明恰好是调用方的工具。仅当调用方没有任何工具时才补一个占位声明，其描述明确劝阻调用；
+  万一被调用则丢弃并记 `warn` 日志，该轮正常结束。
+- 适配器会等待尚未解析完成的传输层，插件加载后的首个请求不再静默退回普通 `fetch`。
+- 出口池选中的代理 URL 现在会传给非 undici 传输层，因此 Bun 形态传输下轮换仍然有效。
 
-### Fixed
+### 修复
 
-- The Bun-shaped transport was never wired to the adapter, so earlier transport work had
-  no effect on requests.
-- `package.json` carried a byte-order mark, which made it invalid JSON for strict
-  parsers.
-- Stale compiled modules and a missing published-docs entry were shipping in the package.
+- Bun 形态传输层此前从未接到适配器，导致早期传输工作对请求毫无影响。
+- `package.json` 曾带有 BOM，严格解析器会认为它不是合法 JSON。
+- 构建残留的旧模块、以及发布清单缺失的文档条目，曾被一并打进包内。
 
-### Removed
+### 移除
 
-- **Breaking:** `toolFingerprint` and `toolTranslation` configuration keys.
-- **Breaking:** the `opencode_bridge_audit` tool, along with the tool-bridge layer it
-  described.
-- `docs/COMPARISON.zh.md` and `docs/research-notes/`, which documented that removed
-  architecture.
+- **破坏性变更：** 配置项 `toolFingerprint` 与 `toolTranslation`。
+- **破坏性变更：** `opencode_bridge_audit` 工具，以及它所描述的工具桥层。
+- `docs/COMPARISON.zh.md` 与 `docs/research-notes/`：记录的是已移除的架构。
 
-### Upgrade
+### 升级
 
-Configuration keys that no longer exist are ignored, so an existing config keeps working.
-If you relied on `opencode_bridge_audit`, that tool is gone. `wreq-js` is an optional
-dependency: without its native binding the plugin falls back to plain `fetch` and loses
-only the TLS alignment.
+配置里已不存在的键会被忽略，现有配置仍可正常加载。若你依赖过 `opencode_bridge_audit`，
+该工具已不存在。`wreq-js` 是可选依赖：缺少其原生绑定时插件回退普通 `fetch`，只失去 TLS 对齐。
 
 ## [0.5.5] - 2026-10-23
 
-### Added
+### 新增
 
-- Optional trimming of completed-turn reasoning, with a persistent Settings tab.
+- 可选的已完成轮次思考精简，含持久化设置标签页。
 
 ## [0.5.4] - 2026-10-22
 
-### Added
+### 新增
 
-- Image input through DSH's attachment request-version API.
-- Tool-result image hoisting after the contiguous tool result group.
+- 通过 DSH 附件请求版本 API 支持图片输入。
+- 工具结果图片在连续工具结果组之后上提。
 
 ## [0.5.3] - 2026-10-21
 
-### Fixed
+### 修复
 
-- Assistant reasoning history is replayed for thinking-mode tool calls, including an
-  explicitly empty reasoning field where the model requires one.
+- 思考模式的工具调用会回放 assistant 思考历史，包括模型要求的空思考字段。
 
 ## [0.5.2] - 2026-10-19
 
-### Changed
+### 变更
 
-- Bounded retries with safe 429 diagnostics and a strict cooldown that never shortens a
-  server-requested wait.
+- 有界重试、安全的 429 诊断，以及绝不缩短服务端等待的严格冷却。
 
 ## [0.5.1] - 2026-10-19
 
-### Added
+### 新增
 
-- Dynamic model catalog refresh.
+- 动态模型目录刷新。
 
 ## [0.4.1] - 2026-10-18
 
-### Added
+### 新增
 
-- SOCKS4/4a/5/5h proxies, DNS modes, and credential handling.
+- SOCKS4/4a/5/5h 代理、DNS 模式与凭据处理。
 
 ## [0.3.0] - 2026-10-18
 
-### Added
+### 新增
 
-- Egress proxy pool with rotation.
+- 出口代理池与轮换。
 
 ## [0.1.0] - 2026-10-17
 
-### Added
+### 新增
 
-- First release: gate reproduction, `OpenCodeFreeAdapter`, and the model catalog.
-
-[Unreleased]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v1.0.0
-[0.5.5]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.5
-[0.5.4]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.4
-[0.5.3]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.3
-[0.5.2]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.2
-[0.5.1]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.1
-[0.4.1]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.4.1
-[0.3.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.3.0
-[0.1.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.1.0
+- 首个版本：门禁复刻、`OpenCodeFreeAdapter` 与模型目录。

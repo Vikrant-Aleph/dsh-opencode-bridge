@@ -32,18 +32,18 @@ test('real client dictionaries name the tab and pane Context trimming in both lo
   assert.doesNotMatch(dictionaries.zh.pageIntro, /图片|图像|视觉/)
 })
 test('visitor summaries mention context trimming and documented navigation uses the new name', () => {
-  for (const file of ['README.md', 'TECHNICAL.md']) {
+  for (const file of ['README.us.md', 'TECHNICAL.us.md']) {
     const text = fs.readFileSync(new URL(file, root), 'utf8')
     assert.match(text.slice(0, text.indexOf('\n## ')), /optional context trimming/i)
     assert.doesNotMatch(text.slice(0, text.indexOf('\n## ')), /image|vision/i)
-    if (file === 'README.md') assert.doesNotMatch(text.split('## Install and get started')[0], /Declared image input/i)
+    if (file === 'README.us.md') assert.doesNotMatch(text.split('## Install and get started')[0], /Declared image input/i)
     assert.doesNotMatch(text, /OpenCode Bridge\s*→\s*Context(?! trimming)/)
   }
-  for (const file of ['README.zh.md', 'TECHNICAL.zh.md']) {
+  for (const file of ['README.md', 'TECHNICAL.md']) {
     const text = fs.readFileSync(new URL(file, root), 'utf8')
     assert.match(text.slice(0, text.indexOf('\n## ')), /上下文精简/)
     assert.doesNotMatch(text.slice(0, text.indexOf('\n## ')), /图片|图像|视觉/)
-    if (file === 'README.zh.md') assert.doesNotMatch(text.split('## 安装与开始使用')[0], /按模型能力输入图片/)
+    if (file === 'README.md') assert.doesNotMatch(text.split('## 安装与开始使用')[0], /按模型能力输入图片/)
     assert.doesNotMatch(text, /OpenCode Bridge\s*→\s*上下文(?!精简)/)
   }
 })

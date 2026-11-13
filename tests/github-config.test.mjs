@@ -92,7 +92,9 @@ test('publish job alone can write and refuses tag drift or overwriting an existi
   assert.match(runs, /Release already exists/)
   assert.match(runs, /gh release create/)
   // The release body comes from CHANGELOG.md, not GitHub's commit summary.
-  assert.match(runs, /--verify-tag --notes-file/)
+  assert.match(runs, /--verify-tag/)
+  assert.match(runs, /--title "\$RELEASE_TAG"/)
+  assert.match(runs, /--notes-file/)
   assert.match(runs, /release-notes\.mjs "\$\{RELEASE_TAG#v\}"/)
   assert.doesNotMatch(runs, /--generate-notes/)
   assert.match(runs, /--prerelease --latest=false/)

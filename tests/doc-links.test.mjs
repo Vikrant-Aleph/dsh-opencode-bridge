@@ -9,12 +9,12 @@ import path from 'node:path'
  * reorganisation cannot leave a reader with a dead pointer.
  */
 const DOCS = [
+  'README.us.md',
   'README.md',
-  'README.zh.md',
+  'TECHNICAL.us.md',
   'TECHNICAL.md',
-  'TECHNICAL.zh.md',
+  'CAMOUFLAGE.us.md',
   'CAMOUFLAGE.md',
-  'CAMOUFLAGE.zh.md',
   'docs/evidence/README.md',
 ]
 

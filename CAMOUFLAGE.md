@@ -1,107 +1,101 @@
-# Camouflage policy
+# 伪装原则
 
-[中文](CAMOUFLAGE.zh.md) | English · [Technical design](TECHNICAL.md)
+中文 | [English](CAMOUFLAGE.us.md) · [技术设计](TECHNICAL.md)
 
-What the bridge imitates, and why. This is the authority for the code: any imitation
-not listed here should be removed.
-
----
-
-## The rule
-
-> **Imitate only what the gateway actually checks.**
-
-The original wording was "imitate only what the official client cannot let a user
-change". Measurement on 2026-11-13 corrected it: a configurable field is ruled out as a
-*fingerprint*; the gateway can still require its *default shape* as a
-protocol precondition. The test is therefore "is it checked", not "is it configurable".
+记录**桥接模仿什么、为什么**，是代码的依据：不在此列出的模仿都应删除。
 
 ---
 
-## What is checked
+## 原则
 
-| Requirement | What we measured | Evidence |
+> **只伪装网关真正会检查的部分。**
+
+最初的表述是“只伪装官方无法让用户改变的部分”，2026-11-13 的实测修正了它：字段“用户可配置”只
+排除了它作为指纹的可能，并不排除网关把**默认形态**当作协议前提。所以判断标准是“是否被检查”，
+不是“是否可配置”。
+
+---
+
+## 会被检查的部分
+
+| 要求 | 实测结果 | 证据 |
 |---|---|---|
-| `User-Agent` | Must be `opencode/latest/2.2.0/cli`; everything else correct is not enough | Community reports and this project's probes |
-| **At least one declared tool** | Any name works; a single tool is enough; an empty array is refused | `docs/evidence/bun-tool-minimum.json`, `docs/evidence/any-tool-vs-read.json` |
-| **An `<env>` block in the system prompt** | A 177-byte prompt containing only that block passes; removing it is refused | `docs/evidence/bun-env-hypothesis.json` |
+| `User-Agent` | 必须是 `opencode/latest/2.2.0/cli`，其余全对也不行 | 社区报告与本项目探针 |
+| **至少声明一个工具** | 名字任意，单独一个即可；空数组被拒 | `docs/evidence/bun-tool-minimum.json`、`docs/evidence/any-tool-vs-read.json` |
+| **系统提示含 `<env>` 块** | 仅含该块的 177 字节提示即可；去掉该块被拒 | `docs/evidence/bun-env-hypothesis.json` |
 
-The last two are the key ones: the official client generates them automatically, so a
-user cannot remove them.
+后两项是关键：它们由官方客户端自动生成，用户改不掉。
 
 ---
 
-## What is not checked
+## 不会被检查的部分
 
-| Surface | User control | Evidence |
+| 面 | 用户可改 | 证据 |
 |---|---|---|
-| System prompt | `agents.<name>.system`, `agents/<name>.md`; still passes when replaced | `docs/evidence/user-customization-round2-2026-11-13.json` |
-| Tool list | Reduced from 12 to 4; still passes | same |
-| Contents of `<env>` | Rewriting paths or flipping the git flag still passes | `docs/evidence/bun-env-strictness.json` |
-| Code Mode catalogue | A catalogue synthesised from different tool names still passes | `docs/evidence/bun-synthetic-catalog.json` |
-| `b3`, `traceparent` | Minted per request; no fixed value | — |
-| `x-opencode-project` | Derived from the working directory | — |
-| Runtime | Bun 1.4.4 with a zero-tool body is refused identically | `docs/evidence/bun-runtime-test.json` |
+| 系统提示 | `agents.<name>.system`、`agents/<name>.md`，改后仍能通过 | `docs/evidence/user-customization-round2-2026-11-13.json` |
+| 工具清单 | 12 个降到 4 个，仍能通过 | 同上 |
+| `<env>` 的内容 | 改写路径、翻转 git 标志，仍能通过 | `docs/evidence/bun-env-strictness.json` |
+| Code Mode 目录 | 用不同工具名合成的目录，仍能通过 | `docs/evidence/bun-synthetic-catalog.json` |
+| `b3`、`traceparent` | 每次请求由运行时生成，无固定值 | — |
+| `x-opencode-project` | 由工作目录推导 | — |
+| 运行时 | Bun 1.4.4 用零工具请求体同样被拒 | `docs/evidence/bun-runtime-test.json` |
 
 ---
 
-## Transport (TLS)
+## 传输层（TLS）
 
-The official client's `ClientHello` cannot be expressed by Node's own TLS.
-`src/bun-transport.ts` delegates the handshake to `wreq-js` (BoringSSL, the same library
-the official client uses).
+官方客户端的 `ClientHello` 是 Node 自带 TLS 无法表达的。`src/bun-transport.ts` 把握手交给
+`wreq-js`（BoringSSL，与官方同一套库）。
 
-**Status: aligned byte for byte; necessity unproven.** It exists to cover
-fingerprint checks that may appear later.
+**状态：已逐字节对齐，但未被证明必需。** 目前只用于应对将来可能出现的指纹检查。
 
-| Element | Value |
+| 元素 | 值 |
 |---|---|
-| Cipher suites | The captured 17, in order |
-| `supported_groups` | `X25519MLKEM768`, `X25519`, `P-256`, `P-384` — the extra `MLKEM768` group the default profile offers must be removed |
-| `signature_algorithms` | The captured 11, including **`0x0807` = ed25519** (not `rsa_pss_pss_sha256`, which is `0x0809`) and `0x0603` = ecdsa_secp521r1_sha512 |
-| Extensions | The captured 12, in order, no GREASE/ECH/ALPS |
-| ALPN | `http/1.1` only — the official client never offers `h2` |
+| 加密套件 | 抓包中的 17 个，顺序一致 |
+| `supported_groups` | `X25519MLKEM768`、`X25519`、`P-256`、`P-384`——默认配置多给的 `MLKEM768` 组要去掉 |
+| `signature_algorithms` | 抓包中的 11 个，含 **`0x0807` = ed25519**（不是 `rsa_pss_pss_sha256`，那是 `0x0809`）与 `0x0603` = ecdsa_secp521r1_sha512 |
+| 扩展 | 抓包中的 12 个，顺序一致，无 GREASE/ECH/ALPS |
+| ALPN | 仅 `http/1.1`——官方客户端从不提供 `h2` |
 
-The `ClientHello` is 1482 bytes and byte-identical to the capture once random fields are
-normalised (`docs/evidence/clienthello-deep-2026-11-13.json`).
-
----
-
-## Deliberately not done
-
-- No rotating of IPs, sessions or identities to evade service limits.
-- No executing tools inside another runtime: returned calls are dispatched by DSH.
-- No extra imitation of user-configurable content, which carries no identity.
+`ClientHello` 为 1482 字节，归一化随机字段后与抓包逐字节相同
+（`docs/evidence/clienthello-deep-2026-11-13.json`）。
 
 ---
 
-## Current state
+## 刻意不做的事
 
-| Requirement | How the bridge satisfies it |
+- 不通过轮换 IP、会话或身份规避服务限制。
+- 不在其他运行时里执行工具：返回的调用交给 DSH 派发。
+- 不额外模仿用户可改的内容，因为它们不构成身份。
+
+---
+
+## 当前状态
+
+| 要求 | 桥接如何满足 |
 |---|---|
-| At least one declared tool | The caller's own tools suffice; a placeholder is added **only when the caller declares none**. Its description says not to call it, and a call that happens anyway is dropped (logged at `warn`) so the turn ends normally. |
-| `<env>` block in the system prompt | The adapter appends `environmentBlock()` after the DSH prompt, generated from the real working directory. |
-| `ClientHello` | Byte-identical to the capture, zero extension mismatches. |
-| Headers | Byte-identical names, casing, order and values apart from `x-opencode-project`. |
-| Connection | Pooled, `keep-alive`. |
+| 至少声明一个工具 | 调用方自己的工具即可满足；**仅当调用方没有任何工具时**才补一个占位声明，其描述劝阻调用，万一被调用则丢弃（记 `warn`），该轮正常结束 |
+| 系统提示含 `<env>` 块 | 适配器把 `environmentBlock()` 追加在 DSH 提示之后，内容取自真实工作目录 |
+| `ClientHello` | 与抓包逐字节一致，扩展零差异 |
+| 请求头 | 除 `x-opencode-project` 外，名称、大小写、顺序、值均一致 |
+| 连接 | 复用连接池、`keep-alive` |
 
-The adapter's own code path returns 200 and answers repeatedly
-(`docs/evidence/verify-env-fix.json`, `docs/evidence/repeat-1.json`,
-`docs/evidence/placeholder-verify.json`).
+适配器自身代码路径可稳定返回 200 并正常作答
+（`docs/evidence/verify-env-fix.json`、`docs/evidence/repeat-1.json`、`docs/evidence/placeholder-verify.json`）。
 
 ---
 
-## Ruled out
+## 已排除的假设
 
-Each of these was disproved by measurement and is recorded so the work is not repeated.
+每一项都经实测否定，记录在此以免重复劳动。
 
-| Hypothesis | Result |
+| 假设 | 结果 |
 |---|---|
-| User-Agent | Aligned to the capture; insufficient alone |
-| Endpoint lane | All four paths behave identically |
-| Stale session id | A fresh session fails the same way |
-| Egress IP quota | A brand-new IP still refused the bridge while the official client passed |
-| Proxy process routing | The same egress IP under both process names |
-| TCP write coalescing | Differs, but is timing-dependent and implausible as a gate |
-| TLS fingerprint alone | Byte-identical, still refused |
-| Runtime | Bun with the same body fails identically |
+| User-Agent | 已按抓包对齐，但不足以通过 |
+| 端点 lane | 四条路径行为一致 |
+| 会话 ID 过期 | 全新会话同样失败 |
+| 出口 IP 配额 | 换全新 IP 后官方通过、桥接仍被拒 |
+| 代理按进程分流 | 两个进程名下出口 IP 相同 |
+| TCP 写入合并 | 确有差异，但随时序变化，作为门禁不合理 |
+| 单独的 TLS 指纹 | 已逐字节一致，仍被拒 |
+| 运行时 | Bun 用同一请求体同样失败 |

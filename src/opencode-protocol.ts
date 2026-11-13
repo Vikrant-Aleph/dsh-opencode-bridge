@@ -174,7 +174,7 @@ export function buildHeaders(
 // ---------------------------------------------------------------------------
 // Tool declarations. The tool list is user-controlled in the official client
 // (a custom agent can drop it to one tool), so it carries no identity and the
-// bridge declares exactly the tools DSH can execute. See CAMOUFLAGE.md.
+// bridge declares exactly the tools DSH can execute. See CAMOUFLAGE.us.md.
 
 export interface ChatTool {
   type: 'function'

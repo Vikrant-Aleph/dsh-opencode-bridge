@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 const root = new URL('../', import.meta.url)
 const read = (file) => readFileSync(new URL(file, root), 'utf8')
 const version = JSON.parse(read('package.json')).version
-const readmes = ['README.md', 'README.zh.md']
+const readmes = ['README.us.md', 'README.md']
 
 for (const file of readmes) {
   const text = read(file)
@@ -27,7 +27,7 @@ for (const file of readmes) {
 }
 
 test('the documentation policy states the rule', () => {
-  for (const file of ['TECHNICAL.md', 'TECHNICAL.zh.md']) {
+  for (const file of ['TECHNICAL.us.md', 'TECHNICAL.md']) {
     const text = read(file)
     assert.match(text, /package\.json/, `${file} must tie the README versions to package.json`)
     assert.match(text, /readme-version\.test\.mjs/, `${file} must name the guard test`)

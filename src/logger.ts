@@ -1,7 +1,7 @@
 /**
  * Leveled file logger for dsh-opencode-bridge.
  *
- * Design constraints (see TECHNICAL.md "Logging & diagnostics"):
+ * Design constraints (see TECHNICAL.us.md "Logging & diagnostics"):
  *
  * - **No sensitive information ever reaches the log.** Call sites log
  *   metadata only (counts, sizes, ids, status codes, timings) — never message

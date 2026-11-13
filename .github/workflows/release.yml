@@ -122,7 +122,12 @@ jobs:
           # published page always matches the changelog instead of a commit list.
           node scripts/release-notes.mjs "${RELEASE_TAG#v}" --out "$RUNNER_TEMP/release-notes.md"
           # gh create also fails if a release appeared after the existence check.
+          # The title is pinned to the tag: left unset, GitHub falls back to the
+          # commit subject, which carries a machine-readable prefix like `feat!:`.
           gh release create "$RELEASE_TAG" \
             "$RUNNER_TEMP/release-assets/"*.tgz \
             "$RUNNER_TEMP/release-assets/SHA256SUMS" \
-            --verify-tag --notes-file "$RUNNER_TEMP/release-notes.md" "${args[@]}"
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            "${args[@]}"

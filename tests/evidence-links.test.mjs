@@ -8,7 +8,7 @@ import path from 'node:path'
  * repository does not contain is worse than not citing it at all, so every reference
  * must resolve inside the repository.
  */
-const DOCS = ['README.md', 'README.zh.md', 'TECHNICAL.md', 'TECHNICAL.zh.md', 'CAMOUFLAGE.md', 'CAMOUFLAGE.zh.md']
+const DOCS = ['README.us.md', 'README.md', 'TECHNICAL.us.md', 'TECHNICAL.md', 'CAMOUFLAGE.us.md', 'CAMOUFLAGE.md']
 
 function evidenceRefs(text) {
   return [...text.matchAll(/docs\/evidence\/[A-Za-z0-9._-]+/g)].map((m) => m[0])

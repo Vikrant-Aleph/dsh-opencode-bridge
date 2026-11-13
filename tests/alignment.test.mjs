@@ -22,7 +22,7 @@ test('2.x headers omit x-opencode-request unless the 1.x compat flag is set', ()
 test('the declared tool set is exactly the caller tools, with strict:false', () => {
   const plan = planTools([callerRead], { strict: true })
   // Tool lists are user-configurable upstream, so the bridge declares only what
-  // DSH can actually execute. See CAMOUFLAGE.md.
+  // DSH can actually execute. See CAMOUFLAGE.us.md.
   assert.deepEqual(plan.tools.map(t => t.function.name), ['read'])
   for (const tool of plan.tools) assert.equal(tool.function.strict, false)
   assert.deepEqual(plan.tools[0].function.parameters, callerRead.parameters)

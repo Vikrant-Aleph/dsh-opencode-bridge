@@ -3,44 +3,56 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 /**
- * The release page is generated from CHANGELOG.md, so a version without a section
- * would publish an empty release. `scripts/release-notes.mjs` extracts the section;
- * these tests keep the file usable by it.
+ * The release page is generated from the changelog pair, so a version without a
+ * section would publish an empty release. `scripts/release-notes.mjs` extracts
+ * both languages; these tests keep the files usable by it.
  */
-const changelog = () => fs.readFileSync('CHANGELOG.md', 'utf8')
+const FILES = { zh: 'CHANGELOG.md', en: 'CHANGELOG.us.md' }
 const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version
+const read = (file) => fs.readFileSync(file, 'utf8')
 
-test('CHANGELOG.md follows the Keep a Changelog shape', () => {
-  const text = changelog()
-  assert.match(text, /^# Changelog/m)
-  assert.match(text, /## \[Unreleased\]/)
+test('both changelog files follow the Keep a Changelog shape', () => {
+  for (const file of Object.values(FILES)) {
+    const text = read(file)
+    assert.match(text, /^# /m, `${file} needs a title`)
+    assert.match(text, /## \[[^\]]+\]/, `${file} needs at least one version section`)
+  }
+  assert.match(read(FILES.zh), /## \[未发布\]/, 'the Chinese changelog needs an Unreleased section')
+  assert.match(read(FILES.en), /## \[Unreleased\]/, 'the English changelog needs an Unreleased section')
 })
 
-test('the current package version has a changelog section', () => {
-  const text = changelog()
+test('the current package version has a section in both languages', () => {
   const heading = new RegExp(`^## \\[${version.replace(/\./g, '\\.')}\\]`, 'm')
-  assert.match(text, heading, `CHANGELOG.md must have a section for ${version}`)
+  for (const file of Object.values(FILES)) {
+    assert.match(read(file), heading, `${file} must have a section for ${version}`)
+  }
 })
 
-test('every released version is listed newest first', () => {
-  const versions = [...changelog().matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map((m) => m[1])
-  assert.ok(versions.length > 0, 'expected at least one released version')
-  const sorted = [...versions].sort((a, b) => {
-    const pa = a.split('.').map(Number)
-    const pb = b.split('.').map(Number)
-    return pb[0] - pa[0] || pb[1] - pa[1] || pb[2] - pa[2]
-  })
-  assert.deepEqual(versions, sorted, 'released versions must be newest first')
+test('released versions are listed newest first in both files', () => {
+  for (const file of Object.values(FILES)) {
+    const versions = [...read(file).matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map((m) => m[1])
+    assert.ok(versions.length > 0, `${file} should list released versions`)
+    const sorted = [...versions].sort((a, b) => {
+      const pa = a.split('.').map(Number)
+      const pb = b.split('.').map(Number)
+      return pb[0] - pa[0] || pb[1] - pa[1] || pb[2] - pa[2]
+    })
+    assert.deepEqual(versions, sorted, `${file} must list versions newest first`)
+  }
 })
 
-test('the release-notes extractor produces a body for the current version', async () => {
+test('the release-notes extractor produces a bilingual body', async () => {
   const { execFileSync } = await import('node:child_process')
   const out = execFileSync(process.execPath, ['scripts/release-notes.mjs', version], { encoding: 'utf8' })
   assert.ok(out.trim().length > 0, 'release notes must not be empty')
   assert.match(out, /###|##/, 'release notes should contain section headings')
+  assert.match(out, /<summary>English<\/summary>/, 'the English section must be present')
+  assert.match(out, /[\u4e00-\u9fff]/, 'the Chinese section must be present')
 })
 
-test('CHANGELOG.md is published with the package', () => {
+test('both changelog files are published with the package', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-  assert.ok(pkg.files.includes('CHANGELOG.md'), 'CHANGELOG.md must be in package.files')
+  for (const file of Object.values(FILES)) {
+    assert.ok(pkg.files.includes(file), `${file} must be in package.files`)
+  }
 })

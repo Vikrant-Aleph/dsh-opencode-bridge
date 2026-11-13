@@ -21,7 +21,7 @@ export function checkMetadata(root, tag, { checkLock = true } = {}) {
   const result = validateTag(pkg, tag)
   const escaped = pkg.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const tarName = pkg.name.replace(/^@/, '').replaceAll('/', '-')
-  for (const file of ['README.md', 'README.zh.md']) {
+  for (const file of ['README.us.md', 'README.md']) {
     const text = readFileSync(resolve(root, file), 'utf8')
     const pins = [...text.matchAll(new RegExp(`${escaped}@([^\\s\x60"']+)`, 'g'))].map((m) => m[1])
     const tarPins = [...text.matchAll(new RegExp(`${tarName}-([^\\s\x60"']+)\\.tgz`, 'g'))].map((m) => m[1])

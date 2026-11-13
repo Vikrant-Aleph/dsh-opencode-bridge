@@ -52,12 +52,13 @@
     "icon.svg",
     "LICENSE",
     "CHANGELOG.md",
+    "CHANGELOG.us.md",
+    "README.us.md",
     "README.md",
-    "README.zh.md",
+    "TECHNICAL.us.md",
     "TECHNICAL.md",
-    "TECHNICAL.zh.md",
+    "CAMOUFLAGE.us.md",
     "CAMOUFLAGE.md",
-    "CAMOUFLAGE.zh.md",
     "docs/evidence"
   ],
   "dsh": {

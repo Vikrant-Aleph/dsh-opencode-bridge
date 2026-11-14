@@ -127,7 +127,11 @@ premise** (`docs/evidence/user-customization-round2-2026-11-13.json`,
 | Plugin registering invented tools | Requests carried arbitrary names and schemas |
 
 A user can emit any tool list and any system prompt from the official client, so
-neither identifies it. The bridge now declares exactly the caller's tools.
+neither *content* identifies it. The bridge now declares exactly the caller's tools.
+
+Content being free does not make the *shape* free: at least one declared tool and
+separator-free names still hold, as §3.4 and §3.5 show. That is precisely why the rule
+is phrased as "what is checked" rather than "what is configurable".
 
 ### 3.4 The one declaration the bridge must add
 

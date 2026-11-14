@@ -18,11 +18,13 @@ import { DEFAULT_PROTOCOL_USER_AGENT } from '../lib/protocol-defaults.js'
 
 const args = process.argv.slice(2)
 if (!args.includes('--run')) {
-  console.error('Usage: node tests/tool-loop-live.mjs --run [model]')
+  console.error('Usage: node tests/tool-loop-live.mjs --run [model] [--out <file>]')
   console.error('This test uses live quota, so it is opt-in.')
   process.exit(2)
 }
-const model = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--rounds') ?? 'deepseek-v4.1-flash-free'
+const outIndex = args.indexOf('--out')
+const outFile = outIndex >= 0 ? args[outIndex + 1] : null
+const model = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--out') ?? 'deepseek-v4.1-flash-free'
 const isThinking = /deepseek/.test(model)
 const TOKEN = 'LOOP_TOKEN_42'
 
@@ -138,7 +140,7 @@ feedResults(round2.calls ?? [], () => 'Todo recorded.')
 // --- Round 3: a plain answer that depends on the earlier rounds ----------------
 const round3 = await turn(`Reply with the secret token only, nothing else.`)
 check('round 3 finished with a text answer', round3.kind === 'stop', round3.error ?? `${round3.kind}${round3.code ? `/${round3.code}` : ''}`)
-check('round 3 answer carried the token', round3.text.includes(TOKEN), round3.text.slice(0, 60))
+check('round 3 answer carried the token', round3.text.includes(TOKEN), round3.text.includes(TOKEN) ? 'token present' : round3.text.slice(0, 60).replace(/\s+/g, ' '))
 
 // --- The wire must replay reasoning on the later turns -------------------------
 const bodies = fs.existsSync(dumpFile)
@@ -166,7 +168,9 @@ catalog.dispose()
 fs.rmSync(dumpDir, { recursive: true, force: true })
 
 const failed = results.filter((r) => !r.ok)
-console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
+const report = { at: new Date().toISOString(), model, thinking: isThinking, passed: results.length - failed.length, failed: failed.length, results }
+if (outFile) fs.writeFileSync(outFile, JSON.stringify(report, null, 2) + '\n')
+console.log(`\n${report.passed}/${results.length} checks passed`)
 if (failed.length) {
   console.error('LOOP_FAILED:', failed.map((f) => f.name).join(', '))
   process.exitCode = 1

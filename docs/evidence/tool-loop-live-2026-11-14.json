@@ -1,0 +1,61 @@
+{
+  "at": "2026-11-14T14:01:27.535Z",
+  "model": "deepseek-v4.1-flash-free",
+  "thinking": true,
+  "note": "Live multi-turn tool loop through the real adapter. Three rounds, each tool result fed back; the later requests must replay the assistant turn and its reasoning. Produced by `node tests/tool-loop-live.mjs --run <model> --out <file>`.",
+  "passed": 10,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "round 1 reached a tool call",
+      "ok": true,
+      "detail": "tool-calls"
+    },
+    {
+      "name": "round 1 call carries the caller name",
+      "ok": true,
+      "detail": "web_search"
+    },
+    {
+      "name": "round 2 continued the loop",
+      "ok": true,
+      "detail": "tool-calls"
+    },
+    {
+      "name": "round 2 call carries the caller name",
+      "ok": true,
+      "detail": "todo_write"
+    },
+    {
+      "name": "round 2 reused the token from round 1",
+      "ok": true,
+      "detail": "{\"item\":\"LOOP_TOKEN_42\"}"
+    },
+    {
+      "name": "round 3 finished with a text answer",
+      "ok": true,
+      "detail": "stop"
+    },
+    {
+      "name": "round 3 answer carried the token",
+      "ok": true,
+      "detail": "LOOP_TOKEN_42\n\n(Note: that string came from tool output, not"
+    },
+    {
+      "name": "every turn reached the wire",
+      "ok": true,
+      "detail": "3 requests"
+    },
+    {
+      "name": "later turns replay the assistant turn",
+      "ok": true,
+      "detail": "3 assistant rows"
+    },
+    {
+      "name": "a thinking model replays reasoning_content",
+      "ok": true,
+      "detail": "role,content,tool_calls,reasoning_content"
+    }
+  ],
+  "detailNote": "A check detail is the value the check reported, truncated to 60 characters. In the round-3 answer the model returned the token and then added its own note that the value had come from tool output; that note is the model explaining its source, and it is itself evidence that the tool result round-tripped and was understood."
+}

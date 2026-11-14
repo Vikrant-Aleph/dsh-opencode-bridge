@@ -375,7 +375,7 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | 探针 | 验证 |
 |---|---|
 | `smoke.mjs --run` | 会话/请求 id 形态、工具名无分隔符且能回映射、目录可达、带完整工具集的一次真实完成、返回调用名正确还原。 |
-| `tool-loop-live.mjs --run` | 多轮工具循环：三轮串行调用，每轮结果喂回下一轮，后续请求必须回放 assistant 历史与 `reasoning_content`。 |
+| `tool-loop-live.mjs --run` | 多轮工具循环：三轮串行调用，每轮结果喂回下一轮，后续请求必须回放 assistant 历史与 `reasoning_content`。2026-11-14 以 deepseek-v4.1-flash-free 实跑 10/10 通过（`docs/evidence/tool-loop-live-2026-11-14.json`）。 |
 | `proxy-live.mjs` | 代理隧道承载真实流量。 |
 | `vision-compat-live.mjs` | 图片输入与工具结果图片。 |
 | `reasoning-compat-live.mjs`、`reasoning-roundtrip-live.mjs` | 思考字段的回放与往返。 |

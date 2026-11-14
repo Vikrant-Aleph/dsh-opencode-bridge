@@ -427,7 +427,7 @@ tests passed while every real request was refused.
 | Probe | What it verifies |
 |---|---|
 | `smoke.mjs --run` | Session and request id shape, separator-free tool names and their round trip, catalog reachability, one live completion with a full tool set, and that a returned call carries the caller name. |
-| `tool-loop-live.mjs --run` | A multi-turn tool loop: three sequential calls where each result feeds the next, and later requests must replay the assistant history and `reasoning_content`. |
+| `tool-loop-live.mjs --run` | A multi-turn tool loop: three sequential calls where each result feeds the next, and later requests must replay the assistant history and `reasoning_content`. Ran 10/10 with deepseek-v4.1-flash-free on 2026-11-14 (`docs/evidence/tool-loop-live-2026-11-14.json`). |
 | `proxy-live.mjs` | A proxy tunnel carrying real traffic. |
 | `vision-compat-live.mjs` | Image input and tool-result images. |
 | `reasoning-compat-live.mjs`, `reasoning-roundtrip-live.mjs` | Reasoning replay and round trips. |

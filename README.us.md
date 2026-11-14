@@ -17,7 +17,7 @@ included.
 
 **Impersonates the official OpenCode client so DSH can use OpenCode's free models.**
 
-Concretely, it reproduces the official client's request headers, the request shape the
+It reproduces the official client's request headers, the request shape the
 gateway requires, and the TLS and HTTP fingerprints. It is an `LlmAdapter`, so it plugs
 into DSH's existing loop: the agent loop, permissions and tool
 execution stay with DSH, and DSH resolves every tool call itself. What the gateway does
@@ -42,17 +42,17 @@ the real gateway.
 | `User-Agent` | Must be the official token, `opencode/latest/2.2.0/cli`. A different token is refused even when everything else matches. |
 | **At least one declared tool** | An empty `tools` array is refused. |
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but that block passes. The same prompt without it is refused. |
-| **Tool names without separators** | A declaration whose names contain underscores, dashes, dots or capitals is refused. Tool call names therefore need converting. |
+| **Tool names without separators** | A declaration whose names contain underscores, dashes, dots or capitals is refused. The plugin converts these names. |
 
 All four are present in the official client no matter how a user configures it, which is
-why they work as a client check: a user can rewrite the system prompt and prune the tool
+why they work as a client check. A user can rewrite the system prompt and prune the tool
 list, but the client still appends an `<env>` block, still declares tools, and its own
 names carry no separators.
 
-Tool names need converting: the gateway answers a non-conforming name with
+Tool names are easy to misread: the gateway answers a non-conforming name with
 `FreeUsageLimitError`, the same error it returns when the quota is spent. The plugin
-converts names on the way out and restores the original name on the way back, so tool
-calls are unaffected.
+converts names on the way out and restores the original on the way back, so tool calls
+are unaffected.
 
 ### What is not checked
 
@@ -80,7 +80,7 @@ indistinguishable from the official client at those layers.
 
 ### TLS fingerprint
 
-Node cannot express the official handshake: OpenSSL orders extensions itself and offers
+Node cannot express the official handshake. OpenSSL orders extensions itself and offers
 no post-quantum key share, producing a different hello (roughly 270 bytes against 1482).
 The plugin therefore delegates the handshake to
 [`wreq-js`](https://github.com/sqdshguy/wreq-js), a Rust engine on BoringSSL — the same

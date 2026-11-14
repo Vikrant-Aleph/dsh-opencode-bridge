@@ -71,7 +71,7 @@ OpenCodeFreeAdapter            src/adapter.ts
 https://opencode.ai/inference/...
 ```
 
-Supporting modules:
+Other modules:
 
 | Module | Responsibility |
 |---|---|
@@ -180,10 +180,10 @@ response body has been fully read.
 The client offers **only `http/1.1`** — no `h2` — so HTTP/2 SETTINGS
 fingerprinting is not part of this client's traffic.
 
-### 3.6 The two structural requirements
+### 3.6 The three structural requirements
 
-Two properties are checked before the model is invoked, and both are appended by the
-official client regardless of user configuration:
+Three properties of a request are checked. The official client sends all of them
+regardless of user configuration:
 
 | Requirement | Finding |
 |---|---|
@@ -191,19 +191,19 @@ official client regardless of user configuration:
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but the block passes; a prompt without one is refused (`docs/evidence/bun-env-hypothesis.json`). |
 
 The `<env>` values are not checked: rewriting the paths or flipping the git flag still
-passes (`docs/evidence/bun-env-strictness.json`), so the block is generated from the real
-working directory. The official harness text and the
-Code Mode catalogue are **not** required — a synthetic catalogue of DSH's own tools
-passes too (`docs/evidence/bun-synthetic-catalog.json`).
+passes (`docs/evidence/bun-env-strictness.json`). The plugin still generates the block
+from the real working directory, so its contents are useful to the model. The official
+harness text and the Code Mode catalogue are **not** required — a synthetic catalogue of
+DSH's own tools passes too (`docs/evidence/bun-synthetic-catalog.json`).
 
 The runtime is not the differentiator: Bun 1.4.4 with a zero-tool body is refused
 exactly like Node (`docs/evidence/bun-runtime-test.json`).
 
-**Declared tool names must not contain separators.** This is the third requirement,
-identified on 2026-11-14, and it is why the UI failed for so long. The gateway answers a
+**Declared tool names must not contain separators.** This requirement was identified on
+2026-11-14 and is why every request was refused before 1.0.4. The gateway answers a
 declaration whose names contain underscores, dashes, dots or capitals with
-`FreeUsageLimitError`, which looks exactly like an exhausted quota and was therefore
-misread as rate limiting for a long time:
+`FreeUsageLimitError`, which looks exactly like an exhausted quota, so it was treated as
+rate limiting for a long time:
 
 | Body | Tool names | Result |
 |---|---|---|
@@ -219,11 +219,9 @@ purely invented names is refused even without separators.
 
 `planTools` therefore reduces every name to `[a-z0-9]` (appending a counter on
 collision) and keeps a sanitized-to-real map, which is applied to returned calls so
-DSH's dispatch is unaffected. A caller with no tools gets a placeholder whose
-description discourages calling it; a call that happens anyway is dropped (logged at
-`warn`).
+DSH's dispatch is unaffected.
 
-### 3.5 Field-level differences from the official encoder
+### 3.7 Field-level differences from the official encoder
 
 After reading the official OpenAI Chat encoder end to end (`openai-chat.ts`, 1288 lines),
 three differences remain. Each was measured inside one open window with a control on

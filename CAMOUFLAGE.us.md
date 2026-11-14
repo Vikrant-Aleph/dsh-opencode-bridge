@@ -23,11 +23,13 @@ protocol precondition. The test is therefore "is it checked", not "is it configu
 | Requirement | What we measured | Evidence |
 |---|---|---|
 | `User-Agent` | Must be `opencode/latest/2.2.0/cli`; everything else correct is not enough | Community reports and this project's probes |
-| **At least one declared tool** | Any name works; a single tool is enough; an empty array is refused | `docs/evidence/bun-tool-minimum.json`, `docs/evidence/any-tool-vs-read.json` |
+| **At least one declared tool** | A single tool is enough; an empty array is refused. At least one name must be one the gateway recognises | `docs/evidence/bun-tool-minimum.json`, `docs/evidence/any-tool-vs-read.json` |
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing only that block passes; removing it is refused | `docs/evidence/bun-env-hypothesis.json` |
+| **Tool names without separators** | Underscores, dashes, dots or capitals are refused; removing the separators passes | `docs/evidence/tools-field-and-token-budget-2026-11-14.json` |
 
-The last two are the key ones: the official client generates them automatically, so a
-user cannot remove them.
+The last three are the key ones: the official client generates them automatically, so a
+user cannot remove them. A declaration also needs at least one name the gateway
+recognises.
 
 ---
 
@@ -71,7 +73,7 @@ normalised (`docs/evidence/clienthello-deep-2026-11-13.json`).
 
 - No rotating of IPs, sessions or identities to evade service limits.
 - No executing tools inside another runtime: returned calls are dispatched by DSH.
-- No extra imitation of user-configurable content, which carries no identity.
+- No imitation of what the gateway does not check.
 
 ---
 
@@ -81,6 +83,7 @@ normalised (`docs/evidence/clienthello-deep-2026-11-13.json`).
 |---|---|
 | At least one declared tool | The caller's own tools suffice; a placeholder is added **only when the caller declares none**. Its description says not to call it, and a call that happens anyway is dropped (logged at `warn`) so the turn ends normally. |
 | `<env>` block in the system prompt | The adapter appends `environmentBlock()` after the DSH prompt, generated from the real working directory. |
+| Tool names without separators | `planTools` reduces each name to `[a-z0-9]` and keeps a map, restored when a call comes back. |
 | `ClientHello` | Byte-identical to the capture, zero extension mismatches. |
 | Headers | Byte-identical names, casing, order and values apart from `x-opencode-project`. |
 | Connection | Pooled, `keep-alive`. |
@@ -105,3 +108,4 @@ Each of these was disproved by measurement and is recorded so the work is not re
 | TCP write coalescing | Differs, but is timing-dependent and implausible as a gate |
 | TLS fingerprint alone | Byte-identical, still refused |
 | Runtime | Bun with the same body fails identically |
+| "The lane opens in windows" | An artefact: hand-built probes lacked the `<env>` block, so they were always refused and looked like a closed lane |

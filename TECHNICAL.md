@@ -190,6 +190,24 @@ DSH 署名是可选项（`userAgentAttribution`），默认关闭。
 「净化名 → 真实名」的映射；模型返回调用时再映射回真实工具名，DSH 的派发不受影响。
 调用方一个工具都没有时补一个占位声明，其描述明确劝阻调用，万一仍被调用则丢弃（记 `warn` 日志）。
 
+### 3.5 与官方编码器的字段级差异
+
+逐行读过官方 OpenAI Chat 编码器（`openai-chat.ts`，1288 行）后，只剩三处差异。每一条都在
+同一开放窗口内测过，前后各有对照（`docs/evidence/tools-field-and-token-budget-2026-11-14.json`）：
+
+| 差异 | 官方做法 | 桥接做法 | 实测 |
+|---|---|---|---|
+| `tools` 为空时 | 省略整个字段 | 补一个 `read` 占位声明 | **省略会被拒（429）**，占位是必需的 |
+| `max_completion_tokens` | 发调用方给的值 | 抬到 `minOutputTokens`（默认 32000） | 小值（1000）**被接受**，抬高不是必需，但保留为配置选择 |
+| `messages` 里的 system 消息 | 渲染成 user 消息 | 并入开头的 system 消息 | 网关接受两种形态，但**不采用官方做法**：DSH 唯一的 system 消息就是系统提示本身 |
+
+第一条值得记下：官方客户端的 `Generate.text`（标题生成）确实发不含 `tools` 的请求体，而这类请求
+会被网关拒绝——只是标题失败是静默的，所以从未被发现。
+
+其余字段均已对齐：`store` 与 `prompt_cache_key` 都不发（官方仅在 provider 声明支持时发送），
+`temperature`、`stop`、`reasoning_effort` 有则转发，助手消息的 `content: null`、
+`reasoning_content` 空串、`tool_calls` 形状与官方一致。
+
 适配器把 `environmentBlock()` 追加在 DSH 提示**之后**，与官方客户端的位置一致，
 使 agent 自身的指令仍然主导。两者到位后，适配器自身路径可稳定返回 200
 （`docs/evidence/verify-env-fix.json`、`docs/evidence/placeholder-verify.json`）。

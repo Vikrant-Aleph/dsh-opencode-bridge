@@ -219,6 +219,27 @@ DSH's dispatch is unaffected. A caller with no tools gets a placeholder whose
 description discourages calling it; a call that happens anyway is dropped (logged at
 `warn`).
 
+### 3.5 Field-level differences from the official encoder
+
+After reading the official OpenAI Chat encoder end to end (`openai-chat.ts`, 1288 lines),
+three differences remain. Each was measured inside one open window with a control on
+either side (`docs/evidence/tools-field-and-token-budget-2026-11-14.json`):
+
+| Difference | Official | This bridge | Measured |
+|---|---|---|---|
+| `tools` when empty | The whole field is omitted | A `read` placeholder is declared | **Omitting it is refused (429)**; the placeholder is required |
+| `max_completion_tokens` | The caller's value is sent | Raised to `minOutputTokens` (32000) | A small value (1000) is **accepted**; the floor is a configuration choice, not a requirement |
+| A system message inside `messages` | Rendered as a user message | Folded into the leading system message | The gateway accepts either, but the official form is **not adopted**: the only system message DSH sends is the system prompt itself |
+
+The first row is worth recording: the official `Generate.text` path (title generation)
+really does send a body without `tools`, and such a request is refused — a failed title
+is silent, so nobody notices.
+
+Every other field is aligned: `store` and `prompt_cache_key` are both omitted (the
+official client sends them only where a provider declares support), `temperature`,
+`stop` and `reasoning_effort` are forwarded when present, and the assistant message's
+`content: null`, empty-string `reasoning_content` and `tool_calls` shape match.
+
 The adapter appends `environmentBlock()` after the DSH prompt, matching where the
 official client puts it, so the agent's own instructions still lead. With both in place
 the adapter's own path returns 200 repeatedly (`docs/evidence/verify-env-fix.json`,

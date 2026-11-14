@@ -35,3 +35,4 @@ succeeded.
 | `clienthello-deep-2026-11-13.json` | Field-level comparison of the official and bridge `ClientHello` |
 | `byte-exact-2026-11-13.json` | The HTTP request is byte-identical apart from the directory-derived project id |
 | `verify-env-fix.json`, `repeat-1.json`, `placeholder-verify.json` | The adapter's own path returning 200 and answering |
+| `tools-field-and-token-budget-2026-11-14.json` | Omitting `tools` is refused while a placeholder passes; a small `max_completion_tokens` is accepted; a system message rendered as a user message is accepted but not adopted |

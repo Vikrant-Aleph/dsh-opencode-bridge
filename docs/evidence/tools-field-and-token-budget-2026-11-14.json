@@ -1,0 +1,47 @@
+{
+  "at": "2026-11-14T13:21:35.315Z",
+  "model": "glm-5.3-flash-free",
+  "note": "Three field-level differences found by reading the official OpenAI Chat encoder. Each case is bracketed by a control, so only \"control passes, case passes, control passes\" counts as evidence.",
+  "question": {
+    "A-tools-absent": "The official encoder omits the tools field entirely when a request declares none. This bridge instead sends a read placeholder.",
+    "B-small-max-tokens": "This bridge raises a caller budget below minOutputTokens (32000) to that floor. Does the gateway accept a smaller value?",
+    "C-system-as-user": "The official encoder renders a system-role message inside messages as a user message."
+  },
+  "results": [
+    {
+      "label": "control",
+      "status": 200,
+      "ok": true,
+      "text": "VERIFY_OK"
+    },
+    {
+      "label": "A-tools-absent",
+      "status": 429,
+      "ok": false,
+      "errorType": "FreeUsageLimitError"
+    },
+    {
+      "label": "B-small-max-tokens",
+      "status": 200,
+      "ok": true,
+      "text": "VERIFY_OK"
+    },
+    {
+      "label": "C-system-as-user",
+      "status": 200,
+      "ok": true,
+      "text": "MIDCASE_OK"
+    },
+    {
+      "label": "control-after",
+      "status": 200,
+      "ok": true,
+      "text": "VERIFY_OK"
+    }
+  ],
+  "conclusion": {
+    "tools absent": "REFUSED. The placeholder declaration is required; the plugin is already correct. The official client does omit the field for its stateless title call, but a failed title is silent, so those refusals go unnoticed.",
+    "small max_completion_tokens": "ACCEPTED. The gateway does not require the 32000 floor. The floor remains a documented configuration choice rather than a requirement.",
+    "system rendered as user": "ACCEPTED by the gateway, but not adopted: the only system message DSH sends is the system prompt itself, so converting it would strip the model of its instructions."
+  }
+}

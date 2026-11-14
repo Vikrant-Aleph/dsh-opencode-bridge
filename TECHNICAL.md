@@ -367,6 +367,23 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | `project-identity`、`request-waits` | 身份推导、持久化截止时间。 |
 | `catalog-*`、`log-*`、`client-boot` | 目录生命周期、脱敏、设置页。 |
 
+### 9.1 实时探针
+
+全部需要显式 `--run`，会消耗真实配额，且拒绝覆盖既有报告。离线套件跑得再全也无法发现「请求形态被网关
+拒绝」这类问题——1.0.4 之前 418 项离线测试全绿，而每个真实请求都被拒。
+
+| 探针 | 验证 |
+|---|---|
+| `smoke.mjs --run` | 会话/请求 id 形态、工具名无分隔符且能回映射、目录可达、带完整工具集的一次真实完成、返回调用名正确还原。 |
+| `tool-loop-live.mjs --run` | 多轮工具循环：三轮串行调用，每轮结果喂回下一轮，后续请求必须回放 assistant 历史与 `reasoning_content`。 |
+| `proxy-live.mjs` | 代理隧道承载真实流量。 |
+| `vision-compat-live.mjs` | 图片输入与工具结果图片。 |
+| `reasoning-compat-live.mjs`、`reasoning-roundtrip-live.mjs` | 思考字段的回放与往返。 |
+| `wire-dump.mjs` | 打印当前实际发出的线上指纹。 |
+
+判定要点：免费通道会在若干次请求后整体拒绝。**任何一次 429 都必须与官方客户端在同一时刻对照**——
+官方也失败说明是配额，官方通过则说明伪装仍有缺口。
+
 ## 10. 安全、隐私与署名
 
 - 除配置的 `apiKey` 外不读取任何凭据；代理 URL 在所有日志与 UI 中脱敏。

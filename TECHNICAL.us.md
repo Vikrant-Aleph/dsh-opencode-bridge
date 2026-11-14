@@ -418,6 +418,25 @@ an explicit `--run`, and refuse to overwrite an earlier report.
 | `project-identity`, `request-waits` | Identity derivation, persisted deadlines. |
 | `catalog-*`, `log-*`, `client-boot` | Catalog lifecycle, redaction, settings page. |
 
+### 9.1 Live probes
+
+All require `--run`, spend real quota, and refuse to overwrite an existing report. No
+offline suite catches a request shape the gateway refuses — before 1.0.4, 418 offline
+tests passed while every real request was refused.
+
+| Probe | What it verifies |
+|---|---|
+| `smoke.mjs --run` | Session and request id shape, separator-free tool names and their round trip, catalog reachability, one live completion with a full tool set, and that a returned call carries the caller name. |
+| `tool-loop-live.mjs --run` | A multi-turn tool loop: three sequential calls where each result feeds the next, and later requests must replay the assistant history and `reasoning_content`. |
+| `proxy-live.mjs` | A proxy tunnel carrying real traffic. |
+| `vision-compat-live.mjs` | Image input and tool-result images. |
+| `reasoning-compat-live.mjs`, `reasoning-roundtrip-live.mjs` | Reasoning replay and round trips. |
+| `wire-dump.mjs` | Print the wire fingerprint actually emitted. |
+
+How to read a refusal: the free lane stops serving after a handful of requests. **Every
+429 must be compared against the official client at the same moment** — if the official
+client fails too it is quota, and if it passes the camouflage still has a gap.
+
 ## 10. Security, privacy, attribution
 
 - No credential is read beyond the configured `apiKey`; proxy URLs are redacted

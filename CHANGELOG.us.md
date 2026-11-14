@@ -9,7 +9,7 @@ the matching section of this file.
 
 ## [Unreleased]
 
-## [1.0.3] - 2026-11-14
+## [1.0.4] - 2026-11-14
 
 The release that explains why the UI never worked.
 
@@ -26,6 +26,10 @@ The release that explains why the UI never worked.
   carries the full identity.
 - All system text is folded into one message, matching the official client, with the
   `<env>` block after the prompt.
+
+## [1.0.3] - 2026-11-14
+
+### Fixed
 
 - The gateway's `Retry-After` points at UTC midnight, but it serves again within
   minutes. The plugin used to lock the model for the stated duration, turning a

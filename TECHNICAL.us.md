@@ -195,11 +195,29 @@ passes too (`docs/evidence/bun-synthetic-catalog.json`).
 The runtime is not the differentiator: Bun 1.4.4 with a zero-tool body is refused
 exactly like Node (`docs/evidence/bun-runtime-test.json`).
 
-Because any tool name works, `planTools` declares the caller's tools as they are and
-adds a placeholder only when the caller declares none — in practice an auxiliary
-request such as title generation. The placeholder's description tells the model not to
-call it, and a call that happens anyway is dropped by the adapter (logged at `warn`),
-so the turn ends normally.
+**Declared tool names must not contain separators.** This is the third requirement,
+identified on 2026-11-14, and it is why the UI failed for so long. The gateway answers a
+declaration whose names contain underscores, dashes, dots or capitals with
+`FreeUsageLimitError`, which looks exactly like an exhausted quota and was therefore
+misread as rate limiting for a long time:
+
+| Body | Tool names | Result |
+|---|---|---|
+| The full UI request (46 tools, 69 KB) | Original, with underscores | 429 |
+| The same body | Separators removed (`askuserquestion`) | **200** |
+| Six tiny tools | `job_list`, `web_search`, … | 429 |
+| The same six objects | `pwsh`, `read`, `glob`, … | 200 |
+
+All 12 official tools are free of separators (`edit`, `glob`, `grep`, `question`,
+`read`, `shell`, `skill`, `subagent`, `webfetch`, `websearch`, `write`,
+`execute`). A declaration also needs at least one name the gateway recognises: a set of
+purely invented names is refused even without separators.
+
+`planTools` therefore reduces every name to `[a-z0-9]` (appending a counter on
+collision) and keeps a sanitized-to-real map, which is applied to returned calls so
+DSH's dispatch is unaffected. A caller with no tools gets a placeholder whose
+description discourages calling it; a call that happens anyway is dropped (logged at
+`warn`).
 
 The adapter appends `environmentBlock()` after the DSH prompt, matching where the
 official client puts it, so the agent's own instructions still lead. With both in place
@@ -410,6 +428,7 @@ an explicit `--run`, and refuse to overwrite an earlier report.
 | **gate** | The upstream check that decides whether a request from a non-official client is served. This project treats it as a dated observation. |
 | **identity header** | A header the official client always sends and a user cannot change (§3). |
 | **placeholder** | A tool declaration sent only when the caller declares none, to satisfy the gateway's "at least one tool" rule. |
+| **wire name** | The declared tool name with separators removed; mapped back to the caller's real tool when a call returns. |
 | **server wait** | A `Retry-After` observed from upstream; scoped to the egress that produced it, blocking only a capped probe window, and clearable on demand. |
 | **egress** | One configured route to upstream (`direct` or a proxy). |
 | **Bun-shaped transport** | The wreq-js handshake reproducing the official client's `ClientHello`. |

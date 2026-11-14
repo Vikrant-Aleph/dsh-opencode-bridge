@@ -36,6 +36,14 @@ export interface CatalogOptions {
   extraModels: string[]
   pool?: ProxyPool
   dispatcherFor?: (url: string) => Promise<unknown> | unknown
+  /**
+   * Headers for the live model listing.
+   *
+   * The listing is served by the same gateway as inference, so it has to carry the
+   * same identity. A bare `user-agent` request is a shape the official client never
+   * sends, and polling it every minute invites the gateway to throttle the egress.
+   */
+  liveHeaders?: () => Record<string, string>
   /** 0 disables periodic refresh, not startup prefetch or on-demand caching. */
   refreshIntervalMs?: number
   /** Total deadline for both sources, including their response bodies. */
@@ -55,6 +63,17 @@ export function normalizeModelRefreshIntervalMs(value: unknown): number {
   if (value === 0) return 0
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return DEFAULT_MODEL_REFRESH_INTERVAL_MS
   return Math.min(MAX_MODEL_REFRESH_INTERVAL_MS, Math.max(MIN_MODEL_REFRESH_INTERVAL_MS, Math.floor(value)))
+}
+
+/** The listing must look like the client, but a header failure must not break it. */
+function liveHeadersFor(options: CatalogOptions): Record<string, string> {
+  try {
+    const built = options.liveHeaders?.()
+    if (built && Object.keys(built).length > 0) return built
+  } catch {
+    // Fall through to the minimal shape.
+  }
+  return { 'user-agent': DEFAULT_PROTOCOL_USER_AGENT }
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -242,7 +261,7 @@ export class FreeModelCatalog {
     const response = await fetchWithPool({
       pool: this.options.pool,
       url: `${this.baseUrl.replace(/\/$/, '')}/models`,
-      init: { headers: { 'user-agent': DEFAULT_PROTOCOL_USER_AGENT }, signal },
+      init: { headers: liveHeadersFor(this.options), signal },
       signal,
       ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
     })

@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs'
 /**
  * DSH LLM adapter that speaks the OpenCode free-tier wire protocol.
  */
@@ -94,6 +95,12 @@ export interface AdapterOptions {
   }
   /** Egress labels currently configured, so stale per-egress waits can be ignored. */
   activeEgresses?: () => readonly string[]
+  /**
+   * Write every outgoing request body to this file. Diagnostic only: it records the
+   * exact bytes sent, including the system prompt, so it must never be enabled by
+   * default.
+   */
+  dumpRequestsTo?: string
 }
 
 interface ChatChunk {
@@ -318,7 +325,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
             attribution: this.options.userAgentAttribution,
             tracing: this.options.tracing ?? true,
           }),
-          body: JSON.stringify(body),
+          body: serializeBody(body, this.options.dumpRequestsTo, requestId),
           signal,
         },
         signal,
@@ -430,7 +437,12 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       // satisfy the gateway's "at least one tool" rule. A call to it is dropped
       // rather than failing the turn, so a stray call costs one tool call instead
       // of the whole response.
-      const normalized = wireCalls.map((call) => normalizeToolCall(call))
+      // A declared name is a sanitized alias; dispatch needs the caller's own name.
+      const normalized = wireCalls.map((call) => {
+        const translated = normalizeToolCall(call)
+        const callerName = plan.wireToCaller.get(translated.name)
+        return callerName && callerName !== translated.name ? { ...translated, name: callerName } : translated
+      })
       const dispatchable = plan.readAnchor
         ? normalized.filter((call) => call.name !== READ_ANCHOR.function.name)
         : normalized
@@ -617,4 +629,23 @@ async function* sseEvents(body: ReadableStream<Uint8Array>, signal: AbortSignal)
   } finally {
     reader.releaseLock()
   }
+}
+
+/**
+ * Serialize the request body, optionally recording it for diagnosis.
+ *
+ * The dump is opt-in through configuration and is written before the request so a
+ * failure still leaves the evidence behind.
+ */
+function serializeBody(body: unknown, dumpTo: string | undefined, requestId: string): string {
+  const json = JSON.stringify(body)
+  if (dumpTo) {
+    try {
+      const record = { at: new Date().toISOString(), request: requestId, bytes: Buffer.byteLength(json), body: JSON.parse(json) }
+      appendFileSync(dumpTo, JSON.stringify(record) + '\n')
+    } catch {
+      // A failed diagnostic write must never break the request itself.
+    }
+  }
+  return json
 }

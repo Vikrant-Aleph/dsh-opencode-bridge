@@ -21,7 +21,7 @@ import { DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
 import { OpenCodeFreeAdapter } from './adapter.js'
 import { ContextPreferencesService, registerContextAccess } from './context-service.js'
 import { completedReasoningForRequest, registerReasoningProjection } from './reasoning-policy.js'
-import type { HeaderRecipe } from './opencode-protocol.js'
+import { buildHeaders, mintRequestId, mintSessionId, type HeaderRecipe } from './opencode-protocol.js'
 import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
@@ -99,6 +99,8 @@ export interface Config {
   proxyCooldownMs: number
   /** Pool store written by the Settings page; empty means the profile data dir. */
   proxyStorePath: string
+  /** Diagnostic: write every outgoing request body to this file. Never enable by default. */
+  dumpRequestsTo?: string
   /** Use the Bun-shaped TLS transport (wreq-js) when its native binding is available. */
   bunTransport: boolean
 }
@@ -133,6 +135,8 @@ export const Config = Schema.object({
   proxies: Schema.array(Schema.string()).default([]),
   proxyCooldownMs: Schema.number().default(60_000),
   proxyStorePath: Schema.string().default(''),
+  /** Diagnostic: write every outgoing request body to this file. Never enable by default. */
+  dumpRequestsTo: Schema.string(),
   bunTransport: Schema.boolean().default(true),
 })
 
@@ -211,11 +215,21 @@ export function apply(ctx: Context, config: Config): void {
   let registration: AdapterRegistrationHandle | undefined
   const providers = config.providers.length ? [...config.providers] : ['opencode-bridge']
   let refreshNotificationUnavailable = false
+  // Declared before the catalog: its live listing reads the transport lazily, and a
+  // temporal-dead-zone read would fail the first refresh.
+  const transportHolder: { current?: typeof fetch & { close?: () => Promise<void> } } = {}
   const catalog = new FreeModelCatalog(
     config.baseUrl,
     {
       includeDeprecated: config.includeDeprecated, extraModels: config.extraModels, pool, dispatcherFor,
       refreshIntervalMs: config.modelRefreshIntervalMs,
+      // The listing is served by the same gateway as inference, so it carries the same
+      // identity and, when available, the same TLS transport. A bare probe would be a
+      // shape the official client never sends.
+      liveHeaders: () => buildHeaders(
+        recipe, mintSessionId(), mintRequestId(),
+        { tracing: config.tracing, attribution: config.userAgentAttribution },
+      ),
       onUpdated: () => {
         if (typeof registration?.replace === 'function') {
           // Public atomic route replacement announces a genuine registration
@@ -246,9 +260,9 @@ export function apply(ctx: Context, config: Config): void {
   //
   // The transport is created once and reused for the whole plugin lifetime so
   // its connection pool persists across turns, matching the official client.
-  const transportHolder: { current?: typeof fetch & { close?: () => Promise<void> } } = {}
   const adapter = new OpenCodeFreeAdapter(catalog, {
     requestWaitState,
+    ...(config.dumpRequestsTo ? { dumpRequestsTo: config.dumpRequestsTo } : {}),
     // A wait is tied to the egress that produced it; removing a proxy retires it.
     activeEgresses: () => (pool && pool.size > 0 ? pool.egressLabels() : ['direct (this machine)']),
     providerRoute: config.providers[0] ?? 'opencode-bridge',

@@ -50,12 +50,17 @@ test('a caller tool named shell is declared as-is and stays native', () => {
   const call = { id: 'x', name: 'shell', arguments: '{"command":"echo test"}' }
   assert.equal(normalizeToolCall(call).name, 'shell')
 })
-test('a placeholder is declared only when the caller declares no tools', () => {
-  // Any tool name satisfies the gateway, so the caller's own tools are enough.
-  assert.equal(planTools([pwsh]).readAnchor, false)
-  assert.deepEqual(planTools([pwsh]).tools.map(t => t.function.name), ['pwsh'])
-  // With no caller tools at all, one placeholder is required: an empty list is
-  // refused (research/any-tool-vs-read.json).
+test('a placeholder is declared when no declared name is one the gateway recognises', () => {
+  // A recognised name satisfies the gateway on its own (research/any-tool-vs-read.json).
+  assert.equal(planTools([read]).readAnchor, false)
+  assert.deepEqual(planTools([read]).tools.map(t => t.function.name), ['read'])
+  // An invented name alone does not: a set of purely unknown names is refused, so
+  // the recognised anchor is declared alongside it.
+  const invented = planTools([pwsh])
+  assert.equal(invented.readAnchor, true)
+  assert.deepEqual(invented.tools.map(t => t.function.name), ['pwsh', 'read'])
+  // With no caller tools at all the placeholder is still required: an empty list is
+  // refused.
   const empty = planTools([])
   assert.deepEqual(empty.tools.map(t => t.function.name), ['read'])
   assert.equal(empty.readAnchor, true)

@@ -188,6 +188,8 @@ export interface ToolsPlan {
   callerNames: Set<string>
   /** Exact caller contracts, never a process-wide registry snapshot. */
   callerTools: Map<string, ToolSchema>
+  /** Declared (wire) tool name -> the caller tool it stands for. */
+  wireToCaller: Map<string, string>
   /** True when `read` was declared as the identity anchor rather than a caller tool. */
   readAnchor: boolean
 }
@@ -236,6 +238,25 @@ export const READ_ANCHOR: ChatTool = {
  * refused (`TOOL_CALL_UNSUPPORTED`) rather than dispatched, because DSH cannot
  * execute it.
  */
+/**
+ * Tool names the free lane recognises. A request must declare at least one of these:
+ * a set of purely invented names is refused with the same free-usage error.
+ */
+const KNOWN_TOOL_NAMES = new Set([
+  'edit', 'glob', 'grep', 'question', 'read', 'shell',
+  'skill', 'subagent', 'webfetch', 'websearch', 'write', 'execute',
+])
+
+/** Reduce a caller tool name to the shape the gateway accepts, keeping it unique. */
+function uniqueWireName(name: string, taken: Map<string, string>): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'tool'
+  if (!taken.has(base)) { taken.set(base, name); return base }
+  for (let suffix = 2; ; suffix++) {
+    const candidate = `${base}${suffix}`
+    if (!taken.has(candidate)) { taken.set(candidate, name); return candidate }
+  }
+}
+
 export function planTools(
   callerTools: readonly ToolSchema[],
   options: { strict?: boolean } = {},
@@ -244,17 +265,30 @@ export function planTools(
   const callerNames = new Set(callerTools.map((tool) => tool.name))
   if (callerNames.size !== callerTools.length) throw new Error('Duplicate caller tool names cannot be bridged.')
   const callerContracts = new Map(callerTools.map((tool) => [tool.name, tool]))
-  const tools = callerTools.map((tool): ChatTool => ({
-    type: 'function',
-    function: { name: tool.name, description: tool.description, parameters: tool.parameters, ...(strict ? { strict: false } : {}) },
-  }))
-  const readAnchor = tools.length === 0
+  // The gateway refuses a request whose declared tool names carry separators, and it
+  // reports that refusal as a free-usage limit. Declared names are therefore reduced
+  // to [a-z0-9] and mapped back when the model calls one.
+  const wireNames = new Map<string, string>()
+  const wireToCaller = new Map<string, string>()
+  const tools = callerTools.map((tool): ChatTool => {
+    const wire = uniqueWireName(tool.name, wireNames)
+    wireToCaller.set(wire, tool.name)
+    return {
+      type: 'function',
+      function: { name: wire, description: tool.description, parameters: tool.parameters, ...(strict ? { strict: false } : {}) },
+    }
+  })
+  // The gateway also needs at least one name it recognises: a set of purely invented
+  // names is refused. DSH's own tool set always carries several, so the anchor is only
+  // insurance for an unusual caller.
+  const knownPresent = [...wireToCaller.keys()].some((name) => KNOWN_TOOL_NAMES.has(name))
+  const readAnchor = tools.length === 0 || !knownPresent
   if (readAnchor) {
     tools.push(strict
       ? READ_ANCHOR
       : { type: 'function', function: { name: READ_ANCHOR.function.name, description: READ_ANCHOR.function.description, parameters: READ_ANCHOR.function.parameters } })
   }
-  return { tools, callerNames, callerTools: callerContracts, readAnchor }
+  return { tools, callerNames, callerTools: callerContracts, readAnchor, wireToCaller }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,12 +389,20 @@ export function buildChatMessages(
   options: GenerateOptions, plan: ToolsPlan, images?: ImageMessageProjection, build: ChatMessageBuildOptions = {},
 ): ChatMessage[] {
   const out: ChatMessage[] = []
-  // The free-tier gate requires the harness environment block. It goes *after*
-  // the caller's prompt, which is where the official client puts it, so the
-  // agent's role and instructions still lead and the environment trails as
-  // supplementary context. A caller that omits it gets no block.
-  const systemParts = [typeof options.system === 'string' ? options.system : '', build.environment ?? '']
-    .filter((part) => part.trim().length > 0)
+  // The free-tier gate requires the harness environment block. The official client
+  // sends exactly one system message with its prompt followed by that block, and the
+  // gateway sees a different shape when a second system message appears, so every
+  // caller-supplied system text is folded into the same leading message. A caller that
+  // omits the environment gets no block.
+  const callerSystems = options.messages
+    .filter((message) => message.role === 'system')
+    .map((message) => contentText(message.content))
+    .filter((text) => text.trim().length > 0)
+  const systemParts = [
+    typeof options.system === 'string' ? options.system : '',
+    ...callerSystems,
+    build.environment ?? '',
+  ].filter((part) => part.trim().length > 0)
   if (systemParts.length > 0) out.push({ role: 'system', content: systemParts.join('\n\n') })
 
   const sentName = (name: string) => name
@@ -377,11 +419,9 @@ export function buildChatMessages(
     // Dropped developer updates do not break a wire-level tool-result group.
     if (message.role !== 'tool' && message.role !== 'developer') flushToolImages()
     switch (message.role) {
-      case 'system': {
-        const text = contentText(message.content)
-        if (text) out.push({ role: 'system', content: text })
+      case 'system':
+        // Already folded into the leading system message above.
         break
-      }
       case 'developer':
         // Tool additions/removals are already projected into `options.tools`;
         // the wire request carries the complete declarations instead.

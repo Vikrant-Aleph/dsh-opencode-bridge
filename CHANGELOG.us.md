@@ -11,7 +11,21 @@ the matching section of this file.
 
 ## [1.0.3] - 2026-11-14
 
+The release that explains why the UI never worked.
+
 ### Fixed
+
+- **Tool names containing separators are refused by the gateway.** Almost every one of
+  DSH's 46 tools carries an underscore (`ask_user_question`, `job_list`, `web_search`,
+  and so on), and the gateway answers such a request with `FreeUsageLimitError`, which
+  reads like an exhausted quota. All 12 official tools are free of separators. Declared
+  names are now reduced to `[a-z0-9]` and a returned call is mapped back to the caller's
+  real tool, so dispatch is unaffected.
+- The model listing request carried only `user-agent`, without `authorization` or the
+  `x-opencode-*` headers. The official client never sends that shape; the listing now
+  carries the full identity.
+- All system text is folded into one message, matching the official client, with the
+  `<env>` block after the prompt.
 
 - The gateway's `Retry-After` points at UTC midnight, but it serves again within
   minutes. The plugin used to lock the model for the stated duration, turning a

@@ -42,29 +42,28 @@ the real gateway.
 | `User-Agent` | Must be the official token, `opencode/latest/2.2.0/cli`. A different token is refused even when everything else matches. |
 | **At least one declared tool** | An empty `tools` array is refused. |
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but that block passes. The same prompt without it is refused. |
-| **Tool names without separators** | A declaration whose names contain underscores, dashes, dots or capitals is refused. Almost all of DSH's 46 tools carry underscores, which is why the UI failed for so long. |
+| **Tool names without separators** | A declaration whose names contain underscores, dashes, dots or capitals is refused. Tool call names therefore need converting. |
 
 All four are present in the official client no matter how a user configures it, which is
 why they work as a client check: a user can rewrite the system prompt and prune the tool
 list, but the client still appends an `<env>` block, still declares tools, and its own
 names carry no separators.
 
-The last one is easy to misread: the gateway answers a non-conforming tool name with
-`FreeUsageLimitError`, which looks exactly like an exhausted quota. Removing the
-separators from the same request body (`ask_user_question` → `askuserquestion`) turns a
-429 into a 200. The plugin sanitizes declared names and maps a returned call back to the
-real tool.
+Tool names need converting: the gateway answers a non-conforming name with
+`FreeUsageLimitError`, the same error it returns when the quota is spent. The plugin
+converts names on the way out and restores the original name on the way back, so tool
+calls are unaffected.
 
 ### What is not checked
 
-Each of these was assumed necessary at some point, then disproved:
+None of these is part of the client check:
 
 - **The official tool manifest.** A custom agent with a single tool passes.
 - **The official system prompt.** A user's own prompt passes.
 - **The values inside `<env>`.** Anything works.
 - **The Code Mode catalogue.** A catalogue synthesised from different tool names passes (the names must still be separator-free).
-- **The runtime.** Bun 1.4.4 sending a zero-tool body is refused exactly like Node, so this is not a Bun versus Node.js issue.
-- **The TLS fingerprint alone.** Aligning it byte for byte (cipher suites, curves, extension order, signature algorithms) did **not** fix the refusal — the real cause was the `<env>` block.
+- **The runtime.** Bun and Node sending a zero-tool body are refused the same way.
+- **The TLS fingerprint alone.** Aligning it byte for byte (cipher suites, curves, extension order, signature algorithms) does not change the outcome.
 
 ### Caveats
 
@@ -187,7 +186,7 @@ later. Replies that have already started streaming are never replayed.
 | Problem | What to try |
 |---|---|
 | No models after installation | Check the target profile, confirm the plugin is enabled, restart DSH, verify network access. |
-| HTTP 429 | Retry later. With proxies configured, check their status in Settings. A 429 also appears when the egress quota is spent, which no request shape can change. |
+| HTTP 429 | Retry later. If it persists, check that the plugin is up to date. With proxies configured, check their status in Settings. |
 | HTTP 403 or 503 | Check for plugin updates and upstream status, then retry. These do not trigger proxy failover. Report persistent cases. |
 | Tool calls fail | Check the **Diagnostic log** tab; a call DSH never declared cannot be dispatched. |
 

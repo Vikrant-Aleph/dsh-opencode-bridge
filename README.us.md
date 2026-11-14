@@ -40,13 +40,20 @@ the real gateway.
 | Requirement | What we measured |
 |---|---|
 | `User-Agent` | Must be the official token, `opencode/latest/2.2.0/cli`. A different token is refused even when everything else matches. |
-| **At least one declared tool** | The name does not matter: a lone tool called anything passes. An empty `tools` array is refused. |
+| **At least one declared tool** | An empty `tools` array is refused. |
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but that block passes. The same prompt without it is refused. |
+| **Tool names without separators** | A declaration whose names contain underscores, dashes, dots or capitals is refused. Almost all of DSH's 46 tools carry underscores, which is why the UI failed for so long. |
 
-The last two are the interesting ones. Both are present in the official client no
-matter how a user configures it, which is why they work as a client check: a user can
-rewrite the system prompt and prune the tool list, but the client still appends an
-`<env>` block and still declares at least one tool.
+All four are present in the official client no matter how a user configures it, which is
+why they work as a client check: a user can rewrite the system prompt and prune the tool
+list, but the client still appends an `<env>` block, still declares tools, and its own
+names carry no separators.
+
+The last one is easy to misread: the gateway answers a non-conforming tool name with
+`FreeUsageLimitError`, which looks exactly like an exhausted quota. Removing the
+separators from the same request body (`ask_user_question` → `askuserquestion`) turns a
+429 into a 200. The plugin sanitizes declared names and maps a returned call back to the
+real tool.
 
 ### What is not checked
 
@@ -55,13 +62,13 @@ Each of these was assumed necessary at some point, then disproved:
 - **The official tool manifest.** A custom agent with a single tool passes.
 - **The official system prompt.** A user's own prompt passes.
 - **The values inside `<env>`.** Anything works.
-- **The Code Mode catalogue.** A catalogue synthesised from different tool names passes.
+- **The Code Mode catalogue.** A catalogue synthesised from different tool names passes (the names must still be separator-free).
 - **The runtime.** Bun 1.4.4 sending a zero-tool body is refused exactly like Node, so this is not a Bun versus Node.js issue.
 - **The TLS fingerprint alone.** Aligning it byte for byte (cipher suites, curves, extension order, signature algorithms) did **not** fix the refusal — the real cause was the `<env>` block.
 
 ### Caveats
 
-All of the above are dated observations from 2026-11-13. The full
+All of the above are observations from 2026-11-13 through 2026-11-14. The full
 evidence trail and the hypotheses that were ruled out are in the
 [camouflage policy](CAMOUFLAGE.us.md).
 

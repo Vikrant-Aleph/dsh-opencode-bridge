@@ -1,6 +1,7 @@
-# OpenCode Bridge
-
-<img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.svg" width="72" height="72" alt="OpenCode Bridge 图标">
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.svg" width="40" height="40" alt="OpenCode Bridge 图标">
+  OpenCode Bridge
+</h1>
 
 [![npm version](https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![Total npm downloads](https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads)](https://www.npmjs.com/package/dsh-opencode-bridge)

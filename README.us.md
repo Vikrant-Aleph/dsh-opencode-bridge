@@ -2,8 +2,9 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![Total npm downloads](https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads)](https://www.npmjs.com/package/dsh-opencode-bridge)
+[![GitHub stars](https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main)
 [![License](https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/Vikrant-Aleph/dsh-opencode-bridge)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/latest)
 [![Node.js requirement](https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js)](https://www.npmjs.com/package/dsh-opencode-bridge)
 
 [中文](README.md) | English

@@ -81,7 +81,7 @@ Other modules:
 
 | Module | Responsibility |
 |---|---|
-| `src/catalog.ts` | Free-model discovery: models.dev registry ∩ live `/models`, TTL and retry. |
+| `src/catalog.ts` | Free-model discovery: reads the official catalog, with TTL and retry. |
 | `src/project-identity.ts` | Derives the official `x-opencode-project` id from a real directory. |
 | `src/request-waits.ts` | Per-model server retry deadlines, persisted across reloads. |
 | `src/http-errors.ts` | Typed upstream classification; safe, bounded diagnostics. |
@@ -343,11 +343,27 @@ applies to new requests only and never deletes local history.
 
 ## 6. Model catalog
 
-`src/catalog.ts` intersects the models.dev registry (cost 0, not deprecated) with
-the live `/models` list. Snapshots are committed atomically: a failed source
-never erases a usable snapshot. Refresh defaults to 10 minutes; failures back off
-60s. `modelRefreshIntervalMs: 0` disables periodic refresh but keeps startup
-prefetch and on-demand caching.
+`src/catalog.ts` reads one source: `https://models.opencode.ai/api.json`, the same catalog
+the official client's `ModelsDev.Service` reads. It keeps the zero-cost models under the
+`opencode` provider and drops `status: deprecated`.
+
+| Item | Value | Why |
+|---|---|---|
+| Source | One, the official catalog | The official client reads only this |
+| Refresh | Five minutes, the official TTL | `Duration.minutes(5)` |
+| Failure | Keep the previous snapshot, retry after 60s | Same effect as the official cache fallback |
+
+**Why the `/models` probe is gone.** Earlier versions intersected the catalog with a live
+`/models` request to decide which models were actually being served. Measurement on
+2026-11-15 showed the step added nothing: the twelve zero-cost, non-deprecated catalog
+entries matched the served set exactly (nothing was in the catalog but missing from the
+live listing), and the other 74 ids the listing returned were paid models. Availability is
+already carried by the catalog's `status` field, so the probe was removed — it was also a
+request shape the official client never sends.
+
+Snapshots commit atomically and `onUpdated` fires only on a real content change.
+`modelRefreshIntervalMs: 0` disables periodic refresh while keeping the startup prefetch
+and on-demand caching.
 
 ## 7. Configuration
 
@@ -369,7 +385,7 @@ prefetch and on-demand caching.
 | `includeDeprecated` | `false` | Offer deprecated-but-live models. |
 | `extraModels` | `[]` | Force-add model ids. |
 | `requestTimeoutMs` | `600000` | Per-request deadline. |
-| `modelRefreshIntervalMs` | `600000` | Catalog refresh; `0` disables polling. |
+| `modelRefreshIntervalMs` | `300000` | Catalog refresh; `0` disables polling. |
 | `trimCompletedReasoning` | `false` (live) | Settings → Context trimming. |
 | `toolResultImages` | `true` | Forward tool-output images on vision routes. |
 | `requestImagePixelBudget` | `4194304` | Request image pixels. |
@@ -393,7 +409,7 @@ Symptoms and first actions:
 | `429 FreeUsageLimitError` | Free lane refusal or real quota | Read the diagnostics; do not retry, rotate or clear the stored wait. |
 | `400 MissingSessionID` | Session header absent | Session minting broke. |
 | Endpoint `404`/`426` | Route migrated | Re-read the catalog's `provider.api`. |
-| Empty catalog | Registry or `/models` failing | Check logs; the previous snapshot is retained. |
+| Empty catalog | Catalog request failing | Check logs; the previous snapshot is retained. |
 
 Re-deriving a constant:
 

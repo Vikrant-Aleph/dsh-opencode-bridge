@@ -12,7 +12,6 @@ const ids = models => models.map(model => model.id)
 const model = (id, extra = {}) => ({ id, name: id, cost: { input: 0, output: 0 }, ...extra })
 const response = body => ({ ok: true, status: 200, json: async () => body })
 const registry = models => ({ opencode: { models: Object.fromEntries(models.map(item => [item.id, item])) } })
-const live = models => ({ data: models.map(item => ({ id: item.id })) })
 const deferred = () => {
   let resolve
   const promise = new Promise(yes => { resolve = yes })
@@ -32,13 +31,12 @@ function setup(t, overrides = {}, { replaceAvailable = true } = {}) {
     return timer
   })
   t.mock.method(globalThis, 'clearTimeout', timer => timers.delete(timer))
-  let source = { registry: registry([model('alpha')]), live: live([model('alpha')]) }
+  let source = registry([model('alpha')])
   const fetches = []
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
-    const kind = String(url) === 'https://models.dev/api.json' ? 'registry' : 'live'
-    assert.ok(kind === 'registry' || String(url) === `${BASE}/models`, `unexpected URL: ${url}`)
-    fetches.push({ kind, signal: init.signal })
-    const value = source[kind]
+    assert.equal(String(url), 'https://models.opencode.ai/api.json', `unexpected URL: ${url}`)
+    fetches.push({ signal: init.signal })
+    const value = source
     return typeof value === 'function' ? value() : response(value)
   })
   const warnings = []
@@ -97,11 +95,11 @@ function setup(t, overrides = {}, { replaceAvailable = true } = {}) {
     // TS private fields are ordinary JS properties: inspect disposal without adding production hooks.
     catalog: registeredAdapter.catalog,
     get disposedRegistrations() { return disposedRegistrations },
-    good(models) { source = { registry: registry(models), live: live(models) } },
+    good(models) { source = registry(models) },
     hold() {
-      const r = deferred(), l = deferred()
-      source = { registry: () => r.promise, live: () => l.promise }
-      return { resolve(models) { r.resolve(response(registry(models))); l.resolve(response(live(models))) } }
+      const gate = deferred()
+      source = () => gate.promise
+      return { resolve(models) { gate.resolve(response(registry(models))) } }
     },
     unload,
     async tick(ms) {
@@ -120,20 +118,20 @@ function setup(t, overrides = {}, { replaceAvailable = true } = {}) {
   }
 }
 
-test('schema defaults to 600000ms and apply starts exactly one immediate catalog prefetch', async t => {
-  assert.equal(Config({}).modelRefreshIntervalMs, 600_000)
+test('schema defaults to 300000ms and apply starts exactly one immediate catalog prefetch', async t => {
+  assert.equal(Config({}).modelRefreshIntervalMs, 300_000)
   const f = setup(t)
-  assert.equal(f.config.modelRefreshIntervalMs, 600_000)
-  assert.equal(f.catalog.refreshIntervalMs, 600_000)
+  assert.equal(f.config.modelRefreshIntervalMs, 300_000)
+  assert.equal(f.catalog.refreshIntervalMs, 300_000)
   await flush()
-  assert.equal(f.fetches.length, 2)
+  assert.equal(f.fetches.length, 1)
   assert.equal(f.registrations.length, 1)
   assert.equal(f.replacements.length, 1)
   assert.deepEqual(f.injections.map(entry => entry.services), [['settings'], ['connection'], ['sessionProjections'], ['connection'], ['connection']])
-  await f.tick(599_999)
-  assert.equal(f.fetches.length, 2)
+  await f.tick(299_999)
+  assert.equal(f.fetches.length, 1)
   await f.tick(1)
-  assert.equal(f.fetches.length, 4)
+  assert.equal(f.fetches.length, 2)
   assert.equal(f.replacements.length, 1, 'unchanged snapshot must not invalidate DSH model cache')
 })
 
@@ -141,13 +139,13 @@ test('apply forwards zero interval: startup still prefetches but no periodic tim
   const f = setup(t, { modelRefreshIntervalMs: 0 })
   assert.equal(f.catalog.refreshIntervalMs, 0)
   await flush()
-  assert.equal(f.fetches.length, 2)
+  assert.equal(f.fetches.length, 1)
   assert.equal(f.replacements.length, 1)
   assert.equal(f.timers.size, 0)
   await f.tick(1_800_000)
-  assert.equal(f.fetches.length, 2)
+  assert.equal(f.fetches.length, 1)
   assert.deepEqual(ids(await f.adapter.listModels('route-one')), ['alpha'])
-  assert.equal(f.fetches.length, 4, 'on-demand list must still refresh stale cache')
+  assert.equal(f.fetches.length, 2, 'on-demand list must still refresh stale cache')
   assert.equal(f.replacements.length, 1)
 })
 
@@ -185,7 +183,7 @@ test('registered discovery and adapter listModels share the refreshed catalog wi
   const initial = await discover({})
   assert.deepEqual(ids(initial), ['alpha'])
   await flush()
-  assert.equal(f.fetches.length, 2)
+  assert.equal(f.fetches.length, 1)
   f.good([model('new', { name: 'New model', limit: { context: 8192, output: 1024 } })])
   await f.tick(60_000)
   const before = f.fetches.length
@@ -204,17 +202,17 @@ test('reverse effect unload aborts pending refresh and rejects discovery before 
   await flush()
   const gate = f.hold()
   await f.tick(60_000)
-  assert.equal(f.fetches.length, 4)
+  assert.equal(f.fetches.length, 2)
   const discoveryResult = f.discoveries[0].callback({}).then(value => ({ value }), error => ({ error }))
   await f.unload()
   assert.equal(f.disposedRegistrations, 1)
-  assert.ok(f.fetches.slice(-2).every(call => call.signal?.aborted))
+  assert.ok(f.fetches.slice(-1).every(call => call.signal?.aborted))
   assert.equal((await discoveryResult).error?.name, 'AbortError')
   assert.equal(f.timers.size, 0)
   gate.resolve([model('late')])
   await flush()
   await f.tick(1_800_000)
-  assert.equal(f.fetches.length, 4)
+  assert.equal(f.fetches.length, 2)
   assert.equal(f.replacements.length, 1)
   await assert.rejects(f.catalog.list(), { name: 'AbortError' })
   await assert.rejects(f.catalog.refresh(), { name: 'AbortError' })
@@ -228,7 +226,7 @@ test('unload clears an idle periodic timer without any subsequent fetch or repla
   await f.unload()
   assert.equal(f.timers.size, 0)
   await f.tick(1_800_000)
-  assert.equal(f.fetches.length, 2)
+  assert.equal(f.fetches.length, 1)
   assert.equal(f.replacements.length, 1)
   assert.equal(f.disposedRegistrations, 1)
 })

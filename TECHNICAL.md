@@ -70,7 +70,7 @@ https://opencode.ai/inference/...
 
 | 模块 | 职责 |
 |---|---|
-| `src/catalog.ts` | 免费模型发现：models.dev 注册表 ∩ 实时 `/models`，含 TTL 与重试。 |
+| `src/catalog.ts` | 免费模型发现：读官方模型目录，含 TTL 与重试。 |
 | `src/project-identity.ts` | 按真实目录推导官方 `x-opencode-project`。 |
 | `src/request-waits.ts` | 按模型持久化服务端重试截止时间，跨重载保留。 |
 | `src/http-errors.ts` | 上游错误分类；安全、有界的诊断信息。 |
@@ -293,9 +293,23 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 
 ## 6. 模型目录
 
-`src/catalog.ts` 取 models.dev 注册表（成本为 0 且未弃用）与实时 `/models` 的交集。
-快照原子提交：单个源失败不会擦掉可用快照。默认每 10 分钟刷新，失败后退避 60s。
-`modelRefreshIntervalMs: 0` 关闭周期刷新，但保留启动预取与按需缓存。
+`src/catalog.ts` 只读一个来源：`https://models.opencode.ai/api.json`，与官方客户端的
+`ModelsDev.Service` 同源。取其中 `opencode` 提供者下成本为 0 的模型，排除 `status: deprecated`。
+
+| 项 | 值 | 依据 |
+|---|---|---|
+| 数据源 | 单一，官方的模型目录 | 官方客户端也只读这一个 |
+| 刷新间隔 | 5 分钟，与官方 TTL 一致 | `Duration.minutes(5)` |
+| 失败处理 | 保留上一份快照，60s 后重试 | 与官方退回缓存同效 |
+
+**为什么不再探测 `/models`。** 早期版本把目录与一次实时 `/models` 请求取交集，用来判断
+「哪些模型现在真的可用」。2026-11-15 实测显示这一步没有增加任何信息：目录中成本为 0 且未弃用的
+12 个模型，与 `/models` 返回的可用集完全一致（「目录有、线上没有」为 0），而 `/models` 另外
+返回的 74 个都是付费模型。可用性信号本来就在目录的 `status` 字段里，因此这次探测被删除——
+它也是官方客户端从不发出的请求形态。
+
+快照原子提交，`onUpdated` 只在内容真正变化时触发。`modelRefreshIntervalMs: 0` 关闭周期刷新，
+但保留启动预取与按需缓存。
 
 ## 7. 配置
 
@@ -317,7 +331,7 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 | `includeDeprecated` | `false` | 提供已弃用但在线的模型。 |
 | `extraModels` | `[]` | 强制追加模型 id。 |
 | `requestTimeoutMs` | `600000` | 单请求截止时间。 |
-| `modelRefreshIntervalMs` | `600000` | 目录刷新；`0` 关闭轮询。 |
+| `modelRefreshIntervalMs` | `300000` | 目录刷新；`0` 关闭轮询。 |
 | `trimCompletedReasoning` | `false`（live） | 设置 → 上下文精简。 |
 | `toolResultImages` | `true` | 视觉路由转发工具输出图片。 |
 | `requestImagePixelBudget` | `4194304` | 请求图片像素。 |
@@ -339,7 +353,7 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 | `429 FreeUsageLimitError` | 免费通道拒绝或真实配额 | 读诊断；不要重试、轮换或清空已保存的等待。 |
 | `400 MissingSessionID` | 缺少会话头 | 会话生成失效。 |
 | 端点 `404`/`426` | 路由迁移 | 重读目录的 `provider.api`。 |
-| 目录为空 | 注册表或 `/models` 失败 | 查日志；上一份快照仍被保留。 |
+| 目录为空 | 目录请求失败 | 查日志；上一份快照仍被保留。 |
 
 重新推导某个常量：
 

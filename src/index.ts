@@ -21,7 +21,7 @@ import { DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
 import { OpenCodeFreeAdapter } from './adapter.js'
 import { ContextPreferencesService, registerContextAccess } from './context-service.js'
 import { completedReasoningForRequest, registerReasoningProjection } from './reasoning-policy.js'
-import { buildHeaders, mintRequestId, mintSessionId, type HeaderRecipe } from './opencode-protocol.js'
+import type { HeaderRecipe } from './opencode-protocol.js'
 import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
@@ -215,21 +215,12 @@ export function apply(ctx: Context, config: Config): void {
   let registration: AdapterRegistrationHandle | undefined
   const providers = config.providers.length ? [...config.providers] : ['opencode-bridge']
   let refreshNotificationUnavailable = false
-  // Declared before the catalog: its live listing reads the transport lazily, and a
-  // temporal-dead-zone read would fail the first refresh.
   const transportHolder: { current?: typeof fetch & { close?: () => Promise<void> } } = {}
+  // One source, as the official client: the OpenCode catalog, no gateway listing probe.
   const catalog = new FreeModelCatalog(
-    config.baseUrl,
     {
       includeDeprecated: config.includeDeprecated, extraModels: config.extraModels, pool, dispatcherFor,
       refreshIntervalMs: config.modelRefreshIntervalMs,
-      // The listing is served by the same gateway as inference, so it carries the same
-      // identity and, when available, the same TLS transport. A bare probe would be a
-      // shape the official client never sends.
-      liveHeaders: () => buildHeaders(
-        recipe, mintSessionId(), mintRequestId(),
-        { tracing: config.tracing, attribution: config.userAgentAttribution },
-      ),
       onUpdated: () => {
         if (typeof registration?.replace === 'function') {
           // Public atomic route replacement announces a genuine registration

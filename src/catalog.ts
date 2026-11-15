@@ -1,11 +1,20 @@
 /**
  * Free-model catalog shared by the adapter and model discovery.
- * Periodic refresh is explicitly owned by start()/dispose(); standalone callers
- * can use list()/refresh() without creating a background timer.
+ *
+ * One source, as the official client has: the OpenCode catalog at
+ * `https://models.opencode.ai/api.json`, read every five minutes.
+ *
+ * The bridge used to intersect that catalog with a live `/models` request to the gateway.
+ * Measurement on 2026-11-15 showed the intersection changed nothing — every free,
+ * non-deprecated catalog entry was also served — while adding a request shape the official
+ * client never sends. The availability signal already lives in the catalog's `status`
+ * field, so the extra probe is gone.
+ *
+ * Periodic refresh is explicitly owned by start()/dispose(); standalone callers can use
+ * list()/refresh() without creating a background timer.
  */
 import { noopLogger, type LoggerLike } from './logger.js'
 import { fetchWithPool, type ProxyPool } from './proxy-pool.js'
-import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 
 export interface FreeModel {
   id: string
@@ -16,10 +25,9 @@ export interface FreeModel {
   inputModalities?: Array<'text' | 'image'>
   efforts?: Array<{ id: string; name: string }>
   api?: string
-  live: boolean
 }
 
-interface ModelsDevModel {
+interface CatalogModel {
   id?: string
   name?: string
   description?: string
@@ -36,44 +44,27 @@ export interface CatalogOptions {
   extraModels: string[]
   pool?: ProxyPool
   dispatcherFor?: (url: string) => Promise<unknown> | unknown
-  /**
-   * Headers for the live model listing.
-   *
-   * The listing is served by the same gateway as inference, so it has to carry the
-   * same identity. A bare `user-agent` request is a shape the official client never
-   * sends, and polling it every minute invites the gateway to throttle the egress.
-   */
-  liveHeaders?: () => Record<string, string>
   /** 0 disables periodic refresh, not startup prefetch or on-demand caching. */
   refreshIntervalMs?: number
-  /** Total deadline for both sources, including their response bodies. */
+  /** Total deadline for the request, including its response body. */
   fetchTimeoutMs?: number
   /** Observer after a committed content change; host notification belongs to the caller. */
   onUpdated?: (models: readonly FreeModel[]) => void
 }
 
-export const DEFAULT_MODEL_REFRESH_INTERVAL_MS = 10 * 60_000
+/** The official client refreshes its catalog on a five-minute TTL. */
+export const DEFAULT_MODEL_REFRESH_INTERVAL_MS = 5 * 60_000
 export const MIN_MODEL_REFRESH_INTERVAL_MS = 60_000
 export const MAX_MODEL_REFRESH_INTERVAL_MS = 2_147_483_647
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000
 const FAILURE_RETRY_MS = 60_000
-const MODELS_DEV_URL = 'https://models.dev/api.json'
+/** Same source the official client reads. */
+const CATALOG_URL = 'https://models.opencode.ai/api.json'
 
 export function normalizeModelRefreshIntervalMs(value: unknown): number {
   if (value === 0) return 0
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return DEFAULT_MODEL_REFRESH_INTERVAL_MS
   return Math.min(MAX_MODEL_REFRESH_INTERVAL_MS, Math.max(MIN_MODEL_REFRESH_INTERVAL_MS, Math.floor(value)))
-}
-
-/** The listing must look like the client, but a header failure must not break it. */
-function liveHeadersFor(options: CatalogOptions): Record<string, string> {
-  try {
-    const built = options.liveHeaders?.()
-    if (built && Object.keys(built).length > 0) return built
-  } catch {
-    // Fall through to the minimal shape.
-  }
-  return { 'user-agent': DEFAULT_PROTOCOL_USER_AGENT }
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -109,7 +100,6 @@ export class FreeModelCatalog {
   private readonly fetchTimeoutMs: number
 
   constructor(
-    private readonly baseUrl: string,
     private readonly options: CatalogOptions,
     private readonly logger: LoggerLike = noopLogger,
   ) {
@@ -149,7 +139,7 @@ export class FreeModelCatalog {
           this.fetchedAt = Date.now()
           this.retryAt = 0
           this.failed = false
-          this.logger.info('catalog', 'ready', { freeModels: next.length, changed, live: 'yes', ids: next.map(model => model.id).join(',') })
+          this.logger.info('catalog', 'ready', { freeModels: next.length, changed, ids: next.map(model => model.id).join(',') })
           if (changed && this.options.onUpdated) {
             try { this.options.onUpdated(this.models) }
             catch { this.logger.warn('catalog', 'catalog observer failed; refreshed snapshot retained') }
@@ -157,7 +147,6 @@ export class FreeModelCatalog {
           return this.models
         } catch (error) {
           if (this.disposed) throw disposedError()
-          // Abort the sibling source/body too: no hung request survives this round.
           controller.abort()
           this.failed = true
           this.retryAt = Date.now() + FAILURE_RETRY_MS
@@ -208,19 +197,17 @@ export class FreeModelCatalog {
   }
 
   private async fetchModels(signal: AbortSignal): Promise<FreeModel[]> {
-    // Commit only complete snapshots; a transient failed source must not erase
-    // usable models or promote an unverified registry entry to live availability.
-    const [registry, live] = await Promise.all([this.fetchRegistry(signal), this.fetchLive(signal)])
+    // A failed fetch throws and the previous snapshot is kept: a transient outage must not
+    // empty the picker, and it must not be mistaken for "no free models exist".
+    const models = await this.fetchCatalog(signal)
     const out: FreeModel[] = []
-    const known = new Set<string>()
-    for (const [key, value] of Object.entries(registry)) {
-      if (!record(value)) { known.add(key); continue }
-      const meta = value as unknown as ModelsDevModel
+    for (const [key, value] of Object.entries(models)) {
+      if (!record(value)) continue
+      const meta = value as unknown as CatalogModel
       const id = typeof meta.id === 'string' && meta.id ? meta.id : key
-      known.add(id)
-      known.add(key)
-      const wanted = meta.cost?.input === 0 && meta.cost?.output === 0 && (this.options.includeDeprecated || meta.status !== 'deprecated')
-      if (!wanted || !live.has(id)) continue
+      const free = meta.cost?.input === 0 && meta.cost?.output === 0
+      if (!free) continue
+      if (!this.options.includeDeprecated && meta.status === 'deprecated') continue
       const efforts = effortsOf(meta)
       out.push({
         id, name: typeof meta.name === 'string' ? meta.name : id,
@@ -230,54 +217,35 @@ export class FreeModelCatalog {
         ...(Array.isArray(meta.modalities?.input) ? { inputModalities: meta.modalities.input.filter((m): m is 'text' | 'image' => m === 'text' || m === 'image') } : {}),
         ...(efforts.length ? { efforts } : {}),
         ...(typeof meta.provider?.api === 'string' ? { api: meta.provider.api } : {}),
-        live: true,
       })
     }
     for (const id of this.options.extraModels) {
-      if (!out.some(model => model.id === id)) out.push({ id, name: id, live: live.has(id) })
-    }
-    for (const id of live) {
-      // Known paid/deprecated/incomplete registry entries cannot sneak back in
-      // through their name; suffix inference is only for unknown live entries.
-      if (!known.has(id) && !out.some(model => model.id === id) && /(-free$|^big-pickle$)/.test(id)) out.push({ id, name: id, live: true })
+      if (!out.some(model => model.id === id)) out.push({ id, name: id })
     }
     return out.sort((a, b) => a.id.localeCompare(b.id))
   }
 
-  private async fetchRegistry(signal: AbortSignal): Promise<Record<string, unknown>> {
-    const response = await fetch(MODELS_DEV_URL, { signal })
-    if (!response.ok) {
-      void response.body?.cancel().catch(() => {})
-      throw new Error(`models.dev HTTP ${response.status}`)
-    }
-    const data: unknown = await response.json()
-    if (!record(data) || !record(data.opencode) || !record(data.opencode.models) || Object.values(data.opencode.models).some(model => !record(model))) {
-      throw new Error('models.dev returned an invalid model registry')
-    }
-    return data.opencode.models
-  }
-
-  private async fetchLive(signal: AbortSignal): Promise<Set<string>> {
+  private async fetchCatalog(signal: AbortSignal): Promise<Record<string, unknown>> {
     const response = await fetchWithPool({
       pool: this.options.pool,
-      url: `${this.baseUrl.replace(/\/$/, '')}/models`,
-      init: { headers: liveHeadersFor(this.options), signal },
+      url: CATALOG_URL,
+      init: { headers: { accept: 'application/json' }, signal },
       signal,
       ...(this.options.dispatcherFor ? { dispatcherFor: this.options.dispatcherFor } : {}),
     })
     if (!response.ok) {
       if (!response.bodyUsed) void response.body?.cancel().catch(() => {})
-      throw new Error(`relay model listing HTTP ${response.status}`)
+      throw new Error(`catalog HTTP ${response.status}`)
     }
     const data: unknown = await response.json()
-    if (!record(data) || !Array.isArray(data.data) || data.data.some(model => !record(model) || typeof model.id !== 'string' || !model.id.length)) {
-      throw new Error('relay returned an invalid model listing')
+    if (!record(data) || !record(data.opencode) || !record(data.opencode.models) || Object.values(data.opencode.models).some(model => !record(model))) {
+      throw new Error('the catalog returned an invalid model registry')
     }
-    return new Set(data.data.map((model: { id: string }) => model.id))
+    return data.opencode.models
   }
 }
 
-function effortsOf(meta: ModelsDevModel): Array<{ id: string; name: string }> {
+function effortsOf(meta: CatalogModel): Array<{ id: string; name: string }> {
   if (!Array.isArray(meta.reasoning_options)) return []
   for (const option of meta.reasoning_options) {
     if (option?.type === 'effort' && Array.isArray(option.values)) return option.values.filter((value): value is string => typeof value === 'string').map(value => ({ id: value, name: value }))

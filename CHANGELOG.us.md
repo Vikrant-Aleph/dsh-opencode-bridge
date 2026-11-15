@@ -18,17 +18,28 @@ the matching section of this file.
 
 ## [1.0.6] - 2026-11-15
 
-Documentation only. The README on npm comes from the tarball published with the version,
-so the structure diagram, the badges and the references added after 1.0.5 exist on GitHub
-and nowhere else.
+The model list now refreshes the way the official client does, along with the documentation
+that accumulated after 1.0.5.
+
+### Changed
+
+- **One catalog source.** The plugin reads only `https://models.opencode.ai/api.json`, the
+  same catalog the official client's `ModelsDev.Service` reads, and refreshes on the
+  official five-minute TTL instead of ten minutes.
+- **The live `/models` probe is gone.** It existed to decide which models were actually
+  served. Measurement showed it added nothing: the twelve zero-cost, non-deprecated
+  catalog entries matched the live list exactly, and the 74 extra ids the listing returned
+  were paid models. Availability is already carried by the catalog's `status` field. As a
+  side effect the plugin no longer sends a request the official client never makes.
 
 ### Fixed
 
 - **The README's document links are absolute now.** npm renders the page outside any
   repository, where a relative `TECHNICAL.md`, `CAMOUFLAGE.md` or `LICENSE` points at
   nothing. On GitHub the links behave as before.
-- This also ships everything accumulated since 1.0.5: the structure diagram, the stars and
-  last-commit badges, the consulted-projects list, and the install section moved up.
+- This also ships the documentation accumulated since 1.0.5: the structure diagram, the
+  stars and last-commit badges, the consulted-projects list, and the install section moved
+  up.
 
 ## [1.0.5] - 2026-11-15
 

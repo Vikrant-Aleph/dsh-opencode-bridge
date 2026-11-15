@@ -3,14 +3,16 @@
   OpenCode Bridge
 </h1>
 
-[![npm version](https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm)](https://www.npmjs.com/package/dsh-opencode-bridge)
-[![Total npm downloads](https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads)](https://www.npmjs.com/package/dsh-opencode-bridge)
-[![GitHub stars](https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main)
-[![License](https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge)](LICENSE)
-[![Node.js requirement](https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js)](https://www.npmjs.com/package/dsh-opencode-bridge)
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads" alt="Total npm downloads"></a>
+  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers"><img src="https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github" alt="GitHub stars"></a>
+  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main"><img src="https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge" alt="Last commit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge" alt="License"></a>
+  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js" alt="Node.js requirement"></a>
+</p>
 
-[中文](README.md) | English
+<p align="center"><a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/README.md">中文</a> | English</p>
 
 Use [OpenCode](https://opencode.ai)'s free models in
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no

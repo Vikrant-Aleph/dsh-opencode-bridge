@@ -12,7 +12,7 @@
   <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js" alt="Node.js requirement"></a>
 </p>
 
-<p align="center"><a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/README.md">中文</a> | English</p>
+[中文](README.md) | English
 
 Use [OpenCode](https://opencode.ai)'s free models in
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no

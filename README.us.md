@@ -27,7 +27,6 @@ and does not check is described [below](#how-opencode-identifies-a-client).
 Also included:
 
 - **Automatic model refresh** — reads the free-model list at startup and every 10 minutes, adding and removing models as the upstream catalog changes and keeping the last good list when a refresh fails.
-- **Streaming with reasoning continuity** — streams responses and preserves reasoning across multi-step tool calls, including the `reasoning_content` field some models require on replay.
 - **Optional context trimming** — clears reasoning only from confirmed completed turns, off by default.
 - **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, failing over on explicit egress-quota errors or connection failures and always honouring server-requested waits.
 

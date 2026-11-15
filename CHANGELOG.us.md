@@ -9,6 +9,22 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-15
+
+Copy only. After 1.0.0 removed the tool bridge and the offline audit, the package
+description, the marketplace copy and the settings-page intro still advertised both.
+
+### Fixed
+
+- **The package description and two copies are updated.** `package.json`,
+  `locale/en.json`, `locale/zh.json` and the plugin's settings intro now describe what
+  the plugin does: no account or API key, the official client's request shape and
+  fingerprints, automatic model refresh, optional context trimming, optional egress
+  rotation.
+- Added a regression check: the description fails if either the tool bridge or the audit
+  reappears. A test had been asserting the old wording, which is how the stale copy
+  survived.
+
 ## [1.0.4] - 2026-11-14
 
 The release that explains why the UI never worked.

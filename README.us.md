@@ -1,5 +1,7 @@
 # OpenCode Bridge
 
+<img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.svg" width="72" height="72" alt="OpenCode Bridge icon">
+
 [![npm version](https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![Total npm downloads](https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![GitHub stars](https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers)
@@ -40,7 +42,7 @@ Also included:
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.0.6
+   dsh-opencode-bridge@1.0.7
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -49,13 +51,13 @@ Also included:
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.7
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.7
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
@@ -215,7 +217,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.6.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.7.tgz
 ```
 
 </details>

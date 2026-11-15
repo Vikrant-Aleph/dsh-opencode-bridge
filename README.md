@@ -1,5 +1,7 @@
 # OpenCode Bridge
 
+<img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.svg" width="72" height="72" alt="OpenCode Bridge 图标">
+
 [![npm version](https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![Total npm downloads](https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![GitHub stars](https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers)
@@ -35,7 +37,7 @@
 2. 输入：
 
    ```text
-   dsh-opencode-bridge@1.0.6
+   dsh-opencode-bridge@1.0.7
    ```
 
 3. **安装源**优先选官方 npm registry；镜像可能滞后。
@@ -44,13 +46,13 @@
 ### 命令行安装
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.7
 ```
 
 把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.7
 ```
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
@@ -189,7 +191,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.6.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.7.tgz
 ```
 
 </details>

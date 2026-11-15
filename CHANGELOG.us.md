@@ -16,6 +16,19 @@ the matching section of this file.
   discussion. The documentation rule requires both places to be updated together, and
   `tests/references.test.mjs` checks that the four copies agree.
 
+## [1.0.7] - 2026-11-15
+
+### Changed
+
+- **A new plugin icon.** It follows the official `artwork.md` rules: a 36x36 canvas, no
+  tile of its own, the subject drawn inside the margins, pure SVG geometry, 2.9 KB. The
+  old one used a 64x64 canvas with its own dark tile, which stacked a second tile inside
+  the one Plugin Manager draws.
+- The README shows the icon at the top, by absolute URL so the npm page renders it too.
+
+This release includes everything in 1.0.6. That version has a GitHub tag and release but
+never reached npm, because the publish was refused for a missing two-factor code.
+
 ## [1.0.6] - 2026-11-15
 
 The model list now refreshes the way the official client does, along with the documentation

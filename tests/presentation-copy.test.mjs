@@ -10,8 +10,11 @@ test('all package display summaries include optional completed-turn context trim
   assert.equal(pkg.description, en.description)
   assert.match(en.description, /optional context trimming of completed-turn reasoning/)
   assert.match(zh.description, /可选的上下文精简（精简已完成轮次思考）/)
-  assert.match(en.description, /tool bridge.*auditing\.$/)
-  assert.match(zh.description, /工具桥.*兼容性审计。$/)
+  // The tool bridge and the offline audit were removed in 1.0.0 and must not be advertised.
+  assert.doesNotMatch(en.description, /tool bridge|auditing/i)
+  assert.doesNotMatch(zh.description, /工具桥|审计/)
+  assert.match(en.description, /without an account or API key/i)
+  assert.match(zh.description, /无需账号或 API Key/)
   assert.doesNotMatch(en.description, /image|vision/i)
   assert.doesNotMatch(zh.description, /图片|图像|视觉/)
 })

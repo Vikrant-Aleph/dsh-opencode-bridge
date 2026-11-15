@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
     const en = {
       nav: 'OpenCode Bridge',
       pageTitle: 'OpenCode Bridge',
-      pageIntro: 'OpenCode free models with automatic refresh, optional context trimming of completed-turn reasoning and egress rotation. Includes a fail-closed tool bridge and offline, agent-scoped compatibility auditing.',
+      pageIntro: 'OpenCode free models with automatic refresh, optional context trimming of completed-turn reasoning and egress rotation.',
       tabContext: 'Context trimming',
       contextTitle: 'Context trimming',
       contextToggle: 'Trim reasoning from completed turns',
@@ -90,7 +90,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: 'OpenCode Bridge',
       pageTitle: 'OpenCode Bridge',
-      pageIntro: '在 DSH 中使用 OpenCode 免费模型，支持模型动态刷新、可选的上下文精简（精简已完成轮次思考）与代理出口轮换。提供默认拒绝不安全转换的工具桥与离线、按 Agent 作用域的兼容性审计。',
+      pageIntro: '在 DSH 中使用 OpenCode 免费模型，支持模型自动刷新、可选的上下文精简（精简已完成轮次思考）与出口轮换。',
       tabContext: '上下文精简',
       contextTitle: '上下文精简',
       contextToggle: '精简已完成轮次的思考',

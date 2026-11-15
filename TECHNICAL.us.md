@@ -26,6 +26,12 @@ install command in both READMEs to match `version` in `package.json`;
 
 READMEs are for visitors; this file is for maintainers. Record every change in §11.
 
+**Update the list when you consult a new project.** After reading or comparing another
+project, add it in the same change to the
+[README references](README.us.md#references-and-credits) and to §13 here. A project read only
+for comparison, with no code copied, is recorded as exactly that; anything reused needs its
+source and licence stated.
+
 **Two rules for citing evidence.** Both are enforced by
 `tests/evidence-links.test.mjs`:
 
@@ -474,3 +480,25 @@ client fails too it is quota, and if it passes the camouflage still has a gap.
 | **server wait** | A `Retry-After` observed from upstream; scoped to the egress that produced it, blocking only a capped probe window, and clearable on demand. |
 | **egress** | One configured route to upstream (`direct` or a proxy). |
 | **Bun-shaped transport** | The wreq-js handshake reproducing the official client's `ClientHello`. |
+
+## 13. Community projects consulted
+
+Every protocol behaviour comes from measuring the official client, not from any community
+project. The projects below were compared during design, to judge whether an approach was
+worth following. **No code was copied from any of them.**
+
+| Project | Relationship | Licence |
+|---|---|---|
+| [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh) | Peer adapter; compared how it fills in missing tools and configures | MIT |
+| [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free) | Peer adapter; compared aliasing and call blocking | MIT |
+| [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free) | Peer adapter; compared how placeholder calls are suppressed | MIT |
+| [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter) | Peer adapter; an earlier tool-filling implementation | MIT |
+| [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen) | Peer adapter; compared catalogue refresh and caching | MIT |
+| [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter) | Peer adapter; compared catalogue discovery | MIT |
+| [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) | Read only for its issue discussion of the free allowance decaying with egress IP | GPL-3.0 |
+
+opencode2api is GPL-3.0. This project read its issue discussion only and uses none of its
+code, so that licence does not apply here. Reusing any of its code later would require a
+fresh licence review.
+
+This section and the README section are the same list; both must be updated together.

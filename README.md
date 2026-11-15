@@ -196,9 +196,20 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.5.tgz
 [技术文档](TECHNICAL.md)（[English](TECHNICAL.us.md)）涵盖线上协议、模块结构、完整配置、
 测试与维护规则。
 
-## 致谢与许可
+## 参考与致谢
 
-协议研究参考了 OpenCode 官方客户端、其公开源码，以及记录同一限制的社区项目。抓包与据此得出的
-原则汇总在[伪装原则](CAMOUFLAGE.md)。
+协议行为全部通过对官方客户端的实测确定，抓包与据此得出的原则汇总在[伪装原则](CAMOUFLAGE.md)。
+设计阶段还对照过以下社区项目，用来判断哪些做法值得沿用、哪些不值得。没有复制它们的代码。
+
+- [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)
+- [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free)
+- [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free)
+- [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter)
+- [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen)
+- [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter)
+- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) —— 只参考了其 issue
+  中关于免费额度随出口 IP 累积衰减的记录，未使用其代码（该项目为 GPL-3.0）
+
+## 许可
 
 基于 [MIT](LICENSE) 许可。

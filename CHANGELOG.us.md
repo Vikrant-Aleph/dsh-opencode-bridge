@@ -9,6 +9,14 @@ the matching section of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- The README and §13 now list the community projects compared during design: seven in total,
+  with a note that no code was copied. opencode2api is GPL-3.0 and was read only for its issue
+  discussion. The documentation rule requires both places to be updated together, and
+  `tests/references.test.mjs` checks that the four copies agree.
+
+
 ## [1.0.5] - 2026-11-15
 
 Copy only. After 1.0.0 removed the tool bridge and the offline audit, the package

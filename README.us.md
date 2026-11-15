@@ -222,10 +222,24 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.5.tgz
 [Technical documentation](TECHNICAL.us.md) ([中文](TECHNICAL.md)) covers the wire
 protocol, module layout, full configuration, testing and maintenance rules.
 
-## Credits and license
+## References and credits
 
-Protocol research drew on the official OpenCode client, its public source, and
-community projects that documented the same restriction. The captures and the policies
-derived from them are summarised in the [camouflage policy](CAMOUFLAGE.us.md).
+Every protocol behaviour was established by measuring the official client. The captures and
+the principles derived from them are collected in the
+[camouflage policy](CAMOUFLAGE.us.md). The design stage also compared the following
+community projects, to decide which approaches were worth following and which were not. No
+code was copied from any of them.
+
+- [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)
+- [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free)
+- [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free)
+- [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter)
+- [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen)
+- [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter)
+- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) — consulted only
+  for its issue discussion of the free allowance decaying with egress IP; no code was used
+  (that project is GPL-3.0)
+
+## License
 
 Licensed under [MIT](LICENSE).

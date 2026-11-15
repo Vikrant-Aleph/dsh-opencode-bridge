@@ -21,6 +21,10 @@ LLM 契约，以及上游变化时如何应对。也涵盖可选的上下文精�
 README 面向访客（概览、安装、限制、故障排查），本文件面向维护者（协议、内部实现、配置、测试）。
 每次变更记录在 §11。代码已改而文档滞后不可接受。
 
+**参考新项目时同步更新清单。** 阅读或对照了别的项目后，在同一改动里补进
+[README 的「参考与致谢」](README.md#参考与致谢)与本文 §13。只读过源码做对照、没有复制代码的，
+如实写成对照关系；用到代码或结论时写清出处与许可。
+
 **两条引用证据的规则。** 由 `tests/evidence-links.test.mjs` 强制：
 
 1. **文档引用的每个文件都必须随本仓库发布。** 证据不可得的结论无法被核查，引用也就失去意义。
@@ -419,3 +423,23 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | **服务端等待** | 来自上游的 `Retry-After`；绑定到产生它的出口，只阻塞一个有上限的退避窗口，可手动清除。 |
 | **出口** | 一条通往上游的配置路线（`direct` 或代理）。 |
 | **Bun 形态传输** | 复刻官方客户端 `ClientHello` 的 wreq-js 握手。 |
+
+## 13. 参考的社区项目
+
+协议行为全部来自对官方客户端的实测，不依赖任何社区项目的结论。下列项目只用于设计阶段的对照，
+判断某个做法是否值得沿用。**没有复制它们的代码。**
+
+| 项目 | 关系 | 许可 |
+|---|---|---|
+| [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh) | 同类适配器，对照工具补缺与配置方式 | MIT |
+| [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free) | 同类适配器，对照别名与调用阻断 | MIT |
+| [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free) | 同类适配器，对照占位工具的抑制方式 | MIT |
+| [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter) | 同类适配器，较早的工具补缺实现 | MIT |
+| [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen) | 同类适配器，对照目录刷新与缓存 | MIT |
+| [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter) | 同类适配器，对照目录发现 | MIT |
+| [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) | 只读其 issue 中关于免费额度随出口 IP 累积衰减的记录 | GPL-3.0 |
+
+opencode2api 是 GPL-3.0。本项目只读过它的 issue 讨论，没有使用其代码，因此不受该许可约束。
+以后若引用其代码，必须重新评估许可兼容性。
+
+本节与 README 的同名章节是同一份清单，两处必须同时更新。

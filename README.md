@@ -17,13 +17,44 @@
 
 **伪装成官方 OpenCode 客户端，让 DSH 能使用 OpenCode 的免费模型。** 
 
-它复刻官方 OpenCode 客户端的请求头、网关要求的请求形态，以及 TLS 与 HTTP 指纹。它是一个 `LlmAdapter`，接入 DSH 既有循环：agent loop、权限与工具执行仍由 DSH 负责，每次工具调用由 DSH 自行解析。网关检查什么、不检查什么，见[下文](#免费档如何判定客户端)。
+它复刻官方 OpenCode 客户端的请求头、网关要求的请求形态，以及 TLS 与 HTTP 指纹。它是一个 `LlmAdapter`，接入 DSH 既有循环：agent loop、权限与工具执行仍由 DSH 负责，每次工具调用由 DSH 自行解析。网关检查什么、不检查什么，见[下文](#opencode-如何判定客户端)。
 
 同时还支持：
 
 - **模型自动刷新** —— 启动时读取免费模型列表，默认每 10 分钟刷新；上游目录变化时自动增删模型，刷新失败则保留上一份可用列表。
 - **可选上下文精简** —— 只清除已确认成功完成轮次中的思考，默认关闭。
 - **可选出口轮换** —— 按顺序配置多个 HTTP(S) 或 SOCKS 代理，遇到明确的出口配额错误或连接失败时切换，并始终遵守服务端要求的等待。
+
+## 安装
+
+### 在 DSH 桌面端安装
+
+1. 侧边栏打开 **插件**，点右上角 **添加插件**。
+2. 输入：
+
+   ```text
+   dsh-opencode-bridge@1.0.5
+   ```
+
+3. **安装源**优先选官方 npm registry；镜像可能滞后。
+4. 点 **安装** 并等待完成。
+
+### 命令行安装
+
+```sh
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+```
+
+把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
+
+```sh
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+```
+
+然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
+
+日常使用无需 API Key，也无需手改配置文件。模型列表变化会通知选择器重新读取，无需重启插件。
+刷新间隔等完整配置见[配置参考](TECHNICAL.md#7-配置)。
 
 ## OpenCode 如何判定客户端
 
@@ -93,37 +124,6 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 
 `wreq-js` 是**可选**依赖。缺少原生绑定时，插件回退到普通 `fetch`，失去 TLS 对齐但仍能工作。
 某些代理环境下普通 `fetch` 根本连不上，所以这层传输的价值不止于指纹。
-
-## 安装
-
-### 在 DSH 桌面端安装
-
-1. 侧边栏打开 **插件**，点右上角 **添加插件**。
-2. 输入：
-
-   ```text
-   dsh-opencode-bridge@1.0.5
-   ```
-
-3. **安装源**优先选官方 npm registry；镜像可能滞后。
-4. 点 **安装** 并等待完成。
-
-### 命令行安装
-
-```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
-```
-
-把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
-
-```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
-```
-
-然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
-
-日常使用无需 API Key，也无需手改配置文件。模型列表变化会通知选择器重新读取，无需重启插件。
-刷新间隔等完整配置见[配置参考](TECHNICAL.md#7-配置)。
 
 ## 可选上下文精简
 

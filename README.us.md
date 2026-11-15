@@ -30,6 +30,39 @@ Also included:
 - **Optional context trimming** — clears reasoning only from confirmed completed turns, off by default.
 - **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, failing over on explicit egress-quota errors or connection failures and always honouring server-requested waits.
 
+## Install
+
+### In DSH Desktop
+
+1. Open **Plugins** in the sidebar, then click **Add plugin** in the top-right corner.
+2. Enter:
+
+   ```text
+   dsh-opencode-bridge@1.0.5
+   ```
+
+3. Prefer the official npm registry under **Installation source**; mirrors may lag.
+4. Click **Install** and wait for completion.
+
+### From the command line
+
+```sh
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+```
+
+Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
+
+```sh
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+```
+
+Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
+restart that DSH profile.
+
+No API key or hand-edited configuration is needed. Model-list changes reach the picker
+without restarting the plugin. Refresh intervals and the rest of the configuration are
+in the [configuration reference](TECHNICAL.us.md#7-configuration).
+
 ## How OpenCode identifies a client
 
 Everything below was measured — one variable at a time, from a single runtime, against
@@ -111,39 +144,6 @@ which is derived from the working directory.
 `wreq-js` is an **optional** dependency. Without its native binding the plugin falls back
 to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups
 plain `fetch` cannot connect at all, so the transport has value beyond fingerprinting.
-
-## Install
-
-### In DSH Desktop
-
-1. Open **Plugins** in the sidebar, then click **Add plugin** in the top-right corner.
-2. Enter:
-
-   ```text
-   dsh-opencode-bridge@1.0.5
-   ```
-
-3. Prefer the official npm registry under **Installation source**; mirrors may lag.
-4. Click **Install** and wait for completion.
-
-### From the command line
-
-```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
-```
-
-Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
-
-```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
-```
-
-Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
-restart that DSH profile.
-
-No API key or hand-edited configuration is needed. Model-list changes reach the picker
-without restarting the plugin. Refresh intervals and the rest of the configuration are
-in the [configuration reference](TECHNICAL.us.md#7-configuration).
 
 ## Optional context trimming
 

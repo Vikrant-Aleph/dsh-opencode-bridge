@@ -9,12 +9,18 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-11-16
+
+This release updates the icon and documentation layout without changing model requests.
+
 ### Changed
 
-- The README and §13 now list the community projects compared during design: seven in total,
-  with a note that no code was copied. opencode2api is GPL-3.0 and was read only for its issue
-  discussion. The documentation rule requires both places to be updated together, and
-  `tests/references.test.mjs` checks that the four copies agree.
+- **Replaced the shared plugin icon.** A 256×256 WebP replaces the SVG. The icon export,
+  package file list and both READMEs use the new file.
+- **Updated the README header.** The title and badges are centred, with the icon directly
+  to the title's left and aligned along its bottom edge. The language switcher stays left-aligned.
+- Replaced the four plugin marks in the Chinese and English structure diagrams, preserving
+  the remaining text and graphics.
 
 ## [1.0.7] - 2026-11-15
 

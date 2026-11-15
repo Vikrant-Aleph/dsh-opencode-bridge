@@ -15,15 +15,15 @@ function fixture(t, version = '1.2.3') {
   const pkg = {
     name: 'dsh-opencode-bridge', version, main: 'lib/index.js', types: 'lib/index.d.ts',
     scripts: { prepack: 'echo fixture-prepack', build: 'echo fixture-build' },
-    exports: { '.': { default: './lib/index.js', types: './lib/index.d.ts' }, './client': './client.js', './locale/*.json': './locale/*.json' },
-    files: ['lib', 'client.js', 'locale/*.json', 'icon.svg', 'cordis.patch.yml', 'README.us.md', 'README.md', 'LICENSE'],
+    exports: { '.': { default: './lib/index.js', types: './lib/index.d.ts' }, './client': './client.js', './locale/*.json': './locale/*.json', './icon': './icon.webp' },
+    files: ['lib', 'client.js', 'locale/*.json', 'icon.webp', 'cordis.patch.yml', 'README.us.md', 'README.md', 'LICENSE'],
     dsh: { bundle: { patch: './cordis.patch.yml' } },
   }
   const files = new Map(Object.entries({
     'package.json': `${JSON.stringify(pkg, null, 2)}\n`,
     'lib/index.js': 'export const plugin = true\n', 'lib/index.d.ts': 'export declare const plugin: boolean\n',
     'client.js': 'export {}\n', 'locale/en.json': '{}\n', 'locale/zh.json': '{}\n',
-    'icon.svg': '<svg/>', 'cordis.patch.yml': 'plugins: []\n', LICENSE: 'MIT\n',
+    'icon.webp': Buffer.from('UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=', 'base64'), 'cordis.patch.yml': 'plugins: []\n', LICENSE: 'MIT\n',
     'README.us.md': `add dsh-opencode-bridge@${version}\nadd ./dsh-opencode-bridge-${version}.tgz\n`,
     'README.md': `add dsh-opencode-bridge@${version}\nadd ./dsh-opencode-bridge-${version}.tgz\n`,
   }))
@@ -90,9 +90,9 @@ test('correct archive contains all dynamic entries and resources', (t) => {
   assert.equal(checkArchive(f.root, f.tag, f.archive).files, f.files.size)
   assert.equal(checkArchive(f.root, f.tag, f.archive).prerelease, true)
 })
-test('rejects missing locale, plugin entry, declaration and bundle patch', (t) => {
+test('rejects missing locale, plugin entry, declaration, icon and bundle patch', (t) => {
   const f = fixture(t)
-  for (const name of ['locale/zh.json', 'lib/index.js', 'lib/index.d.ts', 'cordis.patch.yml']) {
+  for (const name of ['locale/zh.json', 'lib/index.js', 'lib/index.d.ts', 'icon.webp', 'cordis.patch.yml']) {
     const files = new Map(f.files)
     files.delete(name)
     writeFileSync(f.archive, tar(files))

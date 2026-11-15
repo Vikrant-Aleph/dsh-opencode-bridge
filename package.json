@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "Use OpenCode's free models in DSH without an account or API key. Reproduces the official client's request shape plus its TLS and HTTP fingerprints, with automatic model refresh, optional context trimming of completed-turn reasoning and egress-proxy rotation.",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -40,7 +40,7 @@
     },
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg",
+    "./icon": "./icon.webp",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -49,7 +49,7 @@
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg",
+    "icon.webp",
     "LICENSE",
     "CHANGELOG.md",
     "CHANGELOG.us.md",

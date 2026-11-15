@@ -16,6 +16,19 @@ the matching section of this file.
   discussion. The documentation rule requires both places to be updated together, and
   `tests/references.test.mjs` checks that the four copies agree.
 
+## [1.0.6] - 2026-11-15
+
+Documentation only. The README on npm comes from the tarball published with the version,
+so the structure diagram, the badges and the references added after 1.0.5 exist on GitHub
+and nowhere else.
+
+### Fixed
+
+- **The README's document links are absolute now.** npm renders the page outside any
+  repository, where a relative `TECHNICAL.md`, `CAMOUFLAGE.md` or `LICENSE` points at
+  nothing. On GitHub the links behave as before.
+- This also ships everything accumulated since 1.0.5: the structure diagram, the stars and
+  last-commit badges, the consulted-projects list, and the install section moved up.
 
 ## [1.0.5] - 2026-11-15
 
@@ -90,7 +103,6 @@ The release that explains why the UI never worked.
 
 - Settings → Egress rotation → **Clear cooldowns**, which retires stale records without
   a restart.
-
 
 ## [1.0.0] - 2026-11-13
 

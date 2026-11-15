@@ -4,10 +4,10 @@
 [![Total npm downloads](https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads)](https://www.npmjs.com/package/dsh-opencode-bridge)
 [![GitHub stars](https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main)
-[![License](https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge)](LICENSE)
+[![License](https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge)](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/LICENSE)
 [![Node.js requirement](https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js)](https://www.npmjs.com/package/dsh-opencode-bridge)
 
-中文 | [English](README.us.md)
+中文 | [English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/README.us.md)
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里使用
 [OpenCode](https://opencode.ai) 的免费模型——无需 OpenCode 账号或 API Key。
@@ -35,7 +35,7 @@
 2. 输入：
 
    ```text
-   dsh-opencode-bridge@1.0.5
+   dsh-opencode-bridge@1.0.6
    ```
 
 3. **安装源**优先选官方 npm registry；镜像可能滞后。
@@ -44,19 +44,19 @@
 ### 命令行安装
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
 ```
 
 把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
 ```
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
 
 日常使用无需 API Key，也无需手改配置文件。模型列表变化会通知选择器重新读取，无需重启插件。
-刷新间隔等完整配置见[配置参考](TECHNICAL.md#7-配置)。
+刷新间隔等完整配置见[配置参考](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md#7-%E9%85%8D%E7%BD%AE)。
 
 ## OpenCode 如何判定客户端
 
@@ -91,7 +91,7 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
 ### 注意事项
 
 以上为 2026-11-13 至 2026-11-14 的观测，不是规范。
-完整证据链与被排除的假设见[伪装原则](CAMOUFLAGE.md)。
+完整证据链与被排除的假设见[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
 
 ## TLS 与 HTTP 指纹伪装
 
@@ -189,17 +189,17 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.5.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.6.tgz
 ```
 
 </details>
 
-[技术文档](TECHNICAL.md)（[English](TECHNICAL.us.md)）涵盖线上协议、模块结构、完整配置、
+[技术文档](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md)（[English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.us.md)）涵盖线上协议、模块结构、完整配置、
 测试与维护规则。
 
 ## 参考与致谢
 
-协议行为全部通过对官方客户端的实测确定，抓包与据此得出的原则汇总在[伪装原则](CAMOUFLAGE.md)。
+协议行为全部通过对官方客户端的实测确定，抓包与据此得出的原则汇总在[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
 设计阶段还对照过以下社区项目，用来判断哪些做法值得沿用、哪些不值得。没有复制它们的代码。
 
 - [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)
@@ -213,4 +213,4 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.5.tgz
 
 ## 许可
 
-基于 [MIT](LICENSE) 许可。
+基于 [MIT](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/LICENSE) 许可。

@@ -20,8 +20,17 @@ function reposIn(text) {
   for (const m of text.matchAll(/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/g)) {
     found.add(m[1].replace(/\.git$/, '').toLowerCase())
   }
-  // The GPL note repeats one project name; a set removes the duplicate.
+  // The section links to this project's own documents, which are not consulted projects.
+  const own = ownRepo()
+  if (own) found.delete(own)
   return [...found].sort()
+}
+
+/** This project's own `owner/repo`, from package.json. */
+function ownRepo() {
+  const url = JSON.parse(fs.readFileSync('package.json', 'utf8')).repository?.url ?? ''
+  const m = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(url)
+  return m ? m[1].toLowerCase() : null
 }
 
 function listOf(file) {

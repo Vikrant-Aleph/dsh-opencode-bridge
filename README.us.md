@@ -40,7 +40,7 @@ Also included:
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.0.5
+   dsh-opencode-bridge@1.0.6
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -49,13 +49,13 @@ Also included:
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.5
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.6
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
@@ -215,7 +215,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.5.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.6.tgz
 ```
 
 </details>

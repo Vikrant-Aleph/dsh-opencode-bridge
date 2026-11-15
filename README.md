@@ -13,6 +13,8 @@
 [OpenCode](https://opencode.ai) 的免费模型——无需 OpenCode 账号或 API Key。
 另含可选的上下文精简与出口轮换。
 
+![OpenCode Bridge 在 DSH 中的位置：DSH agent loop 经 LlmAdapter 调用本插件，插件复刻官方客户端协议后请求 opencode.ai 网关](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/dsh-opencode-bridge-updated-zh.png)
+
 ## 主要功能
 
 **伪装成官方 OpenCode 客户端，让 DSH 能使用 OpenCode 的免费模型。** 

@@ -14,6 +14,8 @@ Use [OpenCode](https://opencode.ai)'s free models in
 OpenCode account or API key needed. Optional context trimming and egress rotation are
 included.
 
+![Where OpenCode Bridge sits in DSH: the DSH agent loop calls this plugin through its LlmAdapter, and the plugin requests the opencode.ai gateway using the official client protocol](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/dsh-opencode-bridge-updated-en.png)
+
 ## Features
 
 **Impersonates the official OpenCode client so DSH can use OpenCode's free models.**

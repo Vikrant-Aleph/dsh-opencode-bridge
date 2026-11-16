@@ -202,15 +202,6 @@ For bugs or feature requests, [choose an Issue form](https://github.com/Vikrant-
 and include versions, reproduction steps and expected versus actual behaviour. Redact
 logs first — never include API keys, proxy passwords or private conversations.
 
-## Cumulative downloads
-
-![Cumulative npm downloads from the first release through the latest statistics day](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/npm-downloads.us.svg)
-
-Includes the full history since the first release, summed from [npm's official daily statistics](https://github.com/npm/registry/blob/main/docs/download-counts.md)
-and updated automatically each day. The chart shows its cutoff date; downloads are not unique users.
-The [daily workflow](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/actions/workflows/downloads.yml) runs around 02:27 UTC and also supports manual runs.
-To refresh locally: `node scripts/update-downloads.mjs`.
-
 ## Development and documentation
 
 <details>
@@ -237,6 +228,13 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.8.tgz
 
 [Technical documentation](TECHNICAL.us.md) ([中文](TECHNICAL.md)) covers the wire
 protocol, module layout, full configuration, testing and maintenance rules.
+
+## Cumulative downloads
+
+![Cumulative npm downloads from the first release through the latest statistics day](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/npm-downloads.us.svg)
+
+Includes the full history since the first release, summed from [npm's official daily statistics](https://github.com/npm/registry/blob/main/docs/download-counts.md)
+and updated automatically each day. The chart shows its cutoff date.
 
 ## References and credits
 

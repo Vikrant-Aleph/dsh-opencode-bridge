@@ -176,15 +176,6 @@ DSH 统一最多自动重试两次；等待过久会返回错误，稍后重试�
 发现 bug 或想提需求，请[选择 Issue 表单](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose)，
 并附上版本、复现步骤与预期/实际行为。提交前请先脱敏——不要包含 API Key、代理密码或私人对话。
 
-## 累计下载量
-
-![npm 累计下载量：从首次发布到最新统计日](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/npm-downloads.svg)
-
-从首次发布日起累加 [npm 官方逐日统计](https://github.com/npm/registry/blob/main/docs/download-counts.md)，
-包含历史数据。统计截止日期见图，下载次数不等于用户人数。
-[每日任务](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/actions/workflows/downloads.yml)约在北京时间 10:27 更新，也可手动触发。
-本地刷新：`node scripts/update-downloads.mjs`。
-
 ## 开发与文档
 
 <details>
@@ -211,6 +202,13 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.8.tgz
 
 [技术文档](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md)（[English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.us.md)）涵盖线上协议、模块结构、完整配置、
 测试与维护规则。
+
+## 累计下载量
+
+![npm 累计下载量：从首次发布到最新统计日](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/npm-downloads.svg)
+
+从首次发布日起累加 [npm 官方逐日统计](https://github.com/npm/registry/blob/main/docs/download-counts.md)，
+包含历史数据。统计截止日期见图。
 
 ## 参考与致谢
 

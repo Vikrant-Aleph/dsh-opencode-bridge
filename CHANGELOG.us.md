@@ -9,6 +9,12 @@ the matching section of this file.
 
 ## [Unreleased]
 
+### Added
+
+- Cumulative npm download charts in both READMEs, including the full history since the first release,
+  the total count and the statistics cutoff date. GitHub Actions updates the charts and daily data
+  each day; a failed statistics request preserves the previous charts.
+
 ## [1.0.8] - 2026-11-16
 
 This release updates the icon and documentation layout without changing model requests.

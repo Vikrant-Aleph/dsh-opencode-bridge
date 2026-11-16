@@ -1,0 +1,45 @@
+name: Update npm download charts
+
+on:
+  schedule:
+    # UTC 02:27 = Asia/Shanghai 10:27. npm publishes daily statistics after UTC midnight.
+    - cron: '27 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-download-charts
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          # Keep the job-scoped token only for the generated-artifact commit below.
+          persist-credentials: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Fetch complete history and generate both charts
+        run: node scripts/update-downloads.mjs
+      - name: Commit changed statistics only
+        shell: bash
+        run: |
+          git add -- assets/npm-downloads.json assets/npm-downloads.svg assets/npm-downloads.us.svg
+          if git diff --cached --quiet; then
+            echo 'Statistics unchanged.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: update npm download charts'
+          git pull --rebase origin main
+          git push origin HEAD:main

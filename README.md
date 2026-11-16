@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="256" height="256" alt="OpenCode Bridge 图标">
+  <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="128" height="128" alt="OpenCode Bridge 图标">
 </p>
 
 <h1 align="center">OpenCode Bridge</h1>

@@ -15,6 +15,10 @@ the matching section of this file.
   the total count and the statistics cutoff date. GitHub Actions updates the charts and daily data
   each day; a failed statistics request preserves the previous charts.
 
+### Changed
+
+- Package, marketplace, settings and documentation summaries now state that no OpenCode installation is required.
+
 ## [1.0.8] - 2026-11-16
 
 This release updates the icon and documentation layout without changing model requests.

@@ -16,7 +16,7 @@
 [中文](README.md) | English
 
 Use [OpenCode](https://opencode.ai)'s free models in
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no
+[DSH](https://github.com/deepseek-ai/deepseek-harness) (no OpenCode installation required) — no
 OpenCode account or API key needed. Optional context trimming and egress rotation are
 included.
 
@@ -24,7 +24,7 @@ included.
 
 ## Features
 
-**Impersonates the official OpenCode client so DSH can use OpenCode's free models.**
+**Impersonates the official OpenCode client so DSH can use OpenCode's free models (no OpenCode installation required).**
 
 It reproduces the official client's request headers, the request shape the
 gateway requires, and the TLS and HTTP fingerprints. It is an `LlmAdapter`, so it plugs

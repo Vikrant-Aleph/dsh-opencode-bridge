@@ -15,6 +15,8 @@ test('all package display summaries include optional completed-turn context trim
   assert.doesNotMatch(zh.description, /工具桥|审计/)
   assert.match(en.description, /without an account or API key/i)
   assert.match(zh.description, /无需账号或 API Key/)
+  assert.match(en.description, /free models in DSH \(no OpenCode installation required\)/)
+  assert.match(zh.description, /使用 OpenCode 免费模型（不用安装opencode）/)
   assert.doesNotMatch(en.description, /image|vision/i)
   assert.doesNotMatch(zh.description, /图片|图像|视觉/)
 })
@@ -31,9 +33,23 @@ test('real client dictionaries name the tab and pane Context trimming in both lo
   assert.equal(dictionaries.en.contextTitle, 'Context trimming')
   assert.match(dictionaries.zh.pageIntro, /可选的上下文精简/)
   assert.match(dictionaries.en.pageIntro, /optional context trimming/)
+  assert.match(dictionaries.zh.pageIntro, /使用 OpenCode 免费模型（不用安装opencode）/)
+  assert.match(dictionaries.en.pageIntro, /free models in DSH \(no OpenCode installation required\)/)
   assert.doesNotMatch(dictionaries.en.pageIntro, /image|vision/i)
   assert.doesNotMatch(dictionaries.zh.pageIntro, /图片|图像|视觉/)
 })
+test('documentation introductions place the no-install note immediately after the model capability', () => {
+  const zhReadme = fs.readFileSync(new URL('README.md', root), 'utf8')
+  assert.equal((zhReadme.match(/免费模型（不用安装opencode）/g) ?? []).length, 2)
+  const enReadme = fs.readFileSync(new URL('README.us.md', root), 'utf8')
+  assert.match(enReadme, /\[DSH\]\([^\n]+\) \(no OpenCode installation required\)/)
+  assert.match(enReadme, /free models \(no OpenCode installation required\)/)
+  const zhTechnical = fs.readFileSync(new URL('TECHNICAL.md', root), 'utf8')
+  assert.match(zhTechnical, /`-free` 模型（不用安装opencode）/)
+  const enTechnical = fs.readFileSync(new URL('TECHNICAL.us.md', root), 'utf8')
+  assert.match(enTechnical, /`-free` models at `opencode\.ai` \(no OpenCode installation required\)/)
+})
+
 test('visitor summaries mention context trimming and documented navigation uses the new name', () => {
   for (const file of ['README.us.md', 'TECHNICAL.us.md']) {
     const text = fs.readFileSync(new URL(file, root), 'utf8')

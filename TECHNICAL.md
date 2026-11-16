@@ -37,7 +37,7 @@ README 面向访客（概览、安装、限制、故障排查），本文件面�
 ## 1. 插件定位
 
 一个 `LlmAdapter`，复刻官方 OpenCode 客户端的线上协议，让 DSH 无需账号即可使用
-`opencode.ai` 的 `-free` 模型。
+`opencode.ai` 的 `-free` 模型（不用安装opencode）。
 
 它**不**修改 agent loop、不自行执行工具、不 patch 全局 HTTP 入口。工具执行、权限与
 schema 校验都留在 DSH。

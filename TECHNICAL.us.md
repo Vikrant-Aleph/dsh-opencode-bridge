@@ -47,7 +47,7 @@ source and licence stated.
 ## 1. What this plugin is
 
 An `LlmAdapter` that speaks the official OpenCode client's wire protocol, so DSH
-can use the keyless `-free` models at `opencode.ai` without an account.
+can use the keyless `-free` models at `opencode.ai` (no OpenCode installation required) without an account.
 
 It does **not** modify the agent loop, execute tools itself, or patch global
 HTTP entry points. Tool execution, permissions and schema validation stay in DSH.

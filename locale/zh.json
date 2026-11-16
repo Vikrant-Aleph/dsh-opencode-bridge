@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "OpenCode Bridge",
-    "description": "在 DSH 中使用 OpenCode 免费模型，无需账号或 API Key。复刻官方客户端的请求形态与 TLS、HTTP 指纹，支持模型自动刷新、可选的上下文精简（精简已完成轮次思考）与代理出口轮换。"
+    "description": "在 DSH 中使用 OpenCode 免费模型（不用安装opencode），无需账号或 API Key。复刻官方客户端的请求形态与 TLS、HTTP 指纹，支持模型自动刷新、可选的上下文精简（精简已完成轮次思考）与代理出口轮换。"
   }
 }

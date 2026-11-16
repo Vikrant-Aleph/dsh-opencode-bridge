@@ -1,5 +1,5 @@
 /**
- * dsh-opencode-bridge: OpenCode free models for DeepSeek Harness.
+ * dsh-opencode-bridge: OpenCode free models for DeepSeek Harness (no OpenCode installation required).
  *
  * Registers an LLM adapter that simulates the official OpenCode client wire
  * protocol so DSH can use the keyless free-tier models hosted at opencode.ai

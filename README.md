@@ -16,14 +16,14 @@
 中文 | [English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/README.us.md)
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里使用
-[OpenCode](https://opencode.ai) 的免费模型——无需 OpenCode 账号或 API Key。
+[OpenCode](https://opencode.ai) 的免费模型（不用安装opencode）——无需 OpenCode 账号或 API Key。
 另含可选的上下文精简与出口轮换。
 
 ![OpenCode Bridge 在 DSH 中的位置：DSH agent loop 经 LlmAdapter 调用本插件，插件复刻官方客户端协议后请求 opencode.ai 网关](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/dsh-opencode-bridge-updated-zh.webp)
 
 ## 主要功能
 
-**伪装成官方 OpenCode 客户端，让 DSH 能使用 OpenCode 的免费模型。** 
+**伪装成官方 OpenCode 客户端，让 DSH 能使用 OpenCode 的免费模型（不用安装opencode）。**
 
 它复刻官方 OpenCode 客户端的请求头、网关要求的请求形态，以及 TLS 与 HTTP 指纹。它是一个 `LlmAdapter`，接入 DSH 既有循环：agent loop、权限与工具执行仍由 DSH 负责，每次工具调用由 DSH 自行解析。网关检查什么、不检查什么，见[下文](#opencode-如何判定客户端)。
 

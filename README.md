@@ -1,7 +1,8 @@
-<h1 align="center">
-  <sub><img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="30" height="30" alt="OpenCode Bridge 图标"></sub>
-  OpenCode Bridge
-</h1>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="256" height="256" alt="OpenCode Bridge 图标">
+</p>
+
+<h1 align="center">OpenCode Bridge</h1>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a>

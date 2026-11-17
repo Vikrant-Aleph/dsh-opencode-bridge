@@ -160,11 +160,12 @@ test('checked-in history and both generated charts agree', () => {
   assert.equal(history.package, packageName)
   assert.deepEqual(history.days, accumulateDownloads(history.start, history.end, history.days))
   assert.equal(history.totalDownloads, history.days.at(-1).cumulative)
-  assert.equal(readFileSync(new URL(ARTIFACTS[1], root), 'utf8'), renderChart(history))
-  assert.equal(readFileSync(new URL(ARTIFACTS[2], root), 'utf8'), renderChart(history, 'en'))
-  for (const [file, asset] of [['README.md', ARTIFACTS[1]], ['README.us.md', ARTIFACTS[2]]]) {
+  // Git may check out these fixtures with CRLF on Windows; the generator emits LF.
+  assert.equal(readFileSync(new URL(ARTIFACTS[1], root), 'utf8').replaceAll('\r\n', '\n'), renderChart(history))
+  assert.equal(readFileSync(new URL(ARTIFACTS[2], root), 'utf8').replaceAll('\r\n', '\n'), renderChart(history, 'en'))
+  for (const [file, asset] of [['README.md', 'downloads.svg'], ['README.us.md', 'downloads.us.svg']]) {
     const readme = readFileSync(new URL(file, root), 'utf8')
-    assert.ok(readme.includes(`https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/${asset}`))
+    assert.ok(readme.includes(`https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/generated-data/npm-downloads/${asset}`))
   }
 })
 
@@ -175,11 +176,16 @@ test('daily workflow uses pinned actions, no dependency installation and a narro
   assert.equal(workflow.on.push, undefined)
   assert.equal(workflow.on.pull_request, undefined)
   assert.equal(workflow.permissions.contents, 'read')
+  assert.equal(workflow.concurrency.group, 'generated-data')
+  assert.equal(workflow.concurrency['cancel-in-progress'], false)
   const job = workflow.jobs.update
   assert.equal(job.permissions.contents, 'write')
+  assert.equal(job.steps[0].with.ref, 'main', 'always generate with the maintained source scripts')
   for (const step of job.steps.filter(step => step.uses)) assert.match(step.uses, /^actions\/[\w-]+@[a-f0-9]{40}$/)
   const commands = job.steps.map(step => step.run ?? '').join('\n')
   assert.match(commands, /node scripts\/update-downloads\.mjs/)
-  assert.ok(commands.includes(`git add -- ${ARTIFACTS.join(' ')}`))
-  assert.doesNotMatch(commands, /npm install|pnpm install|--force|git add -A|git add \./)
+  assert.ok(commands.includes('remote_ref=refs/heads/generated-data'))
+  assert.ok(commands.includes('add -- npm-downloads/history.json npm-downloads/downloads.svg npm-downloads/downloads.us.svg'))
+  assert.ok(commands.includes('push origin "HEAD:$remote_ref"'))
+  assert.doesNotMatch(commands, /npm install|pnpm install|--force|git add -A|git add \.|git pull|HEAD:main/)
 })

@@ -231,7 +231,7 @@ protocol, module layout, full configuration, testing and maintenance rules.
 
 ## Cumulative downloads
 
-![Cumulative npm downloads from the first release through the latest statistics day](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/npm-downloads.us.svg)
+![Cumulative npm downloads from the first release through the latest statistics day](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/generated-data/npm-downloads/downloads.us.svg)
 
 Includes the full history since the first release, summed from [npm's official daily statistics](https://github.com/npm/registry/blob/main/docs/download-counts.md)
 and updated automatically each day. The chart shows its cutoff date.

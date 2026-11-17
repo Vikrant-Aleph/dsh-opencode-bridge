@@ -9,8 +9,9 @@ on:
 permissions:
   contents: read
 
+# All workflows publishing to this branch must use the same concurrency group.
 concurrency:
-  group: npm-download-charts
+  group: generated-data
   cancel-in-progress: false
 
 jobs:
@@ -30,16 +31,37 @@ jobs:
           node-version: '24'
       - name: Fetch complete history and generate both charts
         run: node scripts/update-downloads.mjs
-      - name: Commit changed statistics only
+      - name: Publish changed statistics to generated-data
         shell: bash
         run: |
-          git add -- assets/npm-downloads.json assets/npm-downloads.svg assets/npm-downloads.us.svg
-          if git diff --cached --quiet; then
+          set -euo pipefail
+          publish_dir="$(mktemp -d "$RUNNER_TEMP/generated-data.XXXXXX")"
+          remote_ref=refs/heads/generated-data
+          if git ls-remote --exit-code --heads origin "$remote_ref" > /dev/null; then
+            git fetch --no-tags origin "$remote_ref"
+            git worktree add --detach "$publish_dir" FETCH_HEAD
+          else
+            status=$?
+            # Exit code 2 means the branch is absent; network/auth errors must fail.
+            if [ "$status" -ne 2 ]; then
+              exit "$status"
+            fi
+            git worktree add --detach "$publish_dir" HEAD
+            # Start with an empty tree and no source history, without switching main.
+            git -C "$publish_dir" switch --orphan generated-data
+          fi
+          # Update only this task's files, preserving data published by other tasks.
+          mkdir -p "$publish_dir/npm-downloads"
+          cp assets/npm-downloads.json "$publish_dir/npm-downloads/history.json"
+          cp assets/npm-downloads.svg "$publish_dir/npm-downloads/downloads.svg"
+          cp assets/npm-downloads.us.svg "$publish_dir/npm-downloads/downloads.us.svg"
+          git -C "$publish_dir" add -- npm-downloads/history.json npm-downloads/downloads.svg npm-downloads/downloads.us.svg
+          if git -C "$publish_dir" diff --cached --quiet; then
             echo 'Statistics unchanged.'
             exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'docs: update npm download charts'
-          git pull --rebase origin main
-          git push origin HEAD:main
+          git -C "$publish_dir" -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            -c commit.gpgsign=false commit -m 'data: update npm download charts'
+          # Never force-push: an unexpected competing writer must not lose its data.
+          git -C "$publish_dir" push origin "HEAD:$remote_ref"

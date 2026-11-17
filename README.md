@@ -207,7 +207,7 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.0.tgz
 
 ## 累计下载量
 
-![npm 累计下载量：从首次发布到最新统计日](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/npm-downloads.svg)
+![npm 累计下载量：从首次发布到最新统计日](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/generated-data/npm-downloads/downloads.svg)
 
 根据 [npm 官方逐日下载量统计](https://github.com/npm/registry/blob/main/docs/download-counts.md)，展示首次发布以来的累计下载量。统计截止日期见图。
 

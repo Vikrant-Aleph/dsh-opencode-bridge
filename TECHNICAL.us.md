@@ -95,9 +95,10 @@ Other modules:
 
 ## 3. The gate, as observed
 
-Three layers were identified. Only the third was later **rejected** by
-experiment — it is documented here because the rejection is the reason the code
-looks the way it does.
+The requirements below were all measured; they are dated observations, not a
+specification (§8 explains how to re-derive each). The *content* of the tool list and
+system prompt does not identify the client, but their *shape* is constrained; the
+transport fingerprint is not currently checked (§3.5).
 
 ### 3.1 User-Agent
 
@@ -119,42 +120,76 @@ official rule verified by capture:
 - git checkout → `sha1("git-remote:" + normalized remote)`
 - otherwise → `sha1("directory:" + resolved path)`
 
-### 3.3 Tool declarations — rejected as an identity signal
+### 3.3 Tool declarations
 
-An earlier revision injected OpenCode's built-in tool manifest and cloaked
-colliding caller tools behind `*_client` aliases. **Experiment disproved the
-premise** (`docs/evidence/user-customization-round2-2026-11-13.json`,
-`docs/evidence/user-add-tools-2026-11-13.json`):
+The *content* of the tool list does not identify the client: a user can emit any tool
+list and system prompt from the official client itself (`agents.<name>.system` and
+`agents/<name>.md` replace the whole system prompt; a custom agent without tools drops
+the list from 12 to 1; a plugin can register tools with arbitrary names and schemas —
+`docs/evidence/user-customization-round2-2026-11-13.json`,
+`docs/evidence/user-add-tools-2026-11-13.json`). An earlier revision injected OpenCode's
+built-in manifest and cloaked colliding caller tools behind `*_client` aliases; that
+premise was disproved by those experiments, and the bridge now declares exactly the
+caller's tools. This is why the rule is phrased as "what is checked" rather than "what
+is configurable".
 
-| Mechanism | Result |
-|---|---|
-| `agents.<name>.system` | Replaced the entire system prompt |
-| `agents/<name>.md` (global or project) | Replaced the entire system prompt |
-| Custom agent without tools | Tool list dropped 12 → 1 |
-| Plugin registering invented tools | Requests carried arbitrary names and schemas |
+Content being free does not make the *shape* free. Tool declarations face three gate
+requirements:
 
-A user can emit any tool list and any system prompt from the official client, so
-neither *content* identifies it. The bridge now declares exactly the caller's tools.
+**At least one declared tool.** An empty list is refused (`FreeUsageLimitError`). Any
+name works — the community claim that a tool **named** `read` is required did not
+reproduce: measured from a single runtime with only the tool array varying, a lone tool
+called `dsh_probe_tool` passes just as well (`docs/evidence/bun-tool-minimum.json`,
+`docs/evidence/any-tool-vs-read.json`). The caller's own tools satisfy the requirement;
+`planTools` adds a placeholder only when the caller declares none. Its description tells
+the model not to call it, and a call that happens anyway is **dropped** (logged at
+`warn`) so the turn still ends normally. Normal traffic therefore never carries a tool
+DSH cannot execute.
 
-Content being free does not make the *shape* free: at least one declared tool and
-separator-free names still hold, as §3.4 and §3.5 show. That is precisely why the rule
-is phrased as "what is checked" rather than "what is configurable".
+**Name shape.** An unrecognized name with underscores, dashes, dots or capitals is
+refused; a name the gateway recognises may carry separators (`web_search` passes as
+`websearch`). A declaration also needs at least one name the gateway recognises: purely
+invented names are refused even without separators. This requirement was identified on
+2026-11-14 and is why every request was refused before 1.0.4 — the gateway's
+`FreeUsageLimitError` looks exactly like an exhausted quota, so it was treated as rate
+limiting for a long time:
 
-### 3.4 The one declaration the bridge must add
+| Body | Tool names | Result |
+|---|---|---|
+| The full UI request (46 tools, 69 KB) | Original, with underscores | 429 |
+| The same body | Separators removed (`askuserquestion`) | **200** |
+| Six tiny tools | `job_list`, `web_search`, … | 429 |
+| The same six objects | `pwsh`, `read`, `glob`, … | 200 |
 
-Community reports across several independent projects claim a tool **named** `read` is
-required. That specific claim did not reproduce: measured from a single runtime with
-only the tool array varying, a lone tool called `dsh_probe_tool` passes just as well
-(`docs/evidence/any-tool-vs-read.json`). What *is* required is simply **at least one
-declared tool** — an empty list is refused (`docs/evidence/bun-tool-minimum.json`).
+All 12 official tools are free of separators (`edit`, `glob`, `grep`, `question`,
+`read`, `shell`, `skill`, `subagent`, `webfetch`, `websearch`, `write`, `execute`).
+`planTools` therefore reduces every name to `[a-z0-9]` (appending a counter on collision)
+and keeps a sanitized-to-real map, applied to returned calls so DSH's dispatch is
+unaffected.
 
-So the caller's own tools satisfy the requirement, and `planTools` adds a placeholder
-only when the caller declares none. That keeps a tool DSH cannot execute out of normal
-traffic; the placeholder's description tells the model not to call it, and a call that
-happens anyway is **dropped** by the adapter (logged at `warn`) so the turn still ends
-normally.
+**Not many rich tools at once.** The real description text and the complex schemas each
+trigger `FreeUsageLimitError` independently; a same-size neutral tool block passes while
+the real block is refused (`docs/evidence/tool-gate-codemode-2026-11-17.json`). The
+official client avoids this with Code Mode, and the bridge does the same for the
+free-model routes (§5.3).
+
+### 3.4 System prompt
+
+The system prompt must contain an `<env>` block: a 177-byte prompt containing nothing
+but the block passes; a prompt without one is refused
+(`docs/evidence/bun-env-hypothesis.json`). The `<env>` values are not checked: rewriting
+the paths or flipping the git flag still passes
+(`docs/evidence/bun-env-strictness.json`). The plugin still generates the block from the
+real working directory so its contents are useful to the model. The official harness
+text and the Code Mode catalogue are **not** required — a synthetic catalogue of DSH's
+own tools passes too (`docs/evidence/bun-synthetic-catalog.json`).
 
 ### 3.5 Transport
+
+**The gate does not currently check this layer.** Reproducing the official `ClientHello`
+covers fingerprint checks that may appear later, making the traffic indistinguishable
+from the official client at the TLS layer; it is aligned byte for byte, but its
+necessity is unproven.
 
 The official client runs on Bun. Node's TLS cannot express the same
 `ClientHello`: OpenSSL orders extensions itself and offers no post-quantum key
@@ -185,50 +220,11 @@ the official client; a pooled connection returns to the pool only once its
 response body has been fully read.
 
 The client offers **only `http/1.1`** — no `h2` — so HTTP/2 SETTINGS
-fingerprinting is not part of this client's traffic.
+fingerprinting is not part of this client's traffic. The runtime is not the
+differentiator either: Bun 1.4.4 with a zero-tool body is refused exactly like Node
+(`docs/evidence/bun-runtime-test.json`).
 
-### 3.6 The three structural requirements
-
-Three properties of a request are checked. The official client sends all of them
-regardless of user configuration:
-
-| Requirement | Finding |
-|---|---|
-| **At least one declared tool** | Any tool name satisfies it; an empty list is refused with `FreeUsageLimitError` (`docs/evidence/bun-tool-minimum.json`, `docs/evidence/any-tool-vs-read.json`). |
-| **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but the block passes; a prompt without one is refused (`docs/evidence/bun-env-hypothesis.json`). |
-
-The `<env>` values are not checked: rewriting the paths or flipping the git flag still
-passes (`docs/evidence/bun-env-strictness.json`). The plugin still generates the block
-from the real working directory, so its contents are useful to the model. The official
-harness text and the Code Mode catalogue are **not** required — a synthetic catalogue of
-DSH's own tools passes too (`docs/evidence/bun-synthetic-catalog.json`).
-
-The runtime is not the differentiator: Bun 1.4.4 with a zero-tool body is refused
-exactly like Node (`docs/evidence/bun-runtime-test.json`).
-
-**Declared tool names must not contain separators.** This requirement was identified on
-2026-11-14 and is why every request was refused before 1.0.4. The gateway answers a
-declaration whose names contain underscores, dashes, dots or capitals with
-`FreeUsageLimitError`, which looks exactly like an exhausted quota, so it was treated as
-rate limiting for a long time:
-
-| Body | Tool names | Result |
-|---|---|---|
-| The full UI request (46 tools, 69 KB) | Original, with underscores | 429 |
-| The same body | Separators removed (`askuserquestion`) | **200** |
-| Six tiny tools | `job_list`, `web_search`, … | 429 |
-| The same six objects | `pwsh`, `read`, `glob`, … | 200 |
-
-All 12 official tools are free of separators (`edit`, `glob`, `grep`, `question`,
-`read`, `shell`, `skill`, `subagent`, `webfetch`, `websearch`, `write`,
-`execute`). A declaration also needs at least one name the gateway recognises: a set of
-purely invented names is refused even without separators.
-
-`planTools` therefore reduces every name to `[a-z0-9]` (appending a counter on
-collision) and keeps a sanitized-to-real map, which is applied to returned calls so
-DSH's dispatch is unaffected.
-
-### 3.7 Field-level differences from the official encoder
+### 3.6 Field-level differences from the official encoder
 
 After reading the official OpenAI Chat encoder end to end (`openai-chat.ts`, 1288 lines),
 three differences remain. Each was measured inside one open window with a control on
@@ -346,14 +342,12 @@ applies to new requests only and never deletes local history.
 
 ### 5.3 Code Mode (tool declarations for free models)
 
-The free lane refuses a request that declares many rich tools at once: the real
-description text and the complex schemas each trigger `FreeUsageLimitError` on their
-own (a same-size neutral tool block passes while the real block is refused; see the
-[measurement record](docs/evidence/tool-gate-codemode-2026-11-17.json)). The official client avoids
-this with Code Mode: keep the wire tool list small, move the full catalog into the
-system prompt, and reach tools through a single code-execution entry.
+To satisfy the §3.3 gate against declaring many rich tools at once, the free-model
+routes use Code Mode, matching the official client: keep the wire tool list small, move
+the full catalog into the system prompt, and reach tools through a single code-execution
+entry.
 
-[code-mode.ts](src/code-mode.ts) gives the free-model routes the same shape:
+The concrete shape in [code-mode.ts](src/code-mode.ts):
 
 - The wire declares only a few simple anchor tools (recognized names such as
   `read`/`write`/`edit` with trivial schemas) plus `execute`. The anchors exist to

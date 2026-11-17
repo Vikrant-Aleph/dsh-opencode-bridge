@@ -1,0 +1,6 @@
+# Generated download-chart artifacts are produced with LF by scripts/update-downloads.mjs.
+# Keep them byte-stable across platforms so the byte-exact chart test also passes on
+# Windows (core.autocrlf would otherwise check them out as CRLF).
+assets/npm-downloads.json text eol=lf
+assets/npm-downloads.svg text eol=lf
+assets/npm-downloads.us.svg text eol=lf

@@ -84,7 +84,8 @@ https://opencode.ai/inference/...
 
 ## 3. 实测到的门禁
 
-识别出三层。第三层后来被实验否定，但它解释了当前代码为什么长这样。
+以下是实测到的门禁要求，均为带日期的观测，不是规范（§8 说明如何重新推导）。工具清单与系统提示的
+**内容**不标识客户端，但它们的**形态**有要求；传输层指纹目前不被检测（§3.5）。
 
 ### 3.1 User-Agent
 
@@ -103,36 +104,55 @@ DSH 署名是可选项（`userAgentAttribution`），默认关闭。
 - Git 检出 → `sha1("git-remote:" + 规范化远端)`
 - 其它目录 → `sha1("directory:" + 真实路径)`
 
-### 3.3 工具声明——已被否定
+### 3.3 工具声明
 
-早期版本会注入 OpenCode 内置工具清单，并把冲突的调用方工具改名为 `*_client`。
-**实验推翻了该前提**（`docs/evidence/user-customization-round2-2026-11-13.json`、
-`docs/evidence/user-add-tools-2026-11-13.json`）：
+工具清单的**内容**不标识客户端：用户可以借助官方客户端本身发出任意工具清单与系统提示
+（`agents.<name>.system`、`agents/<name>.md` 可完全替换系统提示；不带工具的自定义 agent 可把
+工具清单从 12 个降到 1 个；插件可注册任意名称与 schema 的工具。见
+`docs/evidence/user-customization-round2-2026-11-13.json`、`docs/evidence/user-add-tools-2026-11-13.json`）。
+早期版本曾注入 OpenCode 内置工具清单、并把冲突的调用方工具改名为 `*_client`，该前提已被上述实验推翻；
+现在桥接只声明调用方自己的工具。这也是原则按「是否被检查」而非「是否可配置」表述的原因。
 
-| 方式 | 结果 |
-|---|---|
-| `agents.<name>.system` | 完全替换系统提示 |
-| `agents/<name>.md`（全局或项目） | 完全替换系统提示 |
-| 不带工具的自定义 agent | 工具清单从 12 个降到 1 个 |
-| 插件注册自造工具 | 请求中携带任意名称与 schema |
+但「内容任意」不等于「形态任意」。工具声明有三条门禁要求：
 
-用户可以借助官方客户端本身发出任意工具清单与系统提示，两者的**内容**都不标识客户端。
-现在桥接只声明调用方自己的工具。
+**至少声明一个工具。** 空清单被拒（`FreeUsageLimitError`）。名称任意——社区流传的「必须有名为
+`read` 的工具」未能复现：同一运行时下只改工具数组，一个名为 `dsh_probe_tool` 的工具同样通过
+（`docs/evidence/bun-tool-minimum.json`、`docs/evidence/any-tool-vs-read.json`）。调用方自己的
+工具即可满足；`planTools` 仅在调用方一个工具都没有时才补占位声明，其描述明确劝阻调用，万一仍被调用
+则**丢弃**（记 `warn`），该轮正常结束。正常流量里因此不会出现 DSH 无法执行的工具。
 
-但「内容任意」不等于「形态任意」：至少声明一个工具、名称不含分隔符，这两条形态要求仍然成立，
-见 §3.4 与 §3.5。这正是原则按「是否被检查」而非「是否可配置」表述的原因。
+**名称形状。** 未识别的名称含下划线、连字符、点号或大写会被拒；网关认识的名称可带分隔符
+（`web_search` 按 `websearch` 通过）。声明中至少要有一个网关认识的名称：纯自造名称即使无分隔符也被拒。
+这项要求 2026-11-14 才定位，是 1.0.4 之前所有请求被拒的原因——网关返回的 `FreeUsageLimitError`
+与配额耗尽外观一致，长期被当成限流。实测对照：
 
-### 3.4 唯一需要桥接补上的声明
+| 请求体 | 工具名 | 结果 |
+|---|---|---|
+| 完整 UI 请求（46 工具、69 KB） | 原名（含下划线） | 429 |
+| 同一请求体 | 去掉分隔符（`askuserquestion`） | **200** |
+| 6 个极小工具 | `job_list`、`web_search`… | 429 |
+| 同样 6 个对象 | `pwsh`、`read`、`glob`… | 200 |
 
-多个社区项目声称必须存在名为 `read` 的工具。这个说法**未能复现**：同一运行时下只改变工具数组，
-一个名为 `dsh_probe_tool` 的工具同样通过（`docs/evidence/any-tool-vs-read.json`）。
-真正被要求的是**至少声明一个工具**，空清单会被拒（`docs/evidence/bun-tool-minimum.json`）。
+官方客户端的 12 个工具全部无分隔符（`edit`、`glob`、`grep`、`question`、`read`、`shell`、
+`skill`、`subagent`、`webfetch`、`websearch`、`write`、`execute`）。`planTools` 因此把每个名称
+净化为 `[a-z0-9]`（冲突时追加序号），保留「净化名 → 真实名」映射，模型返回调用时还原，DSH 派发不受影响。
 
-调用方自己的工具就能满足该要求，`planTools` 只在调用方一个工具都没有时才补占位声明。
-正常流量里因此不会出现 DSH 无法执行的工具。占位工具的描述明确劝阻调用；万一仍被调用，
-适配器会**丢弃**它（记 `warn` 日志），该轮正常结束。
+**不能一次声明大量富工具。** 真实描述文本与复杂 schema 各自都会触发 `FreeUsageLimitError`；
+同尺寸的中性工具块可过，真实工具块被拒（`docs/evidence/tool-gate-codemode-2026-11-17.json`）。
+官方客户端用 Code Mode 规避，桥接对免费模型路由同样采用（§5.3）。
+
+### 3.4 系统提示
+
+系统提示必须含 `<env>` 块：仅含该块的 177 字节提示即可通过，去掉该块被拒
+（`docs/evidence/bun-env-hypothesis.json`）。`<env>` 的值不被校验：改写路径或翻转 git 标志仍能通过
+（`docs/evidence/bun-env-strictness.json`）。插件仍按真实工作目录生成，使块内信息对模型有用。
+官方 harness 原文与 Code Mode 目录**不**需要——用 DSH 自己工具合成的目录同样通过
+（`docs/evidence/bun-synthetic-catalog.json`）。
 
 ### 3.5 传输层
+
+**门禁目前不检测这一层。** 复刻官方 `ClientHello` 是为了应对将来可能出现的指纹检查，让流量在 TLS
+层面无法区分于官方客户端；现状是已逐字节对齐，但未被证明必需。
 
 官方客户端运行在 Bun 上。Node 的 TLS 表达不出同样的 `ClientHello`：OpenSSL 自行排列
 扩展顺序，也不提供后量子 key share。实测 Node 的 `tls`/`tls-impersonate` 路径扩展顺序不同，
@@ -158,43 +178,10 @@ Hello 约 274 字节，官方是 1482。
 连接才会归还连接池。
 
 客户端**只提供 `http/1.1`**，没有 `h2`，因此 HTTP/2 SETTINGS 指纹不属于本客户端的流量特征。
-
-### 3.6 三项结构要求
-
-请求里有三项属性会被检查。官方客户端无论怎么配置都会带上它们：
-
-| 要求 | 结论 |
-|---|---|
-| **至少声明一个工具** | 任意工具名均可满足；空清单被拒（`FreeUsageLimitError`）（`docs/evidence/bun-tool-minimum.json`、`docs/evidence/any-tool-vs-read.json`）。 |
-| **系统提示含 `<env>` 块** | 仅含该块的 177 字节提示即可通过；不含则被拒（`docs/evidence/bun-env-hypothesis.json`）。 |
-
-`<env>` 的值不被校验：改写路径或翻转 git 标志仍能通过
-（`docs/evidence/bun-env-strictness.json`）。插件仍按真实工作目录生成，这样块里的信息对模型有用。
-官方 harness 原文与 Code Mode 目录**不**需要——用 DSH 自己工具合成的目录同样通过
-（`docs/evidence/bun-synthetic-catalog.json`）。
-
-运行时不是差异来源：Bun 1.4.4 用零工具请求体同样被拒
+运行时本身也不是门禁差异来源：Bun 1.4.4 用零工具请求体同样被拒
 （`docs/evidence/bun-runtime-test.json`）。
 
-**工具名不能含分隔符。** 这项要求 2026-11-14 才定位，也是 1.0.4 之前所有请求被拒的原因。
-网关对名称含下划线、连字符、点号或大写的工具声明返回 `FreeUsageLimitError`，外观与配额耗尽
-完全一样，所以长期被当成限流处理。实测对照：
-
-| 请求体 | 工具名 | 结果 |
-|---|---|---|
-| 完整 UI 请求（46 工具、69 KB） | 原名（含下划线） | 429 |
-| 同一请求体 | 去掉分隔符（`askuserquestion`） | **200** |
-| 6 个极小工具 | `job_list`、`web_search`… | 429 |
-| 同样 6 个对象 | `pwsh`、`read`、`glob`… | 200 |
-
-官方客户端的 12 个工具全部无分隔符（`edit`、`glob`、`grep`、`question`、`read`、
-`shell`、`skill`、`subagent`、`webfetch`、`websearch`、`write`、`execute`）。
-此外，声明中至少要有一个网关认识的名称：一组纯自造名称即使无分隔符也会被拒。
-
-`planTools` 因此把每个名称净化为 `[a-z0-9]`（冲突时追加序号），并保留
-「净化名 → 真实名」的映射；模型返回调用时再映射回真实工具名，DSH 的派发不受影响。
-
-### 3.7 与官方编码器的字段级差异
+### 3.6 与官方编码器的字段级差异
 
 逐行读过官方 OpenAI Chat 编码器（`openai-chat.ts`，1288 行）后，只剩三处差异。每一条都在
 同一开放窗口内测过，前后各有对照（`docs/evidence/tools-field-and-token-budget-2026-11-14.json`）：
@@ -298,12 +285,10 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 
 ### 5.3 Code Mode（免费模型的工具声明）
 
-免费通道会拒绝一次声明大量富工具的请求：真实描述文本与复杂 schema 各自都会触发
-`FreeUsageLimitError`（同尺寸中性工具块对照可过，真实工具块被拒，见
-[实测记录](docs/evidence/tool-gate-codemode-2026-11-17.json)）。官方客户端用 Code Mode 规避：
+为满足 §3.3 的「不能一次声明大量富工具」门禁，免费模型路由采用 Code Mode，与官方客户端一致：
 线上只保留少量工具，完整目录进系统提示词，经一个代码执行入口间接调用。
 
-[code-mode.ts](src/code-mode.ts) 让免费模型路由采用同样的形状：
+[code-mode.ts](src/code-mode.ts) 的具体形状：
 
 - 线上只声明几个简单锚点工具（`read`/`write`/`edit` 等认识的名字、平凡 schema）加 `execute`。
   锚点只为满足网关的形状检查，模型被明确告知不要直接调用；误调会被适配器丢弃。

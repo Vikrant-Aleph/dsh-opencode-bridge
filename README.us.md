@@ -16,7 +16,7 @@
 [中文](README.md) | English
 
 Use [OpenCode](https://opencode.ai)'s free models in
-[DSH](https://github.com/deepseek-ai/deepseek-harness) (no OpenCode installation required) — no
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no
 OpenCode account or API key needed. Optional context trimming and egress rotation are
 included.
 
@@ -24,7 +24,7 @@ included.
 
 ## Features
 
-**Impersonates the official OpenCode client so DSH can use OpenCode's free models (no OpenCode installation required).**
+**Impersonates the official OpenCode client so DSH can use OpenCode's free models.**
 
 It reproduces the official client's request headers, the request shape the
 gateway requires, and the TLS and HTTP fingerprints. It is an `LlmAdapter`, so it plugs
@@ -36,7 +36,8 @@ Also included:
 
 - **Automatic model refresh** — reads the OpenCode model catalog, the same source the official client uses, every five minutes, adding and removing models as it changes and keeping the last good list when a refresh fails.
 - **Optional context trimming** — clears reasoning only from confirmed completed turns, off by default.
-- **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, failing over on explicit egress-quota errors or connection failures and always honouring server-requested waits.
+- **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, trying the next available entry when a connection fails.
+- **Code Mode tool calling** — free models call tools through a program passed to `execute`, reusing DSH's native PTC components; the behavior is closer to DSH's PTC mode and only affects the free-model routes.
 
 ## Install
 
@@ -46,7 +47,7 @@ Also included:
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.0.8
+   dsh-opencode-bridge@1.1.0
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -55,13 +56,13 @@ Also included:
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.8
+dsh plugin --profile desktop add dsh-opencode-bridge@1.1.0
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.8
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.0
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
@@ -80,15 +81,17 @@ the real gateway.
 
 | Requirement | What we measured |
 |---|---|
-| `User-Agent` | Must be the official token, `opencode/latest/2.2.0/cli`. A different token is refused even when everything else matches. |
+| `User-Agent` | Use an official client identifier; the plugin defaults to the captured `opencode/latest/2.2.0/cli`. |
 | **At least one declared tool** | An empty `tools` array is refused. |
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but that block passes. The same prompt without it is refused. |
-| **Tool names without separators** | A declaration whose names contain underscores, dashes, dots or capitals is refused. The plugin converts these names. |
+| **Tool name shape** | An unrecognized name with underscores, dashes, dots or capitals is refused; a name the gateway recognises may carry separators. The plugin converts names. |
+| **Tool declaration content** | Declaring many rich tools at once (real descriptions + complex schemas) is refused; a same-size neutral tool block passes. |
 
-All four are present in the official client no matter how a user configures it, which is
-why they work as a client check. A user can rewrite the system prompt and prune the tool
-list, but the client still appends an `<env>` block, still declares tools, and its own
-names carry no separators.
+These checks are satisfied by the official client's own form, which is why they work as a
+client check. A user can rewrite the system prompt and prune the tool list, but the client
+still appends an `<env>` block and still declares tools. The declaration-content check is
+satisfied by the official client's Code Mode — only a few tools on the wire, the full
+catalog in the system prompt; the plugin uses Code Mode for the free models too.
 
 Tool names are easy to misread: the gateway answers a non-conforming name with
 `FreeUsageLimitError`, the same error it returns when the quota is spent. The plugin
@@ -108,7 +111,7 @@ None of these is part of the client check:
 
 ### Caveats
 
-All of the above are observations from 2026-11-13 through 2026-11-14. The full
+All of the above are observations from 2026-11-13 through 2026-11-17. The full
 evidence trail and the hypotheses that were ruled out are in the
 [camouflage policy](CAMOUFLAGE.us.md).
 
@@ -172,13 +175,10 @@ Without configuration the plugin connects directly.
 2. Add proxies one at a time, such as `http://127.0.0.1:7890` or `socks5h://127.0.0.1:1080`. `direct` (this machine) can stay in the list.
 3. Use **Test all** to check connectivity. Cooling entries are skipped so no early request is made. Adding or removing an entry saves and applies immediately.
 
-Entries are tried in list order. Explicit egress-quota errors and connection failures
-cool an entry temporarily; a server-requested wait prevents immediate failover, and a
-fully cooling pool sends nothing early. Model-backend trouble and unexplained 429s are
-*not* treated as exhausted proxy quota.
+Entries are tried in list order; connection failures cool an entry temporarily. **Clear cooldowns** immediately clears live egress waits and legacy cooldown records, without restarting.
 
-DSH performs at most two automatic retries; long waits return an error for you to retry
-later. Replies that have already started streaming are never replayed.
+A `FreeUsageLimitError` ends the current run without automatic retries, egress rotation or a saved model cooldown. Sending another message makes a new upstream request.
+DSH makes at most two automatic retries for transient throttling, accepting retry delays of at most 15 minutes. Replies that have already started producing output are never replayed.
 
 **HTTP(S), SOCKS4/4a and SOCKS5/5h** are supported.
 
@@ -221,7 +221,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.8.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.0.tgz
 ```
 
 </details>

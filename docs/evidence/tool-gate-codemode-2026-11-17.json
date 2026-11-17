@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-17",
+  "topic": "Free-lane tool-declaration gate and the Code Mode fix",
+  "finding": {
+    "summary": "The OpenCode free lane refuses a request that declares many rich tools at once. The real description text and the complex tool schemas each trigger FreeUsageLimitError (HTTP 429) independently. It is not an IP quota, UA, TLS, or session-header issue.",
+    "method": "Controlled same-egress, same-model comparisons with synthetic marker prompts only (no private conversation or tool arguments). A same-size neutral tool block was compared against the real 46-tool block.",
+    "matchedSizeAb": {
+      "controlSimpleTools": 200,
+      "neutralMatchedSizeBlock": 200,
+      "real46ToolBlock": 429,
+      "note": "Neutral block matched to the real block's byte size passed (repeated); the real block was refused (repeated); controls passed throughout. Refusal reproduced on glm-5.3-flash-free, big-pickle and hy4-flash-free alike."
+    },
+    "componentIsolation": {
+      "realDescriptionsWithSimpleSchemas": 429,
+      "neutralDescriptionsWithRealSchemas": 429,
+      "note": "Real description text and real schema structure each trigger refusal on their own; tool names and count are not the trigger. The description trigger is spread across many tools, not one specific tool."
+    },
+    "underscoreRule": "Unrecognized tool names must be separator-free; recognized names may carry separators. web_search (normalizes to recognized websearch) passes, run_code / read_file (unrecognized) are refused, runcode / readfile / execute pass. The adapter already normalizes names.",
+    "notATimeFlip": "Within-session differences traced to specific names/schemas, not a clean time flip; no claim that the gate is changing live. Whether it recently added these checks cannot be confirmed without a historical snapshot."
+  },
+  "fix": {
+    "approach": "Code Mode, matching the official client and DSH's native PTC mode: the wire declares only a few simple anchor tools plus an execute transport, the real tool catalog is rendered into the system prompt, and the model calls tools through a program passed to execute. execute delegates to DSH's PtcExecutor (sandboxed runtime + guarded nested dispatch).",
+    "validatedWireShape": "A few recognized-name anchors with a trivial {input:string} schema and a short neutral description, plus the execute transport with its real {code,description} schema, pass the gate (repeated, controls pass). The real DSH tool catalog goes in the system prompt.",
+    "codemodeGateVerify": {
+      "controlSimple": { "status": 200, "answered": true },
+      "codemodeWire": { "status": 200, "answered": true, "toolCount": 8 },
+      "controlAfter": { "status": 200, "answered": true },
+      "note": "The Code Mode wire shape (anchors + execute + catalog in the system prompt) passes the free-lane gate."
+    },
+    "catalogPrecision": "The catalog renders each tool's real output schema (ctx.tools.get(name).output.schema), so the SDK shows precise return types (read -> {lines,totalLines}, glob -> {root,paths}). A generic return type made the model guess the structure and retry.",
+    "scope": "Only the free-model provider routes are affected; other agents keep their executor. Without a host PTC runtime the plugin falls back to direct tool declaration."
+  },
+  "endToEndVerification": {
+    "note": "Run by the user in a real free-model session after local install; all tool calls went through execute.",
+    "simpleReply": "Prompt 'reply with exactly OK' returned OK, confirming the Code Mode wire shape passes in the live session.",
+    "fourStepTask": "read package.json (version 1.0.9, 23 devDependencies) + glob src (20 .ts files) + write a report + read it back. Completed; results correct.",
+    "complexTask": "glob src (20) + grep '@deepseek-ai/dsh-llm' (9 files) + parallel read of the 9 files in one program with import-symbol parsing + write a Markdown report + edit to append a validation section + read back and verify. Completed in 9m35s; table, stats and validation section all correct.",
+    "recovery": "During the complex task the model recovered from a too-large read limit, an over-greedy import regex, and read-only-sandbox write approval; it asked the user before retrying the escalation. These are model/sandbox behaviors, not Code Mode faults."
+  },
+  "observations": {
+    "readLimitSdk": "The SDK renders parameters as TypeScript types, which cannot express numeric bounds such as read's limit<=2000; a model may guess a larger limit and correct after the tool rejects it. This is shared with DSH's native PTC rendering.",
+    "readOnlySandbox": "In a read-only file sandbox, write/edit need a one-time workspace-write approval; an unanswered approval prompt times out. This is DSH sandbox behavior, independent of Code Mode."
+  },
+  "officialReference": {
+    "client": "OpenCode v2.3.0",
+    "note": "Confirmed from source: MCP / user-added tools default to codemode:true (catalog in the prompt, invoked via execute); only the small fixed built-in set with codemode:false stays on the wire. DSH's PTC executor implements the same shape; its run_code transport is executor-owned and cannot be registered, so the plugin carries it via a registered execute tool."
+  }
+}

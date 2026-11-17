@@ -1,15 +1,22 @@
 // Live egress verification: proves the CONNECT tunnel carries real relay
 // traffic, then runs one synthetic completion through the pool.
 //
-// Usage: node tests/proxy-live.mjs [proxyUrl] [model-id]
+// Usage: node tests/proxy-live.mjs --run [proxyUrl] [model-id]
 // Sends no user content: the prompt asks for a fixed marker string.
 import { ProxyPool, dispatcherFor } from '../lib/proxy-pool.js'
 import { ProxyService } from '../lib/proxy-service.js'
 import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 import { FreeModelCatalog } from '../lib/catalog.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from '../lib/protocol-defaults.js'
 
-const proxyUrl = process.argv[2] ?? 'http://127.0.0.1:10808'
-const model = process.argv[3] ?? 'glm-5.3-flash-free'
+const args = process.argv.slice(2)
+if (!args.includes('--run')) {
+  console.error('Live probes disabled. Usage: node tests/proxy-live.mjs --run [proxyUrl] [model-id]')
+  process.exit(2)
+}
+const positional = args.filter(value => !value.startsWith('--'))
+const proxyUrl = positional[0] ?? 'http://127.0.0.1:10808'
+const model = positional[1] ?? 'glm-5.3-flash-free'
 const baseUrl = 'https://opencode.ai/inference/v1'
 const log = (m) => console.log(`[proxy-live] ${m}`)
 const silent = { debug() {}, info() {}, warn() {}, error() {} }
@@ -30,10 +37,10 @@ if (probe.reachable === 0) {
 }
 
 // 2. One synthetic completion, ordered proxy-first so the tunnel must carry it.
-const catalog = new FreeModelCatalog(baseUrl, { includeDeprecated: false, extraModels: [], pool, dispatcherFor }, silent)
+const catalog = new FreeModelCatalog({ includeDeprecated: false, extraModels: [], pool, dispatcherFor }, silent)
 const adapter = new OpenCodeFreeAdapter(catalog, {
   providerRoute: 'opencode-bridge',
-  recipe: { baseUrl, apiKey: 'public', userAgent: 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14', client: 'cli', project: 'global', extraHeaders: {} },
+  recipe: { baseUrl, apiKey: 'public', userAgent: DEFAULT_PROTOCOL_USER_AGENT, client: 'cli', project: 'global', extraHeaders: {} },
   requestTimeoutMs: 120_000,
   logger: silent,
   pool,

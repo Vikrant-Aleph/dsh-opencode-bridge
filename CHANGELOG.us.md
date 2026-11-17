@@ -9,15 +9,28 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-18
+
 ### Added
 
+- **Free models now declare tools via Code Mode.** The free lane refuses a request that declares many rich tools (real descriptions + complex schemas) at once. The wire now declares only a few simple anchor tools plus `execute`, the real tool catalog moves into the system prompt, and the model calls tools through a program passed to `execute`, reusing DSH's native PTC sandboxed runtime and guarded nested dispatch. The behavior is closer to DSH's PTC mode; only the free-model routes are affected, and other agents keep their executor.
+- **The Code Mode catalog shows real return types.** It renders the SDK from each tool's actual output schema (e.g. `read` returns `{lines,totalLines}`), so the model parses returns by type instead of guessing. Verified end-to-end in a real free-model session: a simple reply, a four-step read/write task, and a six-step complex task with parallel reads and an `edit` append all completed correctly.
+- **Persistent redacted request summaries.** Failures record route, transport, controls and message/tool structure by default; successful requests record summaries only at Debug. Message text, tool arguments, images, keys and arbitrary schema literals are excluded, with size and depth budgets.
+- The log tool's `stat` reports the diagnostics format version so a running-code update can be checked.
 - Cumulative npm download charts in both READMEs, including the full history since the first release,
   the total count and the statistics cutoff date. GitHub Actions updates the charts and daily data
   each day; a failed statistics request preserves the previous charts.
 
 ### Changed
 
-- Package, marketplace, settings and documentation summaries now state that no OpenCode installation is required.
+- Short package, marketplace and settings summaries state that no OpenCode installation is required.
+
+### Fixed
+
+- **Clear cooldowns takes effect immediately.** It clears live pool waits, backoff counters and legacy model files. The adapter no longer keeps a second model lock that survives until restart.
+- **Quota wait scope follows the official client.** `FreeUsageLimitError` ends the run without automatic retries, a retry-delay hint or a cross-request cooldown. Eligible retry hints are capped at 15 minutes; diagnostics retain the original value.
+- Updated live probes to the current catalog constructor and UA constant, and made the proxy probe require an explicit `--run`.
+- Added same-host official v2.3.0 comparisons and cooldown-clear regression coverage. Requests with 7/52 synthetic tools and roughly 72 KB bodies succeeded; the root cause of the real 46-tool refusal (rich description and schema content) was located and is fixed by the Code Mode change above.
 
 ## [1.0.8] - 2026-11-16
 

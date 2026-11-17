@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { FreeModelCatalog } from '../lib/catalog.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from '../lib/protocol-defaults.js'
 import { buildChatMessages, planTools, buildHeaders, mintSessionId, mintRequestId } from '../lib/opencode-protocol.js'
 import { httpError } from '../lib/http-errors.js'
 import { retryAfterMs } from '../lib/retry-after.js'
@@ -19,7 +20,7 @@ const output = path.resolve(args[outputIndex + 1])
 if (fs.existsSync(output)) throw new Error('Refusing to overwrite a previous probe report')
 fs.mkdirSync(path.dirname(output), { recursive: true })
 const base = 'https://opencode.ai/inference/v1'
-const recipe = { baseUrl: base, apiKey: 'public', userAgent: 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14', client: 'cli', project: 'global', extraHeaders: {} }
+const recipe = { baseUrl: base, apiKey: 'public', userAgent: DEFAULT_PROTOCOL_USER_AGENT, client: 'cli', project: 'global', extraHeaders: {} }
 const callerTool = { name: 'read', description: 'Read synthetic fixture text only.', parameters: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'], additionalProperties: false } }
 const plan = planTools([callerTool])
 const fixture = {
@@ -38,7 +39,7 @@ const totalBudgetMs = 10 * 60_000
 let notBefore = 0
 let halt = false
 let sourceFailure = false
-const catalog = new FreeModelCatalog(base, { includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 }, { debug() {}, info() {}, warn() { sourceFailure = true }, error() {} })
+const catalog = new FreeModelCatalog({ includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 }, { debug() {}, info() {}, warn() { sourceFailure = true }, error() {} })
 let models
 try { models = await catalog.refresh() } finally { catalog.dispose() }
 if (sourceFailure || !models.length) throw new Error('No verified model snapshot; no inference probes sent')

@@ -1,0 +1,94 @@
+{
+  "date": "2026-11-17",
+  "model": "deepseek-v4.1-flash-free",
+  "prompt": "Reply with exactly VERIFY_OK. Do not call tools.",
+  "official": {
+    "version": "2.3.0",
+    "release": "https://github.com/anomalyco/opencode/releases/tag/v2.3.0",
+    "asset": "https://github.com/anomalyco/opencode/releases/download/v2.3.0/opencode-windows-x64.zip",
+    "assetSha256": "2e14eee53f4abad803d55fdc472c1b12dc3802d687ae204f81e7908bd2ab1895",
+    "errorClassificationSource": "https://github.com/anomalyco/opencode/blob/v2.3.0/packages/ai/src/provider-error.ts",
+    "retrySource": "https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/model-retry.ts",
+    "retryabilitySource": "https://github.com/anomalyco/opencode/blob/v2.3.0/packages/ai/src/schema/errors.ts",
+    "quotaAutomaticRetry": false,
+    "quotaPolicyScope": "Default QuotaExceeded classification; official AIError also honors explicit x-should-retry response overrides.",
+    "retryAfterMaximumMs": 900000,
+    "generalRetryBudget": 10
+  },
+  "method": {
+    "script": "tests/official-client-ab-live.mjs",
+    "sameHost": true,
+    "sameModel": true,
+    "sameWorkingDirectory": true,
+    "officialIsolatedConfig": true,
+    "userCredentialsLoaded": false,
+    "userConversationLoaded": false,
+    "pluginTransport": "wreq-js using the existing Bun TLS profile",
+    "pluginBaseVersion": "1.0.8",
+    "pluginUserAgent": "opencode/latest/2.2.0/cli",
+    "casesAreFullDshUiSessions": false
+  },
+  "cases": [
+    {
+      "name": "baseline",
+      "officialAt": "2026-11-17T07:16:51.565Z",
+      "officialExitCode": 0,
+      "officialAnswerMatches": true,
+      "officialQuotaError": false,
+      "pluginAt": "2026-11-17T07:16:58.393Z",
+      "pluginAnswerMatches": true,
+      "pluginFinish": "stop",
+      "pluginToolCount": 7,
+      "systemPaddingBytes": 0,
+      "pluginBodyBytes": 2057,
+      "pluginBodySha256": "200a147326a156fee0f6cb90b41b7780e5bb2942951472fd7bcdda5275021134",
+      "maxCompletionTokens": 32000
+    },
+    {
+      "name": "larger tool set",
+      "officialAt": "2026-11-17T07:38:34.776Z",
+      "officialExitCode": 0,
+      "officialAnswerMatches": true,
+      "officialQuotaError": false,
+      "pluginAt": "2026-11-17T07:38:38.934Z",
+      "pluginAnswerMatches": true,
+      "pluginFinish": "stop",
+      "pluginToolCount": 52,
+      "systemPaddingBytes": 0,
+      "pluginBodyBytes": 12401,
+      "pluginBodySha256": "0cfd4c99cc175c9aacd70945a2f6100f2dc4f0de93fe796b8225c3d815754698",
+      "maxCompletionTokens": 32000
+    },
+    {
+      "name": "larger tool set and context",
+      "officialAt": "2026-11-17T07:39:31.950Z",
+      "officialExitCode": 0,
+      "officialAnswerMatches": true,
+      "officialQuotaError": false,
+      "pluginAt": "2026-11-17T07:39:34.899Z",
+      "pluginAnswerMatches": true,
+      "pluginFinish": "stop",
+      "pluginToolCount": 52,
+      "systemPaddingBytes": 60000,
+      "pluginBodyBytes": 72401,
+      "pluginBodySha256": "1ceaa6c3ca45a0389627ac9e19b39191ecad37d9008c6211c14586dd70cbe6da",
+      "maxCompletionTokens": 32000
+    }
+  ],
+  "cooldownRegression": {
+    "method": "offline reproduction using the pre-change adapter and mocked upstream responses",
+    "firstFailure": "FREE_USAGE_LIMIT",
+    "clearReturned": 1,
+    "storedWaitAfterClearMs": 0,
+    "nextFailureBeforeFix": "REQUEST_COOLING",
+    "upstreamRequestsAfterTwoManualCallsBeforeFix": 1,
+    "cause": "The adapter kept a second in-memory model deadline after the store was cleared.",
+    "regressionTest": "tests/official-cooldown-policy.test.mjs"
+  },
+  "scope": [
+    "These synthetic requests succeeded at the recorded times; the earlier reported 429 was not reproduced.",
+    "The larger request checks tool count and body size, not the contents of every real DSH tool schema or conversation.",
+    "Success does not establish the cause of a refusal from another time, request or network.",
+    "The plugin retains its DSH-executed two-retry budget; the official CLI general retry budget is ten."
+  ]
+}

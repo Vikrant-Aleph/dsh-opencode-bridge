@@ -16,14 +16,14 @@
 中文 | [English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/README.us.md)
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里使用
-[OpenCode](https://opencode.ai) 的免费模型（不用安装opencode）——无需 OpenCode 账号或 API Key。
+[OpenCode](https://opencode.ai) 的免费模型——无需 OpenCode 账号或 API Key。
 另含可选的上下文精简与出口轮换。
 
 ![OpenCode Bridge 在 DSH 中的位置：DSH agent loop 经 LlmAdapter 调用本插件，插件复刻官方客户端协议后请求 opencode.ai 网关](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/dsh-opencode-bridge-updated-zh.webp)
 
 ## 主要功能
 
-**伪装成官方 OpenCode 客户端，让 DSH 能使用 OpenCode 的免费模型（不用安装opencode）。**
+**伪装成官方 OpenCode 客户端，让 DSH 能使用 OpenCode 的免费模型。**
 
 它复刻官方 OpenCode 客户端的请求头、网关要求的请求形态，以及 TLS 与 HTTP 指纹。它是一个 `LlmAdapter`，接入 DSH 既有循环：agent loop、权限与工具执行仍由 DSH 负责，每次工具调用由 DSH 自行解析。网关检查什么、不检查什么，见[下文](#opencode-如何判定客户端)。
 
@@ -31,7 +31,8 @@
 
 - **模型自动刷新** —— 读取 OpenCode 的模型目录（与官方客户端同源），每 5 分钟刷新；目录变化时自动增删模型，刷新失败则保留上一份可用列表。
 - **可选上下文精简** —— 只清除已确认成功完成轮次中的思考，默认关闭。
-- **可选出口轮换** —— 按顺序配置多个 HTTP(S) 或 SOCKS 代理，遇到明确的出口配额错误或连接失败时切换，并始终遵守服务端要求的等待。
+- **可选出口轮换** —— 按顺序配置多个 HTTP(S) 或 SOCKS 代理，连接失败时自动尝试下一个可用出口。
+- **Code Mode 工具调用** —— 免费模型经 `execute` 里的程序调用工具，复用 DSH 原生 PTC 组件，行为更接近 DSH 的 PTC 模式；仅影响免费模型路由。
 
 ## 安装
 
@@ -41,7 +42,7 @@
 2. 输入：
 
    ```text
-   dsh-opencode-bridge@1.0.8
+   dsh-opencode-bridge@1.1.0
    ```
 
 3. **安装源**优先选官方 npm registry；镜像可能滞后。
@@ -50,13 +51,13 @@
 ### 命令行安装
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.0.8
+dsh plugin --profile desktop add dsh-opencode-bridge@1.1.0
 ```
 
 把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.8
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.0
 ```
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
@@ -72,13 +73,15 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.8
 
 | 要求 | 实测结果 |
 |---|---|
-| `User-Agent` | 必须是官方标识 `opencode/latest/2.2.0/cli`。换成其它标识，即使其余全部一致也会被拒。 |
+| `User-Agent` | 使用官方客户端标识；插件默认复刻已抓取的 `opencode/latest/2.2.0/cli`。 |
 | **至少声明一个工具** | `tools` 为空数组会被拒。 |
 | **系统提示含 `<env>` 块** | 仅含该块的 177 字节提示即可通过；同样的提示去掉该块就会被拒。 |
-| **工具名不含分隔符** | 名称含下划线、连字符、点号或大写的工具声明会被拒。插件会自动转换这类名称。 |
+| **工具名形状** | 未识别的名称含下划线、连字符、点号或大写会被拒；网关认识的名称可带分隔符。插件会自动转换名称。 |
+| **工具声明内容** | 一次声明大量富工具（真实描述 + 复杂 schema）会被拒；同尺寸的中性工具块可通过。 |
 
-这四条都是官方客户端无论怎么配置都会带上的特征，因此能当作客户端检查。用户可以改写系统提示、
-裁剪工具清单，但客户端仍会追加 `<env>` 块、声明工具，工具名也不含分隔符。
+这些检查由官方客户端的形态满足，因此能当作客户端检查。用户可以改写系统提示、裁剪工具清单，
+但客户端仍会追加 `<env>` 块、声明工具。工具声明内容这条，官方客户端靠 Code Mode 满足——线上只留
+少量工具，完整目录进系统提示词；插件对免费模型也改用 Code Mode 规避。
 
 工具名这条容易被误读：网关对不合规的名称返回 `FreeUsageLimitError`，与配额耗尽的报错一样。
 插件在发送前转换名称，收到模型返回的调用后再还原，所以工具调用不受影响。
@@ -96,7 +99,7 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.0.8
 
 ### 注意事项
 
-以上为 2026-11-13 至 2026-11-14 的观测，不是规范。
+以上为 2026-11-13 至 2026-11-17 的观测，不是规范。
 完整证据链与被排除的假设见[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
 
 ## TLS 与 HTTP 指纹伪装
@@ -149,11 +152,10 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 2. 逐个添加代理，例如 `http://127.0.0.1:7890` 或 `socks5h://127.0.0.1:1080`。`direct`（本机）可以保留在列表里。
 3. 用 **全部测试** 检查连通性。冷却中的条目会被跳过，避免提前发请求。增删条目会立即保存并生效。
 
-条目按列表顺序尝试。明确的出口配额错误与连接失败会让该条目短暂冷却；服务端要求的等待会阻止
-立即切换；整个池都在冷却时不会提前发送任何请求。模型后端故障与无法解释的 429 **不**会被当作
-代理配额耗尽。
+条目按列表顺序尝试，连接失败会让该条目短暂冷却。点击 **清除冷却** 会立即清空当前出口池的等待和旧版冷却记录，无需重启。
 
-DSH 统一最多自动重试两次；等待过久会返回错误，稍后重试。已经开始流式输出的回复不会自动重放。
+`FreeUsageLimitError` 会结束本轮，不自动重试、不自动换出口，也不保存按模型冷却；再次发送会重新请求上游。
+普通临时限流由 DSH 最多自动重试两次，重试等待最多接受 15 分钟。已经开始输出的回复不会自动重放。
 
 支持 **HTTP(S)、SOCKS4/4a、SOCKS5/5h**。
 
@@ -195,7 +197,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.0.8.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.0.tgz
 ```
 
 </details>

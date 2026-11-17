@@ -1,8 +1,7 @@
 # Evidence
 
 Dated captures behind the claims in [TECHNICAL.us.md](../../TECHNICAL.us.md) and the
-[camouflage policy](../../CAMOUFLAGE.us.md). Every file here is a raw measurement, so a reader can check a claim
-for themselves.
+[camouflage policy](../../CAMOUFLAGE.us.md). The records preserve observed results and experiment context so readers can check the claims.
 
 **These are dated observations.** The free tier changes; a capture from
 2026-11-13 may describe a gate that no longer behaves that way.
@@ -37,3 +36,7 @@ succeeded.
 | `verify-env-fix.json`, `repeat-1.json`, `placeholder-verify.json` | The adapter's own path returning 200 and answering |
 | `tools-field-and-token-budget-2026-11-14.json` | Omitting `tools` is refused while a placeholder passes; a small `max_completion_tokens` is accepted; a system message rendered as a user message is accepted but not adopted |
 | `tool-loop-live-2026-11-14.json` | A live three-round tool loop with a thinking model: each result feeds the next round, and the later requests replay the assistant turn and its `reasoning_content` |
+| `official-client-comparison-2026-11-17.json` | Official v2.3.0 and plugin success on the same host/model, including 52 synthetic tools and a 72 KB request; also records the offline reproduction of a cleared store still blocked by the old adapter Map |
+| `tool-gate-codemode-2026-11-17.json` | The free lane refuses rich tool declarations (real description text and complex schemas each trigger it); a same-size neutral block passes. Records the Code Mode fix, the real-return-type catalog, and end-to-end verification |
+| `codemode-agent-test-2026-11-17.json` | End-to-end four-step task in a real free-model session: read package.json, glob src, write a report, read it back — all through `execute` |
+| `codemode-complex-test-2026-11-17.json` | End-to-end six-step complex task: glob + grep + parallel reads with import parsing + write + `edit` append + read-back verification, completed correctly |

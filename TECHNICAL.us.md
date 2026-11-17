@@ -47,7 +47,7 @@ source and licence stated.
 ## 1. What this plugin is
 
 An `LlmAdapter` that speaks the official OpenCode client's wire protocol, so DSH
-can use the keyless `-free` models at `opencode.ai` (no OpenCode installation required) without an account.
+can use the keyless `-free` models at `opencode.ai` without an account.
 
 It does **not** modify the agent loop, execute tools itself, or patch global
 HTTP entry points. Tool execution, permissions and schema validation stay in DSH.
@@ -83,12 +83,13 @@ Other modules:
 |---|---|
 | `src/catalog.ts` | Free-model discovery: reads the official catalog, with TTL and retry. |
 | `src/project-identity.ts` | Derives the official `x-opencode-project` id from a real directory. |
-| `src/request-waits.ts` | Per-model server retry deadlines, persisted across reloads. |
+| `src/request-waits.ts` | Reads and clears legacy cooldown files; current requests do not read or write per-model waits. |
 | `src/http-errors.ts` | Typed upstream classification; safe, bounded diagnostics. |
 | `src/retry-after.ts` | Strict `Retry-After` parsing (ms, seconds, HTTP-date). |
 | `src/reasoning-policy.ts` | Host-only completed-turn reasoning projection for optional trimming. |
 | `src/context-service.ts` | The Context-trimming preference (RPC + agent tool, one operation). |
 | `src/logger.ts`, `log-service.ts` | Leveled, redacted diagnostic logging. |
+| [request-diagnostics.ts](src/request-diagnostics.ts) | Bounded, content-free facts about the actual serialized request. |
 | `src/proxy-service.ts` | Egress pool editing and probing for the Settings page. |
 | `client.js` | Settings page (browser module, not a tsc product). |
 
@@ -309,17 +310,19 @@ batch yields `TOOL_BRIDGE_INCOMPLETE` and dispatches nothing.
 - **Streaming**: SSE is parsed incrementally; text, reasoning and tool-call
   deltas map to DSH chunks. A stream failure after output starts is never
   replayed (`PARTIAL_STREAM_ERROR`).
-- **Retry**: the adapter declares a bounded policy (`maxRetries: 2`, 2s initial,
-  120s cap, 0.2 jitter) and does not run timers itself. A positive server wait is
-  honored verbatim and is never shortened, jittered or capped by local policy.
-- **Per-model waits**: an observed `Retry-After` is stored per model with the egress that produced it, and
-  persisted, so a reload cannot erase a server-imposed deadline. Other models and
-  metadata requests are unaffected.
-- **Free-usage rejections**: a typed `FreeUsageLimitError` becomes
-  `FREE_USAGE_LIMIT` — non-retryable, and **not** treated as proof that the whole
-  egress is exhausted. Local guesses are never recorded as server waits. The state file is re-read before every check, so an external clear applies immediately; a wait whose egress is no longer configured stops applying; and Settings offers **Clear cooldowns**.
+- **Free-usage rejection**: HTTP 429 with type `FreeUsageLimitError` produces `FREE_USAGE_LIMIT`. It ends the run without automatic retries or a retry-delay hint to the host. The raw `Retry-After` is kept only in diagnostics.
+- **Wait scope**: a new request does not inherit a previous run's model wait. The adapter has no in-memory model lock and writes no model cooldown records. Startup clears legacy files instead of recovering waits from logs.
+- **Transient throttling**: DSH schedules retries, with a budget of two, an initial 2s delay and 0.2 jitter. Eligible provider hints are capped at 15 minutes; diagnostics retain the raw value. Waits are not saved across manual requests.
+- **Clear cooldowns**: the same RPC synchronously clears live pool waits, failure backoff counters and legacy model state. Entries stay in place and no restart is needed.
 
-**Probe policy**: the gateway's `Retry-After` points at UTC midnight, but it serves again within minutes (refused at 17:24, the same model served at 17:27). A cooldown therefore blocks only an exponential probe window -- 60 seconds, doubling, capped at 15 minutes -- not the duration the server claims. The server deadline is still recorded, as an upper bound and for diagnostics.
+This follows v2.3.0's [error classification](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/ai/src/provider-error.ts) and
+[ModelRetry](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/model-retry.ts): quota errors are not automatically retried by default;
+only transient rate limits and provider-internal errors use retry hints, capped at 15 minutes.
+The official CLI has a general budget of ten retries; this plugin retains its two-retry budget executed by DSH.
+The alignment covers quota handling, wait scope and the hint ceiling, not a replacement of the host's entire retry loop.
+
+On 2026-11-17 the old adapter reproduced the failed clear: the store returned zero, but another in-memory Map still produced
+`REQUEST_COOLING` and no next request was sent. Regression tests cover clearing the same instances, legacy migration and sending again after that cross-request state was removed.
 - **Cancellation**: checked before the POST, after buffering and before each
   tool chunk.
 
@@ -341,15 +344,52 @@ reasoning only from canonical **completed** turns, verified by message id and a
 SHA-256 fingerprint; active, failed or interrupted chains are retained. It
 applies to new requests only and never deletes local history.
 
+### 5.3 Code Mode (tool declarations for free models)
+
+The free lane refuses a request that declares many rich tools at once: the real
+description text and the complex schemas each trigger `FreeUsageLimitError` on their
+own (a same-size neutral tool block passes while the real block is refused; see the
+[measurement record](docs/evidence/tool-gate-codemode-2026-11-17.json)). The official client avoids
+this with Code Mode: keep the wire tool list small, move the full catalog into the
+system prompt, and reach tools through a single code-execution entry.
+
+[code-mode.ts](src/code-mode.ts) gives the free-model routes the same shape:
+
+- The wire declares only a few simple anchor tools (recognized names such as
+  `read`/`write`/`edit` with trivial schemas) plus `execute`. The anchors exist to
+  satisfy the gateway's shape checks; the model is told not to call them directly, and
+  the adapter drops a stray call to one.
+- The real tool catalog is rendered into the system prompt with DSH's `renderToolsSdk`,
+  alongside an "only `execute` is callable directly" instruction. The catalog carries each
+  tool's real output schema (e.g. `read` returns `{lines,totalLines}`, `glob` returns
+  `{root,paths}`), so the model parses returns by type instead of guessing the structure.
+- `execute` is an ordinary registered tool whose body delegates to a `PtcExecutor`
+  instance running `run_code`, reusing DSH's native PTC sandboxed runtime and guarded
+  nested dispatch. DSH's `run_code` is executor-owned and cannot be registered, so
+  `execute` carries it.
+- Enabled only when the step admits `execute` (the free-model routes); other agents keep
+  their executor and tool declarations.
+
+The behavior is closer to DSH's PTC mode. Without a host PTC runtime it falls back to
+direct declaration.
+
+Verified end-to-end in a real free-model session: a simple reply, a four-step read/write
+task, and a six-step complex task with parallel reads and an `edit` append all completed
+correctly (see the [complex-task record](docs/evidence/codemode-complex-test-2026-11-17.json)).
+One known boundary: the SDK renders parameters as TypeScript types, which cannot express
+numeric bounds such as `read`'s `limit<=2000`; a model may guess a larger value and correct
+after the tool rejects it. This matches DSH's native PTC rendering.
+
 ## 6. Model catalog
 
-`src/catalog.ts` reads one source: `https://models.opencode.ai/api.json`, the same catalog
-the official client's `ModelsDev.Service` reads. It keeps the zero-cost models under the
-`opencode` provider and drops `status: deprecated`.
+[catalog.ts](src/catalog.ts) reads the stable v1 catalog at `https://models.opencode.ai/api.json`, keeping zero-cost models under `opencode` and dropping `status: deprecated`.
+Official v2.3.0 [ModelsDev](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/models-dev.ts) defaults to the same service's
+`/experimental/v2.0/api.json?type=chat,decision,image`, with a cache and bundled snapshot.
+The upstream service is shared, but the API path and cache layers differ. The plugin has not yet migrated to the v2 catalog.
 
 | Item | Value | Why |
 |---|---|---|
-| Source | One, the official catalog | The official client reads only this |
+| Source | One, the official stable v1 catalog | Same upstream service, different API version |
 | Refresh | Five minutes, the official TTL | `Duration.minutes(5)` |
 | Failure | Keep the previous snapshot, retry after 60s | Same effect as the official cache fallback |
 
@@ -393,7 +433,7 @@ and on-demand caching.
 | `maxRequestImageBytes` | `20971520` | Aggregate base64 budget. |
 | `maxRequestImages` | `20` | Retained image occurrences. |
 | `proxies` | `[]` | Egress pool, in order. |
-| `proxyCooldownMs` | `60000` | Local fallback cooldown; never shortens a server wait. |
+| `proxyCooldownMs` | `60000` | Local fallback for the optional egress pool; a free-usage rejection does not start it. |
 | `proxyStorePath` | `''` | Settings-owned pool store. |
 | `logLevel` | `warn` | `debug`\|`info`\|`warn`\|`error`\|`off`. |
 | `logDir` | `''` | Defaults to the profile log directory. |
@@ -406,7 +446,7 @@ Symptoms and first actions:
 | Symptom | Likely cause | Action |
 |---|---|---|
 | `403 FreeTierError` | Identity shape refused | Check the UA, the session headers, that at least one tool is declared, and that the `<env>` block is present (§3). |
-| `429 FreeUsageLimitError` | Free lane refusal or real quota | Read the diagnostics; do not retry, rotate or clear the stored wait. |
+| `429 FreeUsageLimitError` | Free lane refusal or real quota | Read request summaries and compare the same model/egress at nearby times; the error name does not identify an IP quota cause. |
 | `400 MissingSessionID` | Session header absent | Session minting broke. |
 | Endpoint `404`/`426` | Route migrated | Re-read the catalog's `provider.api`. |
 | Empty catalog | Catalog request failing | Check logs; the previous snapshot is retained. |
@@ -420,6 +460,19 @@ Re-deriving a constant:
 3. Change only what the capture contradicts, and only in the direction it shows.
 4. Add or update the assertion in `tests/` that pins the new value.
 5. Record the change in §11.
+
+### 8.1 Request structure summaries
+
+Failed requests add `request shape` and `tool schema shape` records sharing the error's `request` identifier.
+Successful-request summaries are written only at `debug`; `off` disables logging. The panel's minimum-level selector filters existing records and does not enable Debug recording.
+Use `logLevel` or the `opencode_bridge_log` tool's `level` action to change recording verbosity; `stat` reports the diagnostics format version.
+
+- **Request facts**: recognized public path, selected transport, byte size, output cap, temperature, message roles and lengths, environment-block and image counts, and tool-call pairing counts.
+- **Tool facts**: declaration and name-format counts, plus schema object, reference and combinator statistics. Tool names, property names, descriptions, enum literals and defaults are omitted.
+- **Privacy**: no message text, tool arguments, results, image data or keys. Custom URLs, query values and nonstandard UAs are not copied verbatim.
+- **Bounds**: at most 8 MiB of request JSON, 512 messages, 128 tools and 8192 schema nodes, with a depth limit of 32. Budget hits are marked `capped`; diagnostic failure never interrupts model traffic.
+
+`transport: configured` means a dedicated transport function was set; `node-fetch` means ordinary fetch. This field alone does not prove byte-identical TLS.
 
 ## 9. Testing
 
@@ -439,7 +492,7 @@ an explicit `--run`, and refuse to overwrite an earlier report.
 | `reasoning-*` | Replay rules, trimming eligibility, stream probes. |
 | `image-*`, `vision-*` | Attachment projection, budgets, tool-image hoisting. |
 | `retry-integration`, `proxy-rotation` | Server waits, pool cooldown, no-replay guarantees. |
-| `project-identity`, `request-waits` | Identity derivation, persisted deadlines. |
+| `project-identity`, `request-waits`, `official-cooldown-policy` | Identity derivation, legacy cleanup, fresh manual requests and immediate egress-wait clearing. |
 | `catalog-*`, `log-*`, `client-boot` | Catalog lifecycle, redaction, settings page. |
 
 ### 9.1 Live probes
@@ -456,10 +509,14 @@ tests passed while every real request was refused.
 | `vision-compat-live.mjs` | Image input and tool-result images. |
 | `reasoning-compat-live.mjs`, `reasoning-roundtrip-live.mjs` | Reasoning replay and round trips. |
 | `wire-dump.mjs` | Print the wire fingerprint actually emitted. |
+| `official-client-ab-live.mjs --run --official <exe> --out <new.json>` | Isolated official CLI configuration versus the real adapter and TLS transport on the same host/model, with bounded synthetic tool-count and system-size controls. |
 
-How to read a refusal: the free lane stops serving after a handful of requests. **Every
-429 must be compared against the official client at the same moment** — if the official
-client fails too it is quota, and if it passes the camouflage still has a gap.
+In the [2026-11-17 same-host comparison](docs/evidence/official-client-comparison-2026-11-17.json), both official v2.3.0 and the plugin succeeded.
+The plugin declared 7 tools, 52 tools, and 52 tools with 60 KB of synthetic system padding; the largest body was about 72 KB.
+These are controlled synthetic requests. A real UI history is a separate reproduction, and these results do not explain a refusal at another time or on another request.
+
+Compare actual results on the same egress and model at nearby times. If both are refused, investigate upstream state and egress conditions first;
+if only the plugin is refused, vary tools, messages and request parameters one at a time. A `FreeUsageLimitError` alone does not identify an exhausted IP quota.
 
 ## 10. Security, privacy, attribution
 
@@ -474,6 +531,7 @@ client fails too it is quota, and if it passes the camouflage still has a gap.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-11-17 | Unreleased | Removed cross-request model cooldowns; clearing resets live egress waits and legacy state; quota handling follows the official default and retry hints are capped at 15 minutes. |
 | 2026-11-13 | **1.0.0** | **Gateway requirements found and met.** Two structural requirements are now satisfied: at least one declared tool (any name) and an `<env>` block in the system prompt. The `read` placeholder is added only when the caller declares no tools, its description says not to call it, and a call to it is dropped rather than failing the turn. Transport: `wreq-js` persistent Transport with connection pooling, `Connection: keep-alive`, official header casing/positions, `curvesList` trimmed, `sigalgsList` completed (`ed25519` + `ECDSA+SHA512`), and the wiring fix that had left the transport unused; the selected proxy URL now reaches a non-undici transport, so rotation works with the Bun-shaped transport. Removed the tool-bridge layer, `opencode_bridge_audit`, and the dead `harnessSystem` option. |
 | 2026-10-23 | 0.5.5 | Optional completed-turn reasoning trimming with a persistent settings tab. |
 | 2026-10-22 | 0.5.4 | Official attachment-backed images (Issue #3); tool-result image hoisting. |
@@ -493,7 +551,7 @@ client fails too it is quota, and if it passes the camouflage still has a gap.
 | **identity header** | A header the official client always sends and a user cannot change (§3). |
 | **placeholder** | A tool declaration sent only when the caller declares none, to satisfy the gateway's "at least one tool" rule. |
 | **wire name** | The declared tool name with separators removed; mapped back to the caller's real tool when a call returns. |
-| **server wait** | A `Retry-After` observed from upstream; scoped to the egress that produced it, blocking only a capped probe window, and clearable on demand. |
+| **server wait** | A retry hint for an eligible error in the current run, capped at 15 minutes. A quota rejection keeps the raw hint only as diagnostics and creates no model lock. |
 | **egress** | One configured route to upstream (`direct` or a proxy). |
 | **Bun-shaped transport** | The wreq-js handshake reproducing the official client's `ClientHello`. |
 

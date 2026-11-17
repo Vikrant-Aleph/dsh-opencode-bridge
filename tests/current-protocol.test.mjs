@@ -44,17 +44,18 @@ test('custom user-agent and extra headers remain explicit user choices', async t
   assert.equal(headers['x-fixture'], 'safe')
 })
 
-test('typed free-usage denial remains distinct from transient throttling with the exact server hint', async () => {
+test('typed free-usage denial is terminal and keeps the server hint only for diagnostics', async () => {
   const e = await httpError(Response.json({ error: { type: 'FreeUsageLimitError', message: 'Free usage limit reached.' } }, { status: 429, headers: { 'retry-after': '54965' } }))
   assert.equal(e.failure.code, 'FREE_USAGE_LIMIT')
   assert.equal(e.failure.status, 429)
-  assert.equal(e.failure.providerRetryAfterMs, 54_965_000)
+  assert.equal(e.failure.providerRetryAfterMs, undefined)
+  assert.equal(e.diagnostics.retryAfterMs, 54_965_000)
   const outage = await httpError(Response.json({ error: { type: 'FreeUsageLimitError', message: 'Endpoint is unavailable.' } }, { status: 429 }))
-  assert.equal(outage.failure.code, 'RATE_LIMIT')
+  assert.equal(outage.failure.code, 'FREE_USAGE_LIMIT')
   assert.equal(outage.diagnostics.reason, 'endpoint_unavailable')
 })
 
-test('free-usage server wait is preserved for the affected model without locking unrelated models or metadata egress', async t => {
+test('free-usage denial does not lock later manual requests or metadata egress', async t => {
   const pool = new ProxyPool(['direct'])
   let posts = 0
   t.mock.method(globalThis, 'fetch', async () => ++posts === 1
@@ -63,13 +64,13 @@ test('free-usage server wait is preserved for the affected model without locking
   const a = adapter({ pool })
   const first = await collect(a)
   assert.equal(first.at(-1).reason.failure.code, 'FREE_USAGE_LIMIT')
-  assert.equal(first.at(-1).reason.failure.providerRetryAfterMs, 54_965_000)
+  assert.equal(first.at(-1).reason.failure.providerRetryAfterMs, undefined)
   assert.equal(a.providerRetryPolicy(input.provider).retryableCodes.includes('FREE_USAGE_LIMIT'), false)
-  const deferred = await collect(a)
-  assert.equal(deferred.at(-1).reason.failure.code, 'REQUEST_COOLING')
-  assert.equal(posts, 1, 'same-model manual call cannot shorten the server wait')
+  const next = await collect(a)
+  assert.equal(next.at(-1).reason.kind, 'stop')
+  assert.equal(posts, 2, 'a manual call is a new request, not an automatic retry')
   assert.equal(pool.health()[0].state, 'ready', 'usage type alone does not establish an IP quota')
   const other = await collect(a, { model: 'other-fixture-free' })
   assert.equal(other.at(-1).reason.kind, 'stop')
-  assert.equal(posts, 2)
+  assert.equal(posts, 3)
 })

@@ -16,6 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { PluginLogger, type LogLevel } from './logger.js'
+import { REQUEST_DIAGNOSTICS_VERSION } from './request-diagnostics.js'
 
 const RPC_NAMESPACE = 'opencode-bridge-logs'
 const RPC_CHANNEL = '/api'
@@ -163,7 +164,7 @@ export function registerLogAccess(ctx: Context, service: LogService): () => void
           name: 'opencode_bridge_log',
           description:
             'Read or manage the dsh-opencode-bridge plugin diagnostic log (the log of the OpenCode free-model adapter). ' +
-            'Use action "read" to fetch recent log lines, "stat" for file sizes and the current level, ' +
+            'Use action "read" to fetch recent log lines, "stat" for file sizes, the current level and request-diagnostics version, ' +
             '"level" to change the runtime verbosity (debug|info|warn|error|off), and "clear" to delete all log files. ' +
             'Log lines are already scrubbed of credentials and message content.',
           parameters: {
@@ -220,6 +221,7 @@ export function registerLogAccess(ctx: Context, service: LogService): () => void
                   `level: ${read.level}`,
                   `total: ${read.totalBytes} bytes`,
                   `records: ${read.lines.length}`,
+                  `request diagnostics: v${REQUEST_DIAGNOSTICS_VERSION} (failures by default; successes at debug)`,
                   `files:`,
                   files || '  (none)',
                 ].join('\n'),

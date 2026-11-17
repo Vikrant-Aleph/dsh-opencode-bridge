@@ -59,7 +59,7 @@ async function normalContract(adapter, advance, extra = {}) {
 
 test('adapter supplies exact bounded normal policy and excludes replay-prone errors', t => {
   const { adapter } = fixture(t)
-  assert.deepEqual(adapter.providerRetryPolicy(input.provider), { mode: 'normal', maxRetries: 2, retryableCodes: ['RATE_LIMIT', 'EGRESS_COOLING', 'REQUEST_COOLING'], initialDelayMs: 2000, maxDelayMs: 120000, jitterRatio: .2 })
+  assert.deepEqual(adapter.providerRetryPolicy(input.provider), { mode: 'normal', maxRetries: 2, retryableCodes: ['RATE_LIMIT', 'EGRESS_COOLING'], initialDelayMs: 2000, maxDelayMs: 900000, jitterRatio: .2 })
   for (const code of ['TIMEOUT', 'TRANSPORT', 'PARTIAL_STREAM_ERROR', 'PROVIDER_STREAM_ERROR', 'STREAM_FAILED', 'TOOL_BRIDGE_REJECTED', 'TOOL_BRIDGE_INCOMPLETE', 'ABORTED']) assert.equal(adapter.providerRetryPolicy(input.provider).retryableCodes.includes(code), false)
 })
 test('normal contract simulation stops after two retries, without plugin timers', async t => {
@@ -74,11 +74,12 @@ test('normal contract simulation uses server wait verbatim, not jitter', async t
   const out = await normalContract(f.adapter, f.advance)
   assert.deepEqual(out.delays, [60000]); assert.equal(sent, 2); assert.equal(out.reason.kind, 'stop')
 })
-test('over-policy-cap hint terminates normal contract without shortening', async t => {
+test('provider hints use the official fifteen-minute ceiling within the bounded host run', async t => {
   const f = fixture(t); let sent = 0
   t.mock.method(globalThis, 'fetch', async () => { sent++; return rejected('RateLimitError', 'Too many requests', { 'retry-after': '3600' }) })
   const out = await normalContract(f.adapter, f.advance)
-  assert.deepEqual(out.delays, []); assert.equal(sent, 1); assert.equal(out.reason.failure.providerRetryAfterMs, 3600000)
+  assert.deepEqual(out.delays, [900000, 900000]); assert.equal(sent, 3); assert.equal(out.reason.failure.providerRetryAfterMs, 900000)
+  assert.ok(f.logs.some(log => log.args[2]?.serverRetryAfterMs === 3600000))
 })
 test('all-cold pool refuses network and dispatchers with remaining deadline', async () => {
   const p = pool(); p.rateLimited(0, 60000); p.rateLimited(1, 90000)
@@ -127,18 +128,16 @@ for (const [label, type, message] of [['unknown', 'UnknownError', 'unknown upstr
   test(`${label} 429 does not rotate or punish egress`, async t => {
     const p = pool(); const f = fixture(t, { pool: p }); let sent = 0
     t.mock.method(globalThis, 'fetch', async () => { sent++; return rejected(type, message) })
-    assert.equal(terminal(await collect(f.adapter)).failure.code, 'RATE_LIMIT')
+    assert.equal(terminal(await collect(f.adapter)).failure.code, type === 'FreeUsageLimitError' ? 'FREE_USAGE_LIMIT' : 'RATE_LIMIT')
     assert.equal(sent, 1); assert.ok(p.health().every(h => h.state === 'ready'))
   })
 }
-test('manual same-model call cannot bypass request hint, other models remain independent', async t => {
+test('manual same-model calls start fresh without a persisted request hint', async t => {
   const f = fixture(t); let sent = 0
-  t.mock.method(globalThis, 'fetch', async () => { sent++; return rejected('RateLimitError', 'Too many requests', { 'retry-after': '60' }) })
-  await collect(f.adapter)
-  f.advance(59999)
-  assert.equal(terminal(await collect(f.adapter)).failure.code, 'REQUEST_COOLING'); assert.equal(sent, 1)
-  await collect(f.adapter, { model: 'other-free' }); assert.equal(sent, 2)
-  f.advance(1); await collect(f.adapter); assert.equal(sent, 3)
+  t.mock.method(globalThis, 'fetch', async () => ++sent === 1 ? rejected('RateLimitError', 'Too many requests', { 'retry-after': '60' }) : ok())
+  assert.equal(terminal(await collect(f.adapter)).failure.code, 'RATE_LIMIT')
+  assert.equal(terminal(await collect(f.adapter)).kind, 'stop'); assert.equal(sent, 2)
+  await collect(f.adapter, { model: 'other-free' }); assert.equal(sent, 3)
 })
 test('HTTP-date hint honors server Date clock skew and strict malformed boundaries', () => {
   const date = new Date(epoch).toUTCString(); const target = new Date(epoch + 60000).toUTCString()
@@ -149,7 +148,7 @@ test('huge hints remain safe finite deadlines and exceed Node timer maximum', ()
   const wait = retryAfterMs(new Response('', { headers: { 'retry-after': '9'.repeat(400) } }), epoch)
   assert.ok(Number.isSafeInteger(wait)); assert.ok(wait > 2147483647); assert.ok(Number.isSafeInteger(epoch + wait))
 })
-test('concurrent successful response cannot clear remembered request hint', async t => {
+test('concurrent success and rejection do not create a cross-request model lock', async t => {
   const f = fixture(t); const pending = deferred(); const dispatched = deferred(); let sent = 0
   t.mock.method(globalThis, 'fetch', async () => {
     if (++sent === 1) { dispatched.resolve(); return pending.promise }
@@ -158,7 +157,7 @@ test('concurrent successful response cannot clear remembered request hint', asyn
   const successful = collect(f.adapter)
   await dispatched.promise
   await collect(f.adapter); pending.resolve(ok()); await successful
-  assert.equal(terminal(await collect(f.adapter)).failure.code, 'REQUEST_COOLING'); assert.equal(sent, 2)
+  assert.equal(terminal(await collect(f.adapter)).failure.code, 'RATE_LIMIT'); assert.equal(sent, 3)
 })
 test('in-flight result maps by stable ID after live pool reorder', async () => {
   const p = pool(); const first = p.entryAt(0).id; const second = p.entryAt(1).id

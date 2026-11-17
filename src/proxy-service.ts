@@ -51,10 +51,10 @@ export interface ProxyServiceOptions {
   dispatcherFor?: (url: string) => Promise<unknown> | unknown
   logger?: LoggerLike
   /**
-   * Drop persisted per-model server waits and return how many were removed.
+   * Drop legacy per-model server waits and return how many were removed.
    *
-   * A wait is tied to the egress that produced it, so a user who changes egress
-   * outside the plugin needs a way to retire them without editing files.
+   * Compatibility cleanup for older releases. Live egress waits are always
+   * cleared by the service itself, including when no legacy hook is supplied.
    */
   clearCooldowns?: () => number
 }
@@ -71,9 +71,10 @@ export class ProxyService {
     this.probeTimeoutMs = Math.max(1000, options.probeTimeoutMs ?? 8000)
   }
 
-  /** Retire every persisted server wait; returns how many were dropped. */
+  /** Clear live egress waits and legacy model waits immediately, without restarting. */
   clearCooldowns(): number {
-    return this.options.clearCooldowns?.() ?? 0
+    const active = this.pool.clearCooldowns()
+    return active + (this.options.clearCooldowns?.() ?? 0)
   }
 
   read(): ProxyView {

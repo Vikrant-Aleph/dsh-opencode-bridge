@@ -1,5 +1,5 @@
 /**
- * dsh-opencode-bridge: OpenCode free models for DeepSeek Harness (no OpenCode installation required).
+ * dsh-opencode-bridge: OpenCode free models for DeepSeek Harness.
  *
  * Registers an LLM adapter that simulates the official OpenCode client wire
  * protocol so DSH can use the keyless free-tier models hosted at opencode.ai
@@ -21,6 +21,7 @@ import { DEFAULT_IMAGE_INPUT_POLICY } from './image-input.js'
 import { OpenCodeFreeAdapter } from './adapter.js'
 import { ContextPreferencesService, registerContextAccess } from './context-service.js'
 import { completedReasoningForRequest, registerReasoningProjection } from './reasoning-policy.js'
+import { createCodeMode, type CodeModeHandle } from './code-mode.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
 import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
@@ -176,7 +177,7 @@ export function apply(ctx: Context, config: Config): void {
   const storedProxies = loadProxyStore(proxyStorePath)
   const pool = new ProxyPool(storedProxies.urls ?? config.proxies, { cooldownMs: config.proxyCooldownMs })
   ctx.effect(() => () => clearDispatchers())
-  // Filled once the wait store exists; the Settings page clears cooldowns through it.
+  // Legacy model waits are retired on startup and remain clearable from Settings.
   const cooldownStore: { current?: RequestWaitStore } = {}
   const proxyService = new ProxyService(pool, {
     storePath: proxyStorePath,
@@ -241,8 +242,10 @@ export function apply(ctx: Context, config: Config): void {
   const waitScope = requestWaitScope(config.baseUrl, config.apiKey)
   const requestWaitState = new RequestWaitStore(
     path.join(path.dirname(proxyStorePath), `request-waits-${waitScope}.json`),
-    logger, logger.read({ level: 'warn', limit: 5000 }).lines,
+    logger,
   )
+  const retiredWaits = requestWaitState.clear()
+  if (retiredWaits) logger.info('retry', 'retired legacy model cooldowns', { cleared: retiredWaits })
   cooldownStore.current = requestWaitState
   // The gateway's free lane distinguishes the official client's TLS stack from
   // Node's. The Bun-shaped transport resolves asynchronously (native module
@@ -251,11 +254,11 @@ export function apply(ctx: Context, config: Config): void {
   //
   // The transport is created once and reused for the whole plugin lifetime so
   // its connection pool persists across turns, matching the official client.
+  // Code Mode handle is populated once the host tool/prompt/PTC services are ready; the
+  // adapter reads it lazily per request. Absent (no PTC runtime) keeps direct declaration.
+  const codeModeHolder: { current?: CodeModeHandle } = {}
   const adapter = new OpenCodeFreeAdapter(catalog, {
-    requestWaitState,
     ...(config.dumpRequestsTo ? { dumpRequestsTo: config.dumpRequestsTo } : {}),
-    // A wait is tied to the egress that produced it; removing a proxy retires it.
-    activeEgresses: () => (pool && pool.size > 0 ? pool.egressLabels() : ['direct (this machine)']),
     providerRoute: config.providers[0] ?? 'opencode-bridge',
     recipe,
     requestTimeoutMs: config.requestTimeoutMs,
@@ -264,6 +267,7 @@ export function apply(ctx: Context, config: Config): void {
     minOutputTokens: config.minOutputTokens,
     userAgentAttribution: config.userAgentAttribution,
     tracing: config.tracing,
+    codeMode: () => codeModeHolder.current,
     getAttachments: () => typeof ctx.get === 'function' ? ctx.get('attachments') : undefined,
     toolImages: config.toolResultImages,
     getCompletedReasoning: options => preferences.currentTrim() ? completedReasoningForRequest(ctx, options) : undefined,
@@ -296,6 +300,17 @@ export function apply(ctx: Context, config: Config): void {
     // Release pooled connections when the plugin unloads.
     ctx.effect(() => () => { void transportHolder.current?.close?.() })
   }
+
+  // Register the Code Mode transport once the host tool registry, prompt service, and PTC
+  // runtime are available. Scoped to the free-model providers; other agents keep native.
+  ctx.effect(() => {
+    const fiber = ctx.inject(['tools', 'systemPrompt', 'ptcRuntime'], (scoped) => {
+      const handle = createCodeMode(scoped, { providers, logger })
+      if (handle) codeModeHolder.current = handle
+      return () => { codeModeHolder.current = undefined; handle?.dispose() }
+    })
+    return () => { void fiber.dispose?.() }
+  })
 
   try {
     registration = ctx.llm.registerAdapter(providers, adapter)

@@ -1,4 +1,4 @@
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { LlmError, type BuiltinLlmFailureCode } from '@deepseek-ai/dsh-llm'
 import { retryAfterMs } from './retry-after.js'
 
 export interface HttpDiagnostics {
@@ -9,14 +9,21 @@ export interface HttpDiagnostics {
   requestId?: string
 }
 
+/** Same bound used by OpenCode v2.3.0 ModelRetry for request-scoped provider hints. */
+export const MAX_PROVIDER_RETRY_AFTER_MS = 15 * 60_000
+
 /** Only diagnostics, never message/failure/body, may be copied into logs. */
 export class UpstreamHttpError extends LlmError {
   readonly diagnostics: HttpDiagnostics
 
   constructor(message: string, code: string, diagnostics: HttpDiagnostics) {
-    super(message, code, {
+    const retryableHint = code === 'RATE_LIMIT' || (code === 'PROVIDER_HTTP_ERROR' && diagnostics.status >= 500)
+    const delay = retryableHint && diagnostics.retryAfterMs !== undefined
+      ? Math.min(diagnostics.retryAfterMs, MAX_PROVIDER_RETRY_AFTER_MS)
+      : undefined
+    super(message, code as BuiltinLlmFailureCode, {
       status: diagnostics.status,
-      ...(diagnostics.retryAfterMs !== undefined ? { providerRetryAfterMs: diagnostics.retryAfterMs } : {}),
+      ...(delay !== undefined ? { providerRetryAfterMs: delay } : {}),
       ...(diagnostics.requestId ? { requestId: diagnostics.requestId as never } : {}),
     })
     this.diagnostics = Object.freeze({ ...diagnostics })
@@ -80,7 +87,7 @@ export async function httpError(
   const classification = reason(rawMessage, type)
   const code = response.status === 401 ? 'AUTH'
     : response.status === 403 && type === 'FreeTierError' ? 'FREE_TIER_GATE'
-      : response.status === 429 && type === 'FreeUsageLimitError' && classification === 'quota_exceeded' ? 'FREE_USAGE_LIMIT'
+      : response.status === 429 && type === 'FreeUsageLimitError' ? 'FREE_USAGE_LIMIT'
         : response.status === 429 ? 'RATE_LIMIT' : 'PROVIDER_HTTP_ERROR'
   return new UpstreamHttpError(message, code, {
     status: response.status,

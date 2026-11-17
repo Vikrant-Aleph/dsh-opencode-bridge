@@ -4,7 +4,7 @@ import {
   IMAGE_OFFLOAD_REQUIRED_CODE, LlmError, offloadedImageText,
   requestImageHandleText, requiredImageOffload, textOnlyImageText,
 } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, ImageBlock } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, ImageBlock, BuiltinLlmFailureCode } from '@deepseek-ai/dsh-llm'
 import type { ChatContentPart, ImageMessageProjection } from './opencode-protocol.js'
 
 export interface ImageInputPolicy {
@@ -37,8 +37,8 @@ export function requestImageTarget(ref: ImageAttachmentRef, policy: ImageInputPo
 
 const TOOL_IMAGE_OMITTED = '[image omitted because this route does not accept images in tool results]'
 const mediaTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
-const readFailed = () => new LlmError('Image attachment request projection could not be read.', 'IMAGE_ATTACHMENT_READ_FAILED')
-const unavailable = () => new LlmError('Image attachment request projection is unavailable.', 'IMAGE_ATTACHMENT_UNAVAILABLE')
+const readFailed = () => new LlmError('Image attachment request projection could not be read.', 'IMAGE_ATTACHMENT_READ_FAILED' as BuiltinLlmFailureCode)
+const unavailable = () => new LlmError('Image attachment request projection is unavailable.', 'IMAGE_ATTACHMENT_UNAVAILABLE' as BuiltinLlmFailureCode)
 const positiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0
 
 function validRef(ref: ImageAttachmentRef): boolean {

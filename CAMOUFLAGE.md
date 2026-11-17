@@ -23,9 +23,11 @@
 | `User-Agent` | 必须是 `opencode/latest/2.2.0/cli`，其余全对也不行 | 社区报告与本项目探针 |
 | **至少声明一个工具** | 单独一个工具即可；空数组被拒。声明中至少要有网关认识的名称 | `docs/evidence/bun-tool-minimum.json`、`docs/evidence/any-tool-vs-read.json` |
 | **系统提示含 `<env>` 块** | 仅含该块的 177 字节提示即可；去掉该块被拒 | `docs/evidence/bun-env-hypothesis.json` |
-| **工具名不含分隔符** | 名称含下划线、连字符、点号或大写会被拒；去掉分隔符即通过 | `docs/evidence/tools-field-and-token-budget-2026-11-14.json` |
+| **工具名形状** | 未识别的名称含下划线、连字符、点号或大写会被拒；网关认识的名称可带分隔符（`web_search` 按 `websearch` 通过） | `docs/evidence/tools-field-and-token-budget-2026-11-14.json`、`docs/evidence/tool-gate-codemode-2026-11-17.json` |
+| **工具声明内容** | 一次声明大量富工具被拒：真实描述文本与复杂 schema 各自独立触发；同尺寸中性工具块可过 | `docs/evidence/tool-gate-codemode-2026-11-17.json` |
 
-后三项是关键：它们由官方客户端自动生成，用户改不掉。此外，声明中至少要有一个网关认识的名称。
+工具声明、`<env>` 块、名称形状由官方客户端的形态满足，用户改不掉。工具声明内容这一项靠 Code Mode
+规避：线上只留少量简单锚点工具加 `execute`，完整目录进系统提示词（见 [技术设计 §5.3](TECHNICAL.md)）。
 
 ---
 
@@ -77,7 +79,8 @@
 |---|---|
 | 至少声明一个工具 | 调用方自己的工具即可满足；**仅当调用方没有任何工具时**才补一个占位声明，其描述劝阻调用，万一被调用则丢弃（记 `warn`），该轮正常结束 |
 | 系统提示含 `<env>` 块 | 适配器把 `environmentBlock()` 追加在 DSH 提示之后，内容取自真实工作目录 |
-| 工具名不含分隔符 | `planTools` 把名称净化为 `[a-z0-9]`，并保留映射，模型返回调用时还原 |
+| 工具名形状 | `planTools` 把名称净化为 `[a-z0-9]`，并保留映射，模型返回调用时还原 |
+| 工具声明内容 | 免费模型路由走 Code Mode：线上只声明少量简单锚点工具加 `execute`，真实目录（含各工具返回类型）进系统提示词，`execute` 委托 DSH 原生 PTC 分发 |
 | `ClientHello` | 与抓包逐字节一致，扩展零差异 |
 | 请求头 | 除 `x-opencode-project` 外，名称、大小写、顺序、值均一致 |
 | 连接 | 复用连接池、`keep-alive` |

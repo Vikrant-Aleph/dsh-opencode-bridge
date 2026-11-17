@@ -19,6 +19,7 @@ import type {
   ResolvedRetryPolicy,
   StreamChunk,
   TokenUsage,
+  BuiltinLlmFailureCode,
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
 import { prepareImageProjection, requestImageTarget, resolveImageInputPolicy, type ImageInputPolicy } from './image-input.js'
@@ -27,7 +28,9 @@ import type { FreeModelCatalog, FreeModel } from './catalog.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { noopLogger, type LoggerLike } from './logger.js'
 import { fetchWithPool, EgressCoolingError, retryAfterMs, type ProxyPool } from './proxy-pool.js'
-import { httpError, UpstreamHttpError } from './http-errors.js'
+import { httpError, UpstreamHttpError, MAX_PROVIDER_RETRY_AFTER_MS } from './http-errors.js'
+import { summarizeWireRequest, type WireDiagnosticInput } from './request-diagnostics.js'
+import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, type CodeModeHandle } from './code-mode.js'
 import {
   buildChatMessages,
   buildHeaders,
@@ -85,7 +88,7 @@ export interface AdapterOptions {
   lifetimeSignal?: AbortSignal
   /** Canonical completed-turn evidence captured once when a request starts; absent means full. */
   getCompletedReasoning?: (options: GenerateOptions) => readonly ReasoningRecord[] | undefined
-  /** Plugin-owned persistence; standalone callers retain in-memory waits. */
+  /** @deprecated Compatibility hook only; requests no longer read or write model cooldowns. */
   requestWaitState?: {
     /** `activeEgresses` lets a wait recorded on a removed egress stop applying. */
     remaining(model: string, activeEgresses?: readonly string[]): number
@@ -93,7 +96,7 @@ export interface AdapterOptions {
     describe?(model: string, activeEgresses?: readonly string[]): { until: number; probeAt: number; attempts: number; egress?: string } | undefined
     remember(model: string, delay: number, egress?: string): void
   }
-  /** Egress labels currently configured, so stale per-egress waits can be ignored. */
+  /** @deprecated Retained for caller compatibility; model wait state is no longer consulted. */
   activeEgresses?: () => readonly string[]
   /**
    * Write every outgoing request body to this file. Diagnostic only: it records the
@@ -101,6 +104,13 @@ export interface AdapterOptions {
    * default.
    */
   dumpRequestsTo?: string
+  /**
+   * Code Mode handle for the free lane. When present and the step admits the `execute`
+   * transport, the wire declares only simple anchor tools plus `execute`, and the real
+   * tool catalog moves into the system prompt. Absent keeps direct tool declaration.
+   * A getter so the handle can be populated once host services are ready.
+   */
+  codeMode?: () => CodeModeHandle | undefined
 }
 
 interface ChatChunk {
@@ -123,8 +133,6 @@ interface ChatChunk {
 
 export class OpenCodeFreeAdapter extends LlmAdapter {
   private readonly sessions = new Map<string, string>()
-  private readonly requestWaits = new Map<string, number>()
-  private overflowWaitUntil = 0
   private readonly imagePolicy: Readonly<ImageInputPolicy>
 
   /**
@@ -167,8 +175,8 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
   override providerRetryPolicy(_provider: string): ResolvedRetryPolicy {
     return resolveRetryPolicy({
       mode: 'normal', maxRetries: 2,
-      retryableCodes: ['RATE_LIMIT', 'EGRESS_COOLING', 'REQUEST_COOLING'],
-      backoff: { initialDelayMs: 2000, maxDelayMs: 120_000, jitterRatio: 0.2 },
+      retryableCodes: ['RATE_LIMIT', 'EGRESS_COOLING'],
+      backoff: { initialDelayMs: 2000, maxDelayMs: MAX_PROVIDER_RETRY_AFTER_MS, jitterRatio: 0.2 },
     }, 'opencode-bridge retry policy')
   }
 
@@ -213,6 +221,18 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
     let observedStatus: number | undefined
     let serverWaitMs: number | undefined
     let lastTransportCode: string | undefined
+    let diagnosticInput: WireDiagnosticInput | undefined
+    const emitDiagnostics = (level: 'debug' | 'warn' | 'error') => {
+      try {
+        if (!diagnosticInput) return
+        const current = this.logger.getLevel?.()
+        if (current === 'off' || (level === 'debug' && current && current !== 'debug')) return
+        const summary = summarizeWireRequest(diagnosticInput)
+        const correlation = { request: requestId, model: safeModelId(options.model), kind: options.purpose ? 'auxiliary' : 'chat' }
+        this.logger[level]('request', 'request shape', { ...correlation, ...summary.request })
+        this.logger[level]('request', 'tool schema shape', { ...correlation, ...summary.tools })
+      } catch { /* Diagnostics must not affect traffic or print an exception quoting request data. */ }
+    }
 
     const close = function* (): Generator<StreamChunk> {
       if (!open) return
@@ -233,25 +253,8 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       }
       const reasoningHistory = trimCompletedReasoning(options.messages, completedReasoning)
       const projectedOptions = reasoningHistory.messages === options.messages ? options : { ...options, messages: reasoningHistory.messages }
-      const activeEgresses = this.options.activeEgresses?.()
-      const requestWait = Math.max(
-        this.remainingRequestWait(options.model),
-        this.options.requestWaitState?.remaining(options.model, activeEgresses) ?? 0,
-      )
-      if (requestWait > 0) {
-        const observed = this.options.requestWaitState?.describe?.(options.model, activeEgresses)
-        const seconds = Math.ceil(requestWait / 1000)
-        // Say plainly that nothing was sent, and that the pause is this client's own
-        // backoff rather than the server's stated deadline, so it is not mistaken for
-        // a live rejection or for a lockout lasting hours.
-        const where = observed?.egress ? ` on ${observed.egress}` : ''
-        const serverDeadline = observed?.until ? ` The server asked for a longer pause (until ${new Date(observed.until).toISOString()}${where}), but this client retries sooner because the gateway recovers before then.` : ''
-        throw new LlmError(
-          `No request was sent: this model is backing off after an earlier server rejection. The next automatic attempt is allowed in ${seconds} seconds.${serverDeadline} Clear the cooldown in Settings to try immediately.`,
-          'REQUEST_COOLING',
-          { providerRetryAfterMs: requestWait },
-        )
-      }
+      // Like the official client, a new user request starts without a model lockout.
+      // Retry-After applies only to eligible retries inside the current host run.
       const meta = snapshot === undefined ? (await this.catalog.list(options.signal)).find(model => model.id === options.model) : snapshot ?? undefined
       const sessionId = this.sessionIdFor(options)
       requestId = mintRequestId()
@@ -259,6 +262,30 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         // OpenCode sends `strict: false` on OpenAI Chat tools for providers that accept it.
         strict: this.options.toolStrict ?? true,
       })
+      // Code Mode: the free lane refuses a request that declares many rich tools. When the
+      // step admits the `execute` transport, declare only simple anchor tools plus the
+      // transport on the wire and move the real tool catalog into the system prompt.
+      const codeMode = this.options.codeMode?.()
+      const codeModeActive = codeMode !== undefined && !options.purpose
+        && (options.tools ?? []).some(tool => tool.name === CODE_MODE_TOOL_NAME)
+      let wireTools = plan.tools
+      let codeModeAnchorNames = new Set<string>()
+      let environment = this.options.environment ?? defaultEnvironmentBlock()
+      if (codeModeActive) {
+        const transport = plan.tools.find(tool => tool.function.name === CODE_MODE_TOOL_NAME)
+        const anchors = CODE_MODE_ANCHOR_NAMES.map(name => ({
+          type: 'function' as const,
+          function: {
+            name,
+            description: 'Protocol anchor. Do not call this tool directly; use execute.',
+            parameters: { type: 'object', properties: { input: { type: 'string' } }, required: ['input'], additionalProperties: false },
+            strict: false,
+          },
+        }))
+        wireTools = transport ? [...anchors, transport] : anchors
+        codeModeAnchorNames = new Set<string>(CODE_MODE_ANCHOR_NAMES)
+        environment += '\n\n' + codeMode.instruction + '\n\n' + codeMode.renderCatalog(options.tools ?? [])
+      }
       const signals = [AbortSignal.timeout(this.options.requestTimeoutMs), options.signal, this.options.lifetimeSignal].filter((value): value is AbortSignal => value !== undefined)
       const signal = AbortSignal.any(signals)
       signal.throwIfAborted()
@@ -272,7 +299,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         requireReasoning: requiresReasoningReplay(meta, options.model, this.options.recipe.baseUrl),
         // The gateway refuses a request whose system prompt carries no <env>
         // block; the values inside it are not checked.
-        environment: this.options.environment ?? defaultEnvironmentBlock(),
+        environment,
       })
 
       const body: Record<string, unknown> = {
@@ -280,7 +307,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         messages,
         stream: true,
         stream_options: { include_usage: true },
-        tools: plan.tools,
+        tools: wireTools,
       }
       // Match the current OpenCode OpenAI Chat encoder. `auto` is the API
       // default; cache affinity remains in headers instead of an undeclared
@@ -315,17 +342,20 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       // Wait for a transport that is still resolving, so the first request after
       // plugin load does not silently use the plain-fetch fallback.
       await this.transportReady
+      const headers = buildHeaders(this.options.recipe, sessionId, requestId, {
+        requestIdHeader: this.options.requestIdHeader,
+        attribution: this.options.userAgentAttribution,
+        tracing: this.options.tracing ?? true,
+      })
+      const serializedBody = serializeBody(body, this.options.dumpRequestsTo, requestId)
+      diagnosticInput = { endpoint, headers, serializedBody, configuredTransport: Boolean(this.options.bunFetch) }
       const response = await fetchWithPool({
         pool: this.options.pool,
         url: endpoint,
         init: {
           method: 'POST',
-          headers: buildHeaders(this.options.recipe, sessionId, requestId, {
-            requestIdHeader: this.options.requestIdHeader,
-            attribution: this.options.userAgentAttribution,
-            tracing: this.options.tracing ?? true,
-          }),
-          body: serializeBody(body, this.options.dumpRequestsTo, requestId),
+          headers,
+          body: serializedBody,
           signal,
         },
         signal,
@@ -338,10 +368,8 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
           const error = await httpError(res)
           errors.set(res, error)
           serverWaitMs = retryAfterMs(res)
-          if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs, egress)
-          // A named free-usage rejection does not establish an IP-wide scope.
-          // Preserve its request wait, but do not rotate identities or poison
-          // the shared metadata/other-model pool on that inference alone.
+          // A typed free-usage rejection is terminal for this run, not a persisted
+          // model ban or evidence that every model on this egress is unavailable.
           return 'request'
         },
         onAttempt: (event) => {
@@ -361,16 +389,15 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         let error = errors.get(response) ?? await httpError(response)
         if (response.status === 429) {
           serverWaitMs = retryAfterMs(response)
-          if (serverWaitMs !== undefined) this.rememberRequestWait(options.model, serverWaitMs, egress)
-          const wait = Math.max(error.diagnostics.retryAfterMs ?? 0, this.options.pool?.waitMs() ?? 0)
-          if (wait > 0) error = new UpstreamHttpError(
-            `${error.message} Retry after at least ${Math.ceil(wait / 1000)} seconds.`, error.failure.code,
-            { ...error.diagnostics, retryAfterMs: wait },
+          const wait = error.failure.providerRetryAfterMs
+          if (wait !== undefined && error.failure.code === 'RATE_LIMIT') error = new UpstreamHttpError(
+            `${error.failure.message} Retry after at least ${Math.ceil(wait / 1000)} seconds.`, error.failure.code,
+            error.diagnostics,
           )
         }
         throw error
       }
-      if (!response.body) throw new LlmError('opencode free tier returned an empty stream', 'PROVIDER_HTTP_ERROR')
+      if (!response.body) throw new LlmError('opencode free tier returned an empty stream', 'PROVIDER_HTTP_ERROR' as BuiltinLlmFailureCode)
 
       const calls = new Map<number, WireCall>()
       let usage: TokenUsage | undefined
@@ -385,7 +412,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
           continue
         }
         if (chunk.error) {
-          throw new LlmError(chunk.error.message ?? 'opencode free tier stream error', 'PROVIDER_STREAM_ERROR')
+          throw new LlmError(chunk.error.message ?? 'opencode free tier stream error', 'PROVIDER_STREAM_ERROR' as BuiltinLlmFailureCode)
         }
         const delta = chunk.choices?.[0]?.delta
         const text = delta?.content
@@ -430,7 +457,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
 
       const wireCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call)
       if (wireCalls.length && finishReason !== 'tool_calls') {
-        throw new LlmError('Tool call batch did not finish completely; no tools were emitted.', 'TOOL_BRIDGE_INCOMPLETE')
+        throw new LlmError('Tool call batch did not finish completely; no tools were emitted.', 'TOOL_BRIDGE_INCOMPLETE' as BuiltinLlmFailureCode)
       }
       // Pass returned calls through under their own names. The one declaration
       // DSH cannot execute is the protocol placeholder, which exists only to
@@ -443,11 +470,13 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         const callerName = plan.wireToCaller.get(translated.name)
         return callerName && callerName !== translated.name ? { ...translated, name: callerName } : translated
       })
-      const dispatchable = plan.readAnchor
-        ? normalized.filter((call) => call.name !== READ_ANCHOR.function.name)
-        : normalized
+      const dispatchable = normalized.filter((call) => {
+        if (plan.readAnchor && call.name === READ_ANCHOR.function.name) return false
+        if (codeModeAnchorNames.has(call.name)) return false
+        return true
+      })
       if (dispatchable.length !== normalized.length) {
-        this.logger.warn('adapter', 'dropped a call to the protocol placeholder tool', {
+        this.logger.warn('adapter', 'dropped a call to a protocol placeholder tool', {
           model: safeModelId(options.model),
           dropped: normalized.length - dispatchable.length,
         })
@@ -469,6 +498,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       }
 
       signal.throwIfAborted()
+      emitDiagnostics('debug')
       this.logger.info('adapter', 'completed', {
         model: safeModelId(options.model),
         session: sessionId,
@@ -500,7 +530,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       const partial = outputStarted && !['TOOL_BRIDGE_REJECTED', 'TOOL_BRIDGE_INCOMPLETE'].includes(original.code)
       const failure = partial ? { ...original, code: 'PARTIAL_STREAM_ERROR' } : original
       const diagnostic = error instanceof UpstreamHttpError ? error.diagnostics : undefined
-      const retryEligible = !outputStarted && ['RATE_LIMIT', 'EGRESS_COOLING', 'REQUEST_COOLING'].includes(failure.code)
+      const retryEligible = !outputStarted && ['RATE_LIMIT', 'EGRESS_COOLING'].includes(failure.code)
       const transport = lastTransportCode ?? safeTransportCode((error as { cause?: { code?: unknown } })?.cause?.code)
       const data = {
         model: safeModelId(options.model), code: failure.code,
@@ -519,32 +549,12 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
             : partial ? 'Provider stream failed after output started; automatic replay disabled'
               : 'Provider request failed',
       }
+      emitDiagnostics(retryEligible ? 'warn' : 'error')
       if (retryEligible) this.logger.warn('adapter', 'request deferred', data)
       else this.logger.error('adapter', 'stream failed', data)
       if (outputStarted) yield* close()
       yield { type: 'finish', reason: { kind: 'error', failure } }
     }
-  }
-
-  /** Keep server waits even across manual calls and concurrent successful requests. */
-  private rememberRequestWait(model: string, delay: number, egress?: string): void {
-    this.options.requestWaitState?.remember(model, delay, egress)
-    const now = Date.now()
-    const until = Math.min(Number.MAX_SAFE_INTEGER, now + delay)
-    for (const [id, deadline] of this.requestWaits) if (deadline <= now) this.requestWaits.delete(id)
-    if (this.requestWaits.has(model) || this.requestWaits.size < 256) {
-      this.requestWaits.set(model, Math.max(this.requestWaits.get(model) ?? 0, until))
-    } else {
-      // Never evict a still-blocked model and forget its server deadline.
-      this.overflowWaitUntil = Math.max(this.overflowWaitUntil, until)
-    }
-  }
-
-  private remainingRequestWait(model: string): number {
-    const now = Date.now()
-    const deadline = this.requestWaits.get(model) ?? 0
-    if (deadline <= now) this.requestWaits.delete(model)
-    return Math.max(0, Math.ceil(Math.max(deadline, this.overflowWaitUntil) - now))
   }
 
   private sessionIdFor(options: GenerateOptions): string {

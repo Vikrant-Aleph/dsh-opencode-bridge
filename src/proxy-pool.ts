@@ -261,6 +261,19 @@ export class ProxyPool {
     slot.coolingUntil = Math.max(slot.coolingUntil, Math.min(Number.MAX_SAFE_INTEGER, now + wait))
   }
 
+  /** Clear active egress waits and their backoff streaks without replacing entries. */
+  clearCooldowns(): number {
+    const now = this.now()
+    let cleared = 0
+    for (const slot of this.slots) {
+      if (slot.coolingUntil > now) cleared += 1
+      slot.coolingUntil = 0
+      slot.failures = 0
+      delete slot.lastCode
+    }
+    return cleared
+  }
+
   /** Transport failure: unreachable proxy, DNS, reset. Short cooldown. */
   failed(index: number, code: string): void {
     const slot = this.slots[index]

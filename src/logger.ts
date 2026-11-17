@@ -34,6 +34,8 @@ export interface LoggerLike {
   info(scope: string, msg: string, data?: Record<string, unknown>): void
   warn(scope: string, msg: string, data?: Record<string, unknown>): void
   error(scope: string, msg: string, data?: Record<string, unknown>): void
+  /** Optional level introspection avoids preparing successful-request diagnostics when disabled. */
+  getLevel?(): LogLevel
 }
 
 /** A logger that discards everything; the default for standalone use. */
@@ -42,6 +44,7 @@ export const noopLogger: LoggerLike = {
   info: () => {},
   warn: () => {},
   error: () => {},
+  getLevel: () => 'off',
 }
 
 export interface LogRecord {

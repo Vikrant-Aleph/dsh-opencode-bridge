@@ -37,7 +37,7 @@ README 面向访客（概览、安装、限制、故障排查），本文件面�
 ## 1. 插件定位
 
 一个 `LlmAdapter`，复刻官方 OpenCode 客户端的线上协议，让 DSH 无需账号即可使用
-`opencode.ai` 的 `-free` 模型（不用安装opencode）。
+`opencode.ai` 的 `-free` 模型。
 
 它**不**修改 agent loop、不自行执行工具、不 patch 全局 HTTP 入口。工具执行、权限与
 schema 校验都留在 DSH。
@@ -72,12 +72,13 @@ https://opencode.ai/inference/...
 |---|---|
 | `src/catalog.ts` | 免费模型发现：读官方模型目录，含 TTL 与重试。 |
 | `src/project-identity.ts` | 按真实目录推导官方 `x-opencode-project`。 |
-| `src/request-waits.ts` | 按模型持久化服务端重试截止时间，跨重载保留。 |
+| `src/request-waits.ts` | 兼容并清理旧版冷却文件；当前请求不读取或写入按模型等待。 |
 | `src/http-errors.ts` | 上游错误分类；安全、有界的诊断信息。 |
 | `src/retry-after.ts` | 严格解析 `Retry-After`（毫秒、秒、HTTP-date）。 |
 | `src/reasoning-policy.ts` | 仅 Host 侧的已完成轮次思考投影，供可选精简使用。 |
 | `src/context-service.ts` | 上下文精简偏好（RPC 与 agent 工具共用同一操作）。 |
 | `src/logger.ts`, `log-service.ts` | 分级、脱敏的诊断日志。 |
+| [request-diagnostics.ts](src/request-diagnostics.ts) | 有界、无内容的真实请求结构摘要。 |
 | `src/proxy-service.ts` | 设置页使用的出口池编辑与探测。 |
 | `client.js` | 设置页（浏览器模块，非 tsc 产物）。 |
 
@@ -268,14 +269,18 @@ Hello 约 274 字节，官方是 1482。
 
 - **流式**：增量解析 SSE，文本、思考与工具调用增量映射为 DSH chunk。输出开始后的
   流失败不会重放（`PARTIAL_STREAM_ERROR`）。
-- **重试**：适配器声明有界策略（`maxRetries: 2`、初始 2s、上限 120s、抖动 0.2），
-  自身不启动定时器。服务端给出的等待按原值遵守，绝不被本地策略缩短、抖动或封顶。
-- **按模型等待**：观测到的 `Retry-After` 按模型保存并持久化，并记录产生它的出口；
-  设定的截止时间。其它模型与元数据请求不受影响。
-- **免费额度拒绝**：类型化的 `FreeUsageLimitError` 转为 `FREE_USAGE_LIMIT`——不重试，
-  这不构成整个出口已耗尽的证据。本地猜测不会成为服务端等待。等待文件每次检查前重读，外部清空立即生效；记录所属出口不再被配置时该等待自动失效；设置页提供「清除冷却」。
+- **免费额度拒绝**：HTTP 429 且类型为 `FreeUsageLimitError` 时返回 `FREE_USAGE_LIMIT`。本轮结束，不自动重试，不向宿主传递重试等待。原始 `Retry-After` 仅保留在诊断中。
+- **等待范围**：新请求不继承上一轮的按模型等待。适配器不再维护内存模型锁，也不写入模型冷却文件；升级时清空旧文件，且不从日志恢复冷却。
+- **临时限流**：重试由 DSH 调度（最多 2 次、初始 2s、抖动 0.2）。可重试响应的等待上限为 15 分钟，原始值保留在诊断中。等待不跨手动请求保存。
+- **清除冷却**：同一个 RPC 同步清空当前出口池的等待、失败退避计数及旧版模型冷却文件，不替换出口条目，不需要重启。
 
-**重探策略**：网关的 `Retry-After` 指向 UTC 午夜，但实测它几分钟内就会恢复服务（17:24 被拒、17:27 同一模型可用）。因此冷却只阻塞一个指数退避窗口——60 秒起、逐次翻倍、上限 15 分钟——而不是服务端声称的时长；服务端截止时间仍记录，仅作上限与诊断。
+依据官方 v2.3.0 的 [错误分类](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/ai/src/provider-error.ts)与
+[ModelRetry](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/model-retry.ts)：额度拒绝默认不自动重试，
+只有临时限流和提供方内部错误会使用重试等待，且最多接受 15 分钟。
+官方 CLI 的通用重试预算是 10 次；本插件保留通过 DSH 执行的 2 次预算。本次对齐的是额度错误处理、等待范围和等待上限，不是替换宿主的整个重试循环。
+
+2026-11-17 已用旧版适配器复现清空失效：存储已返回 0，适配器仍从另一份内存 Map 返回 `REQUEST_COOLING`，没有发送下一次请求。
+移除这份跨请求状态后，回归测试覆盖同一实例清除、旧文件迁移和再次发送。
 - **取消**：POST 前、缓冲后、每个工具块前均检查。
 
 ### 5.1 图片
@@ -291,14 +296,41 @@ Hello 约 274 字节，官方是 1482。
 （`trimCompletedReasoning`）只移除 Canonical **已完成**轮次的思考，通过消息 id 与
 SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影响新请求，不删除本地历史。
 
+### 5.3 Code Mode（免费模型的工具声明）
+
+免费通道会拒绝一次声明大量富工具的请求：真实描述文本与复杂 schema 各自都会触发
+`FreeUsageLimitError`（同尺寸中性工具块对照可过，真实工具块被拒，见
+[实测记录](docs/evidence/tool-gate-codemode-2026-11-17.json)）。官方客户端用 Code Mode 规避：
+线上只保留少量工具，完整目录进系统提示词，经一个代码执行入口间接调用。
+
+[code-mode.ts](src/code-mode.ts) 让免费模型路由采用同样的形状：
+
+- 线上只声明几个简单锚点工具（`read`/`write`/`edit` 等认识的名字、平凡 schema）加 `execute`。
+  锚点只为满足网关的形状检查，模型被明确告知不要直接调用；误调会被适配器丢弃。
+- 真实工具目录用 DSH 的 `renderToolsSdk` 渲染进系统提示词，并附"只能直接调 `execute`"的指令。
+  目录带每个工具真实的返回 schema（如 `read` 返回 `{lines,totalLines}`、`glob` 返回 `{root,paths}`），
+  模型按类型解析返回，不用猜结构。
+- `execute` 是注册的普通工具，其执行体委托一个 `PtcExecutor` 实例跑 `run_code`，复用 DSH 原生
+  PTC 的沙箱运行时与受防护的嵌套分发。DSH 的 `run_code` 是执行器私有、不可注册，故用 `execute` 承载。
+- 仅当该步准入 `execute`（免费模型路由）时启用；其他 agent 的执行器与工具声明不变。
+
+行为更接近 DSH 的 PTC 模式。宿主无 PTC 运行时时自动退回直接声明。
+
+已在真实免费模型会话端到端验证：简单应答、四步读写任务、以及含并行读取与 `edit` 追加的六步复杂任务
+都正确完成（见 [复杂任务记录](docs/evidence/codemode-complex-test-2026-11-17.json)）。一个已知边界：
+SDK 用 TypeScript 类型渲染参数，表达不了 `read` 的 `limit<=2000` 这类数值上限，模型可能先猜大值、
+被工具拒绝后再改对；这与 DSH 原生 PTC 的渲染一致。
+
 ## 6. 模型目录
 
-`src/catalog.ts` 只读一个来源：`https://models.opencode.ai/api.json`，与官方客户端的
-`ModelsDev.Service` 同源。取其中 `opencode` 提供者下成本为 0 的模型，排除 `status: deprecated`。
+[catalog.ts](src/catalog.ts) 只读稳定版 v1 目录 `https://models.opencode.ai/api.json`，取其中 `opencode` 提供者下成本为 0 的模型，排除 `status: deprecated`。
+官方 v2.3.0 的 [ModelsDev](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/models-dev.ts) 默认读取同一服务的
+`/experimental/v2.0/api.json?type=chat,decision,image`，并使用缓存与内置快照。
+两者同源，但读取路径和缓存层并非完全一致；插件目前尚未迁移到 v2 目录。
 
 | 项 | 值 | 依据 |
 |---|---|---|
-| 数据源 | 单一，官方的模型目录 | 官方客户端也只读这一个 |
+| 数据源 | 单一，官方稳定版 v1 目录 | 与官方客户端同源，API 版本不同 |
 | 刷新间隔 | 5 分钟，与官方 TTL 一致 | `Duration.minutes(5)` |
 | 失败处理 | 保留上一份快照，60s 后重试 | 与官方退回缓存同效 |
 
@@ -339,7 +371,7 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 | `maxRequestImageBytes` | `20971520` | base64 总预算。 |
 | `maxRequestImages` | `20` | 保留的图片出现次数。 |
 | `proxies` | `[]` | 出口池，按顺序。 |
-| `proxyCooldownMs` | `60000` | 本地兜底冷却；不缩短服务端等待。 |
+| `proxyCooldownMs` | `60000` | 可选出口池的本地兜底冷却；免费额度拒绝不启动它。 |
 | `proxyStorePath` | `''` | 设置页拥有的池存储。 |
 | `logLevel` | `warn` | `debug`\|`info`\|`warn`\|`error`\|`off`。 |
 | `logDir` | `''` | 默认使用 profile 日志目录。 |
@@ -350,7 +382,7 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 | 现象 | 可能原因 | 处理 |
 |---|---|---|
 | `403 FreeTierError` | 身份形态被拒 | 检查 UA、会话头、是否至少声明了一个工具、以及 `<env>` 块是否存在（§3）。 |
-| `429 FreeUsageLimitError` | 免费通道拒绝或真实配额 | 读诊断；不要重试、轮换或清空已保存的等待。 |
+| `429 FreeUsageLimitError` | 免费通道拒绝或真实配额 | 读取请求摘要，在同出口、同模型、相近时间对照实际结果；错误名不能确认 IP 配额原因。 |
 | `400 MissingSessionID` | 缺少会话头 | 会话生成失效。 |
 | 端点 `404`/`426` | 路由迁移 | 重读目录的 `provider.api`。 |
 | 目录为空 | 目录请求失败 | 查日志；上一份快照仍被保留。 |
@@ -363,6 +395,19 @@ SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影
 3. 只改抓包与之矛盾之处，且只按抓包所指方向改。
 4. 在 `tests/` 中新增或更新固定该值的断言。
 5. 在 §11 记录本次变更。
+
+### 8.1 请求结构摘要
+
+失败请求默认追加 `request shape` 和 `tool schema shape` 两条摘要，与错误行共享 `request` 标识。
+成功请求的摘要仅在写入级别为 `debug` 时记录；`off` 关闭日志。面板的“显示最低级别”只筛选现有记录，不会开启 Debug 写入。
+可通过配置 `logLevel` 或 `opencode_bridge_log` 的 `level` 操作调整写入级别；`stat` 会报告诊断格式版本。
+
+- **请求摘要**：已识别的公共路径、传输选择、请求字节数、输出上限、温度、消息角色与长度、环境块数量、图片数量、工具调用配对计数。
+- **工具摘要**：声明数量、名字格式计数、schema 对象、引用和组合结构的统计。不写工具名字、属性名、描述、枚举值或默认值。
+- **隐私**：不写消息正文、工具调用参数、结果、图片数据或密钥。自定义 URL、查询参数和非标准 UA 不原样记录。
+- **上限**：最多解析 8 MiB 请求、检查 512 条消息、128 个工具及 8192 个 schema 节点，深度上限 32；达到上限会标记 `capped`。摘要失败不影响模型请求。
+
+`transport: configured` 表示已设置专用传输函数，`node-fetch` 表示普通 fetch；该字段不单独证明 TLS 字节一致。
 
 ## 9. 测试
 
@@ -381,7 +426,7 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | `reasoning-*` | 回放规则、精简资格、流探针。 |
 | `image-*`、`vision-*` | 附件投影、预算、工具图片上提。 |
 | `retry-integration`、`proxy-rotation` | 服务端等待、池冷却、不重放保证。 |
-| `project-identity`、`request-waits` | 身份推导、持久化截止时间。 |
+| `project-identity`、`request-waits`、`official-cooldown-policy` | 身份推导、旧版状态清理、无跨请求模型锁与即时清除出口等待。 |
 | `catalog-*`、`log-*`、`client-boot` | 目录生命周期、脱敏、设置页。 |
 
 ### 9.1 实时探针
@@ -397,9 +442,14 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | `vision-compat-live.mjs` | 图片输入与工具结果图片。 |
 | `reasoning-compat-live.mjs`、`reasoning-roundtrip-live.mjs` | 思考字段的回放与往返。 |
 | `wire-dump.mjs` | 打印当前实际发出的线上指纹。 |
+| `official-client-ab-live.mjs --run --official <exe> --out <new.json>` | 隔离官方 CLI 配置，与真实适配器及 TLS 传输在同机、同模型上对照；支持合成工具数量与系统提示大小控制。 |
 
-判定要点：免费通道会在若干次请求后整体拒绝。**任何一次 429 都必须与官方客户端在同一时刻对照**——
-官方也失败说明是配额，官方通过则说明伪装仍有缺口。
+2026-11-17 的[同机对照记录](docs/evidence/official-client-comparison-2026-11-17.json)中，官方 v2.3.0 与插件均成功。
+插件分别声明 7 个、52 个合成工具，以及 52 个工具加 60 KB 系统提示填充；最大请求体约 72 KB。
+范围是受控合成请求，真实 UI 历史需另行复现。这些结果不能解释其他时刻或请求中的 429。
+
+判定要点：先在同出口、同模型、相近时间对照实际结果。两边都被拒时，先排查上游状态与出口条件；
+只有插件被拒时，再单变量比较工具、消息与请求参数。`FreeUsageLimitError` 本身不能确认 IP 额度已耗尽。
 
 ## 10. 安全、隐私与署名
 
@@ -413,8 +463,7 @@ node --test tests/*.test.mjs                            # 全量离线测试
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
-| 日期 | 版本 | 变更 |
-|---|---|---|
+| 2026-11-17 | 未发布 | 移除跨请求模型冷却；清除冷却同步清理活动出口池及旧状态；额度拒绝与官方默认行为对齐，重试等待上限 15 分钟。 |
 | 2026-11-13 | **1.0.0** | **找到并满足网关的两项要求。** 两项结构要求现已满足：至少声明一个工具（名称任意）、系统提示含 `<env>` 块。`read` 占位仅在调用方没有任何工具时添加，其描述明确劝阻调用；万一被调用则丢弃该调用而不是让整轮失败。传输层：`wreq` 持久 Transport 与连接池、`Connection: keep-alive`、官方头大小写与位置、`curvesList` 裁剪、`sigalgsList` 补齐（`ed25519` + `ECDSA+SHA512`），以及此前导致传输层从未生效的接线缺失；选中的代理 URL 现在会传给非 undici 传输层，因此 Bun 形态传输下代理轮换仍有效。移除工具桥层、`opencode_bridge_audit` 与失效的 `harnessSystem` 选项。 |
 | 2026-10-23 | 0.5.5 | 可选已完成轮次思考精简，含持久化设置标签页。 |
 | 2026-10-22 | 0.5.4 | 官方附件图片（Issue #3）；工具结果图片上提。 |
@@ -434,7 +483,7 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | **身份头** | 官方客户端恒发、用户无法更改的请求头（§3）。 |
 | **占位声明** | 仅在调用方没有任何工具时发送，用于满足网关“至少一个工具”的要求。 |
 | **净化名** | 声明到线上的工具名，已去掉分隔符；返回调用时映射回调用方的真实工具名。 |
-| **服务端等待** | 来自上游的 `Retry-After`；绑定到产生它的出口，只阻塞一个有上限的退避窗口，可手动清除。 |
+| **服务端等待** | 当前运行中可重试错误的 `Retry-After` 提示，上限 15 分钟；免费额度拒绝仅记录原始值，不据此锁定模型。 |
 | **出口** | 一条通往上游的配置路线（`direct` 或代理）。 |
 | **Bun 形态传输** | 复刻官方客户端 `ClientHello` 的 wreq-js 握手。 |
 

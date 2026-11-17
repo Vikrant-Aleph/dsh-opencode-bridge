@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { FreeModelCatalog } from '../lib/catalog.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from '../lib/protocol-defaults.js'
 import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 import { retryAfterMs } from '../lib/retry-after.js'
 
@@ -28,10 +29,10 @@ const fixtureMap = new Map(fixtures.map(item => [item.attachment.attachmentId, i
 const report = { startedAt: new Date().toISOString(), feature: 'unreleased vision candidate', baseVersion: JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version, syntheticOnly: true, actualToolsExecuted: 0, attachmentReader: 'synthetic test double for live wire verification; production uses ctx.attachments', models: [], cases: [], posts: 0 }
 const save = () => fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n')
 const base = 'https://opencode.ai/inference/v1'
-const recipe = { baseUrl: base, apiKey: 'public', userAgent: 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14', client: 'cli', project: 'global', extraHeaders: {} }
+const recipe = { baseUrl: base, apiKey: 'public', userAgent: DEFAULT_PROTOCOL_USER_AGENT, client: 'cli', project: 'global', extraHeaders: {} }
 let discoveryFailed = false
 const quiet = { debug() {}, info() {}, warn() { discoveryFailed = true }, error() { discoveryFailed = true } }
-const catalog = new FreeModelCatalog(base, { includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 }, quiet)
+const catalog = new FreeModelCatalog({ includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 }, quiet)
 let models
 try { models = await catalog.refresh() } finally { catalog.dispose() }
 if (discoveryFailed || !models.length) throw new Error('Fresh free-model discovery unavailable')

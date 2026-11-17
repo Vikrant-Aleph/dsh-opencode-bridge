@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { FreeModelCatalog } from '../lib/catalog.js'
+import { DEFAULT_PROTOCOL_USER_AGENT } from '../lib/protocol-defaults.js'
 import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 
 const args = process.argv.slice(2)
@@ -21,7 +22,7 @@ const logger = Object.fromEntries(['debug', 'info', 'warn', 'error'].map(level =
   if (level === 'warn' || level === 'error') report.diagnostics.push({ level, scope, message, ...keep })
 }]))
 const base = 'https://opencode.ai/inference/v1'
-const catalog = new FreeModelCatalog(base, { includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 }, logger)
+const catalog = new FreeModelCatalog({ includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 }, logger)
 const originalFetch = globalThis.fetch
 let expectedReasoning
 let sent = 0
@@ -33,7 +34,7 @@ try {
   if (!meta || !meta.efforts?.some(effort => effort.id === 'high')) throw new Error('Required free model/high effort is not currently advertised')
   const tool = { name: 'read', description: 'Returns a synthetic fixture string for protocol verification. This tool does not access a filesystem.', parameters: { type: 'object', properties: { file_path: { type: 'string', enum: ['fixture.txt'] } }, required: ['file_path'], additionalProperties: false } }
   const adapter = new OpenCodeFreeAdapter(catalog, {
-    providerRoute: 'opencode-bridge', recipe: { baseUrl: base, apiKey: 'public', userAgent: 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14', client: 'cli', project: 'global', extraHeaders: {} },
+    providerRoute: 'opencode-bridge', recipe: { baseUrl: base, apiKey: 'public', userAgent: DEFAULT_PROTOCOL_USER_AGENT, client: 'cli', project: 'global', extraHeaders: {} },
     requestTimeoutMs: 90_000, logger,
   })
   globalThis.fetch = async (url, init) => {

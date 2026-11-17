@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply, Config } from '../lib/index.js'
 import { PluginLogger } from '../lib/logger.js'
+import { requestWaitScope } from '../lib/request-waits.js'
 
 const BASE = 'https://relay.invalid/v1'
 const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve() }
@@ -118,6 +119,19 @@ function setup(t, overrides = {}, { replaceAvailable = true } = {}) {
   }
 }
 
+test('plugin startup retires legacy model cooldown files before serving requests', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'legacy-cooldown-boot-'))
+  t.after(() => { const actual = realpathSync(directory); assert.equal(actual, directory); rmSync(actual, { recursive: true, force: true }) })
+  const file = join(directory, `request-waits-${requestWaitScope(BASE, 'public')}.json`)
+  writeFileSync(file, JSON.stringify({ version: 3, waits: [['alpha', Date.now() + 54_000_000, 'direct (this machine)', Date.now() + 60_000, 1]], overflowUntil: 0 }))
+  const f = setup(t, { proxyStorePath: join(directory, 'proxies.json') })
+  const saved = JSON.parse(readFileSync(file, 'utf8'))
+  assert.deepEqual(saved.waits, [])
+  assert.equal(saved.overflowUntil, 0)
+  await flush()
+  assert.deepEqual(ids(await f.adapter.listModels('route-one')), ['alpha'])
+})
+
 test('schema defaults to 300000ms and apply starts exactly one immediate catalog prefetch', async t => {
   assert.equal(Config({}).modelRefreshIntervalMs, 300_000)
   const f = setup(t)
@@ -127,7 +141,7 @@ test('schema defaults to 300000ms and apply starts exactly one immediate catalog
   assert.equal(f.fetches.length, 1)
   assert.equal(f.registrations.length, 1)
   assert.equal(f.replacements.length, 1)
-  assert.deepEqual(f.injections.map(entry => entry.services), [['settings'], ['connection'], ['sessionProjections'], ['connection'], ['connection']])
+  assert.deepEqual(f.injections.map(entry => entry.services), [['settings'], ['connection'], ['sessionProjections'], ['connection'], ['connection'], ['tools', 'systemPrompt', 'ptcRuntime']])
   await f.tick(299_999)
   assert.equal(f.fetches.length, 1)
   await f.tick(1)

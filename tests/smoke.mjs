@@ -70,7 +70,6 @@ check('a recognised name is present', wireNames.some((n) => ['read', 'write', 'e
 // --- 3. Live catalog ----------------------------------------------------------
 const transport = await createBunFetch({ timeoutMs: 120_000 })
 const catalog = new FreeModelCatalog(
-  'https://opencode.ai/inference/v1',
   { includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 },
   { debug() {}, info() {}, warn() {}, error() {} },
 )

@@ -112,7 +112,7 @@ test('large and overflow positive waits saturate safely rather than shortening t
 test('minimum combines with parsed hint as a floor, including date hint and absent hint', async () => {
   for (const [headers, minimum, expected] of [[{ 'retry-after': '7200' }, 1000, 7_200_000], [{ 'retry-after-ms': '2' }, 5000, 5000], [{}, 2.1, 3], [{}, -1, undefined], [{}, Infinity, undefined], [{ date: new Date(now).toUTCString(), 'retry-after': new Date(now + 60_000).toUTCString() }, 90_000, 90_000]]) {
     const error = await httpError(response(429, {}, headers), { minimumRetryAfterMs: minimum, now })
-    assert.equal(error.failure.providerRetryAfterMs, expected)
+    assert.equal(error.failure.providerRetryAfterMs, expected === undefined ? undefined : Math.min(expected, 900_000))
     assert.equal(error.diagnostics.retryAfterMs, expected)
   }
 })

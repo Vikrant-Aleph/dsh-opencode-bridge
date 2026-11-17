@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "Use OpenCode's free models in DSH (no OpenCode installation required) without an account or API key. Reproduces the official client's request shape plus its TLS and HTTP fingerprints, with automatic model refresh, optional context trimming of completed-turn reasoning and egress-proxy rotation.",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -83,6 +83,11 @@
     "@deepseek-ai/dsh-session": ">=0.2.1-rc.2",
     "@deepseek-ai/dsh-session-projection": ">=0.2.1-rc.2",
     "@deepseek-ai/dsh-settings": ">=0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-tool-executor-ptc": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-ptc-runtime": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-scope": ">=0.2.2-rc.3",
     "@deepseek-ai/schemastery": "*"
   },
   "peerDependenciesMeta": {
@@ -109,18 +114,44 @@
     },
     "@deepseek-ai/dsh-settings": {
       "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-executor-ptc": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-ptc-runtime": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-scope": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
-    "@deepseek-ai/schemastery": "3.18.4",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-attachment": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-brand": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-error": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-ptc-runtime": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-ptc-runtime-node": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-sandbox": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-sandbox-policy": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-scope": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session-projection": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-settings": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tool-executor-ptc": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-user-approval": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-working-directory": "0.2.2-rc.3",
+    "@deepseek-ai/schemastery": "3.19.0",
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3",
     "yaml": "^2.9.1"
@@ -128,7 +159,7 @@
   "dependencies": {
     "socks": "^2.8.10",
     "undici": "^7.30.1",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "optionalDependencies": {
     "wreq-js": "^3.2.0"

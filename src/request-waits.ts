@@ -19,11 +19,9 @@ const PROBE_CAP_MS = 15 * 60_000
 /**
  * One observed rejection.
  *
- * `until` is the deadline the server asked for and is kept for diagnostics and the
- * message. `probeAt` is when this client will try again: the gateway's free lane
- * recovers far sooner than its `Retry-After` claims (measured: refused at 17:24,
- * served again at 17:27), so waiting for the stated deadline would strand a model
- * for hours over a transient refusal.
+ * `until` is the recorded server deadline. `probeAt` and `attempts` describe the
+ * short exponential wait used by older releases. The current adapter does not
+ * consult these fields; they are retained for legacy-state parsing and cleanup.
  */
 export interface RequestWaitSnapshot {
   model: string
@@ -55,15 +53,15 @@ export function legacyRequestWaits(lines: readonly string[], now: number): Array
 }
 
 /**
- * Persisted per-model backoff after an observed rejection.
+ * Legacy per-model state, retained for migration and explicit cleanup.
  *
- * A wait is recorded with the egress that produced it and stops applying once that
- * egress is no longer configured. It also does not block until the server's stated
- * deadline: it blocks for a short, doubling probe delay instead, because the gateway
- * serves again long before the deadline it reports.
- *
- * The file is re-read whenever it changes on disk, so clearing it externally (or
- * through {@link clear}) takes effect immediately instead of after a restart.
+ * Older versions recorded an egress, raw deadline and exponential probe window.
+ * Reading those formats lets an upgrade clear existing files without reviving a
+ * lock from old log entries. New inference requests never use this table.
+ */
+/**
+ * @deprecated Legacy state reader retained to erase cooldowns written by older releases.
+ * Current inference requests neither consult this store nor record new model waits.
  */
 export class RequestWaitStore {
   private waits = new Map<string, RequestWaitSnapshot>()

@@ -55,7 +55,6 @@ const check = (name, ok, detail) => {
 
 const transport = await createBunFetch({ timeoutMs: 120_000 })
 const catalog = new FreeModelCatalog(
-  'https://opencode.ai/inference/v1',
   { includeDeprecated: false, extraModels: [], refreshIntervalMs: 0 },
   { debug() {}, info() {}, warn() {}, error() {} },
 )

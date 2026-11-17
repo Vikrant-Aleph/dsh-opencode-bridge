@@ -25,11 +25,13 @@ protocol precondition. The test is therefore "is it checked", not "is it configu
 | `User-Agent` | Must be `opencode/latest/2.2.0/cli`; everything else correct is not enough | Community reports and this project's probes |
 | **At least one declared tool** | A single tool is enough; an empty array is refused. At least one name must be one the gateway recognises | `docs/evidence/bun-tool-minimum.json`, `docs/evidence/any-tool-vs-read.json` |
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing only that block passes; removing it is refused | `docs/evidence/bun-env-hypothesis.json` |
-| **Tool names without separators** | Underscores, dashes, dots or capitals are refused; removing the separators passes | `docs/evidence/tools-field-and-token-budget-2026-11-14.json` |
+| **Tool name shape** | An unrecognized name with underscores, dashes, dots or capitals is refused; a name the gateway recognises may carry separators (`web_search` passes as `websearch`) | `docs/evidence/tools-field-and-token-budget-2026-11-14.json`, `docs/evidence/tool-gate-codemode-2026-11-17.json` |
+| **Tool declaration content** | Declaring many rich tools at once is refused: the real description text and the complex schemas each trigger it independently; a same-size neutral tool block passes | `docs/evidence/tool-gate-codemode-2026-11-17.json` |
 
-The last three are the key ones: the official client generates them automatically, so a
-user cannot remove them. A declaration also needs at least one name the gateway
-recognises.
+The declaration, the `<env>` block and the name shape are satisfied by the official
+client's own form, so a user cannot remove them. The declaration-content check is avoided
+with Code Mode: keep only a few simple anchor tools plus `execute` on the wire and move the
+full catalog into the system prompt (see [TECHNICAL §5.3](TECHNICAL.us.md)).
 
 ---
 
@@ -83,7 +85,8 @@ normalised (`docs/evidence/clienthello-deep-2026-11-13.json`).
 |---|---|
 | At least one declared tool | The caller's own tools suffice; a placeholder is added **only when the caller declares none**. Its description says not to call it, and a call that happens anyway is dropped (logged at `warn`) so the turn ends normally. |
 | `<env>` block in the system prompt | The adapter appends `environmentBlock()` after the DSH prompt, generated from the real working directory. |
-| Tool names without separators | `planTools` reduces each name to `[a-z0-9]` and keeps a map, restored when a call comes back. |
+| Tool name shape | `planTools` reduces each name to `[a-z0-9]` and keeps a map, restored when a call comes back. |
+| Tool declaration content | Free-model routes use Code Mode: only a few simple anchor tools plus `execute` on the wire, the real catalog (with each tool's return types) in the system prompt, and `execute` delegating to DSH's native PTC dispatch. |
 | `ClientHello` | Byte-identical to the capture, zero extension mismatches. |
 | Headers | Byte-identical names, casing, order and values apart from `x-opencode-project`. |
 | Connection | Pooled, `keep-alive`. |

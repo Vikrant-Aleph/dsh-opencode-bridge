@@ -43,8 +43,8 @@ window.__ModuleLoader__.load({
       tabLogs: 'Diagnostic log',
       tabProxies: 'Egress rotation (optional)',
       title: 'OpenCode Bridge — Diagnostic Log',
-      intro: 'Adapter log for the OpenCode free-model bridge. Lines are scrubbed of credentials and message content before they are written.',
-      level: 'Minimum level',
+      intro: 'Failed requests include redacted structure summaries. Successful-request summaries require Debug recording. No message text, tool arguments, images or keys are recorded.',
+      level: 'Minimum level shown',
       refresh: 'Refresh',
       copy: 'Copy all',
       copied: 'Copied!',
@@ -60,7 +60,7 @@ window.__ModuleLoader__.load({
       copyAccessible: 'Copy the whole log to the clipboard',
       proxyNav: 'OpenCode Bridge — Proxies',
       proxyTitle: 'Egress rotation',
-      proxyIntro: 'The free tier throttles each egress IP. When one is rate-limited it cools down and the next entry is used. Keep “direct” to use this machine\u2019s IP.',
+      proxyIntro: 'Configure direct and proxy entries in order. Connection failures try the next ready entry; free-usage rejections do not rotate egresses. Clearing cooldowns takes effect immediately.',
       proxyAddLabel: 'Add a proxy',
       proxyPlaceholder: 'http://host:port / socks5h://host:port / direct',
       proxyAdd: 'Add',
@@ -107,8 +107,8 @@ window.__ModuleLoader__.load({
       tabLogs: '诊断日志',
       tabProxies: '出口代理轮换（可选）',
       title: 'OpenCode Bridge — 诊断日志',
-      intro: 'OpenCode 免费模型桥接适配器的日志。每行在写入前已脱敏：不含凭据与消息内容。',
-      level: '最低级别',
+      intro: '失败请求默认附带脱敏结构摘要；成功请求摘要需开启 Debug 写入。不记录消息正文、工具入参、图片或密钥。',
+      level: '显示最低级别',
       refresh: '刷新',
       copy: '复制全部',
       copied: '已复制！',
@@ -124,7 +124,7 @@ window.__ModuleLoader__.load({
       copyAccessible: '把完整日志复制到剪贴板',
       proxyNav: 'OpenCode Bridge — 代理',
       proxyTitle: '出口轮换',
-      proxyIntro: '免费层按出口 IP 限流。某个出口被限流后进入冷却，自动改用下一个。保留“本机直连”即可继续使用本机 IP。',
+      proxyIntro: '按顺序配置直连或代理，连接失败时尝试下一个可用出口。免费额度拒绝不会自动换出口，清除冷却立即生效。',
       proxyAddLabel: '添加代理',
       proxyPlaceholder: 'http://host:port / socks5h://host:port / direct',
       proxyAdd: '添加',
@@ -529,6 +529,8 @@ window.__ModuleLoader__.load({
         setMessage(t('proxyClearingCooldowns'));
         try {
           const value = await call('clear-cooldowns', {});
+          const current = await call('read', {});
+          setEntries(Array.isArray(current.entries) ? current.entries : []);
           const cleared = typeof value.cleared === 'number' ? value.cleared : 0;
           setMessage(cleared > 0 ? `${t('proxyCooldownsCleared')} (${cleared})` : t('proxyCooldownsCleared'));
         } catch (e) {

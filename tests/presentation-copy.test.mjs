@@ -38,16 +38,11 @@ test('real client dictionaries name the tab and pane Context trimming in both lo
   assert.doesNotMatch(dictionaries.en.pageIntro, /image|vision/i)
   assert.doesNotMatch(dictionaries.zh.pageIntro, /图片|图像|视觉/)
 })
-test('documentation introductions place the no-install note immediately after the model capability', () => {
-  const zhReadme = fs.readFileSync(new URL('README.md', root), 'utf8')
-  assert.equal((zhReadme.match(/免费模型（不用安装opencode）/g) ?? []).length, 2)
-  const enReadme = fs.readFileSync(new URL('README.us.md', root), 'utf8')
-  assert.match(enReadme, /\[DSH\]\([^\n]+\) \(no OpenCode installation required\)/)
-  assert.match(enReadme, /free models \(no OpenCode installation required\)/)
-  const zhTechnical = fs.readFileSync(new URL('TECHNICAL.md', root), 'utf8')
-  assert.match(zhTechnical, /`-free` 模型（不用安装opencode）/)
-  const enTechnical = fs.readFileSync(new URL('TECHNICAL.us.md', root), 'utf8')
-  assert.match(enTechnical, /`-free` models at `opencode\.ai` \(no OpenCode installation required\)/)
+test('detailed documentation does not repeat the short-summary no-install parenthesis', () => {
+  for (const file of ['README.md', 'README.us.md', 'TECHNICAL.md', 'TECHNICAL.us.md']) {
+    const text = fs.readFileSync(new URL(file, root), 'utf8')
+    assert.doesNotMatch(text, /（不用安装opencode）|\(no OpenCode installation required\)/, file)
+  }
 })
 
 test('visitor summaries mention context trimming and documented navigation uses the new name', () => {

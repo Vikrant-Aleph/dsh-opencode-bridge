@@ -97,7 +97,7 @@ export function completedReasoningForRequest(ctx: Context, options: GenerateOpti
     const agent = ctx.get('agents')?.get(options.sessionId)
     const projections = ctx.get('sessionProjections')
     if (!agent || !projections || agent.session.id !== options.sessionId) return undefined
-    return projections.stateOf(agent.session, REASONING_PROJECTION_KEY)?.completed
+    return (projections.stateOf(agent.session, REASONING_PROJECTION_KEY) as CompletedReasoningState | undefined)?.completed
   } catch { return undefined }
 }
 export interface ReasoningProjectionResult {

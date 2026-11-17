@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="380" viewBox="0 0 960 380" role="img" aria-labelledby="chart-title chart-description">
   <title id="chart-title">npm 累计下载量 — dsh-opencode-bridge</title>
-  <desc id="chart-description">2026-10-18 → 2026-11-15: 5,257 次累计下载.</desc>
+  <desc id="chart-description">2026-10-18 → 2026-11-16: 5,426 次累计下载.</desc>
   <defs><linearGradient id="download-area" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#3b82f6" stop-opacity="0.22"/><stop offset="1" stop-color="#3b82f6" stop-opacity="0.02"/></linearGradient></defs>
   <rect x="0.5" y="0.5" width="959" height="379" rx="16" fill="#ffffff" stroke="#dce5f0"/>
   <g font-family="system-ui, -apple-system, 'Segoe UI', 'Noto Sans CJK SC', sans-serif">
     <text x="32" y="43" fill="#0f172a" font-size="23" font-weight="650">npm 累计下载量</text>
     <text x="32" y="70" fill="#64748b" font-size="14">dsh-opencode-bridge</text>
-    <text x="928" y="48" text-anchor="end" fill="#2563eb" font-size="32" font-weight="700">5,257</text>
+    <text x="928" y="48" text-anchor="end" fill="#2563eb" font-size="32" font-weight="700">5,426</text>
     <text x="928" y="72" text-anchor="end" fill="#64748b" font-size="12">总下载量</text>
     <line x1="80" y1="296" x2="928" y2="296" stroke="#e7edf5"/>
     <text x="66" y="300" text-anchor="end" fill="#64748b" font-size="12">0</text>
@@ -17,16 +17,16 @@
     <text x="66" y="180" text-anchor="end" fill="#64748b" font-size="12">4,000</text>
     <line x1="80" y1="116" x2="928" y2="116" stroke="#e7edf5"/>
     <text x="66" y="120" text-anchor="end" fill="#64748b" font-size="12">6,000</text>
-    <path d="M80 277.34 L110.29 277.34 L140.57 277.34 L170.86 265.43 L201.14 254.72 L231.43 245.42 L261.71 242.27 L292 238.61 L322.29 234.83 L352.57 232.55 L382.86 229.64 L413.14 226.88 L443.43 224.57 L473.71 222.53 L504 219.47 L534.29 217.31 L564.57 214.73 L594.86 212.63 L625.14 210.26 L655.43 208.46 L685.71 206.06 L716 203.99 L746.29 202.4 L776.57 200.45 L806.86 198.35 L837.14 196.16 L867.43 175.94 L897.71 165.23 L928 138.29 L928 296 L80 296 Z" fill="url(#download-area)"/>
-    <path d="M80 277.34 L110.29 277.34 L140.57 277.34 L170.86 265.43 L201.14 254.72 L231.43 245.42 L261.71 242.27 L292 238.61 L322.29 234.83 L352.57 232.55 L382.86 229.64 L413.14 226.88 L443.43 224.57 L473.71 222.53 L504 219.47 L534.29 217.31 L564.57 214.73 L594.86 212.63 L625.14 210.26 L655.43 208.46 L685.71 206.06 L716 203.99 L746.29 202.4 L776.57 200.45 L806.86 198.35 L837.14 196.16 L867.43 175.94 L897.71 165.23 L928 138.29" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="928" cy="138.29" r="4.5" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+    <path d="M80 277.34 L109.24 277.34 L138.48 277.34 L167.72 265.43 L196.97 254.72 L226.21 245.42 L255.45 242.27 L284.69 238.61 L313.93 234.83 L343.17 232.55 L372.41 229.64 L401.66 226.88 L430.9 224.57 L460.14 222.53 L489.38 219.47 L518.62 217.31 L547.86 214.73 L577.1 212.63 L606.34 210.26 L635.59 208.46 L664.83 206.06 L694.07 203.99 L723.31 202.4 L752.55 200.45 L781.79 198.35 L811.03 196.16 L840.28 175.94 L869.52 165.23 L898.76 138.29 L928 133.22 L928 296 L80 296 Z" fill="url(#download-area)"/>
+    <path d="M80 277.34 L109.24 277.34 L138.48 277.34 L167.72 265.43 L196.97 254.72 L226.21 245.42 L255.45 242.27 L284.69 238.61 L313.93 234.83 L343.17 232.55 L372.41 229.64 L401.66 226.88 L430.9 224.57 L460.14 222.53 L489.38 219.47 L518.62 217.31 L547.86 214.73 L577.1 212.63 L606.34 210.26 L635.59 208.46 L664.83 206.06 L694.07 203.99 L723.31 202.4 L752.55 200.45 L781.79 198.35 L811.03 196.16 L840.28 175.94 L869.52 165.23 L898.76 138.29 L928 133.22" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="928" cy="133.22" r="4.5" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
     <text x="80" y="322" text-anchor="start" fill="#64748b" font-size="12">2026-10-18</text>
-    <text x="261.71" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-10-24</text>
-    <text x="413.14" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-10-29</text>
-    <text x="594.86" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-11-04</text>
-    <text x="746.29" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-11-09</text>
-    <text x="928" y="322" text-anchor="end" fill="#64748b" font-size="12">2026-11-15</text>
+    <text x="255.45" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-10-24</text>
+    <text x="430.9" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-10-30</text>
+    <text x="577.1" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-11-04</text>
+    <text x="752.55" y="322" text-anchor="middle" fill="#64748b" font-size="12">2026-11-10</text>
+    <text x="928" y="322" text-anchor="end" fill="#64748b" font-size="12">2026-11-16</text>
     <text x="32" y="356" fill="#64748b" font-size="12">npm 官方统计 · 每日更新 · UTC</text>
-    <text x="928" y="356" text-anchor="end" fill="#64748b" font-size="12">2026-10-18 → 2026-11-15</text>
+    <text x="928" y="356" text-anchor="end" fill="#64748b" font-size="12">2026-10-18 → 2026-11-16</text>
   </g>
 </svg>

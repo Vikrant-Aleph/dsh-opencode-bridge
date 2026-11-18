@@ -1,25 +1,12 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="128" height="128" alt="OpenCode Bridge icon">
-</p>
+<p align="center"> <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="128" height="128" alt="OpenCode Bridge icon"> </p>
 
 <h1 align="center">OpenCode Bridge</h1>
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a>
-  <a href="https://dshfind.com/en/plugins/Vikrant-Aleph/dsh-opencode-bridge?ref=badge"><img src="https://dshfind.com/api/badge/Vikrant-Aleph/dsh-opencode-bridge?lang=en" alt="dshfind"></a>
-  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads" alt="Total npm downloads"></a>
-  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers"><img src="https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github" alt="GitHub stars"></a>
-  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main"><img src="https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge" alt="Last commit"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge" alt="License"></a>
-  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js" alt="Node.js requirement"></a>
-</p>
+<p align="center"> <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a> <a href="https://dshfind.com/en/plugins/Vikrant-Aleph/dsh-opencode-bridge?ref=badge"><img src="https://dshfind.com/api/badge/Vikrant-Aleph/dsh-opencode-bridge?lang=en" alt="dshfind"></a> <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads" alt="Total npm downloads"></a> <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers"><img src="https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github" alt="GitHub stars"></a> <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main"><img src="https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge" alt="Last commit"></a> <a href="LICENSE"><img src="https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge" alt="License"></a> <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js" alt="Node.js requirement"></a> </p>
 
 [中文](README.md) | English
 
-Use [OpenCode](https://opencode.ai)'s free models in
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no
-OpenCode account or API key needed. Optional context trimming and egress rotation are
-included.
+Use [OpenCode](https://opencode.ai)'s free models in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — no OpenCode account or API key needed. Optional context trimming and egress rotation are included.
 
 ![Where OpenCode Bridge sits in DSH: the DSH agent loop calls this plugin through its LlmAdapter, and the plugin requests the opencode.ai gateway using the official client protocol](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/dsh-opencode-bridge-updated-en.webp)
 
@@ -27,11 +14,7 @@ included.
 
 **Impersonates the official OpenCode client so DSH can use OpenCode's free models.**
 
-It reproduces the official client's request headers, the request shape the
-gateway requires, and the TLS and HTTP fingerprints. It is an `LlmAdapter`, so it plugs
-into DSH's existing loop: the agent loop, permissions and tool
-execution stay with DSH, and DSH resolves every tool call itself. What the gateway does
-and does not check is described [below](#how-opencode-identifies-a-client).
+It reproduces the official client's request headers, the request shape the gateway requires, and the TLS and HTTP fingerprints. It is an `LlmAdapter`, so it plugs into DSH's existing loop: the agent loop, permissions and tool execution stay with DSH, and DSH resolves every tool call itself. What the gateway does and does not check is described [below](#how-opencode-identifies-a-client).
 
 Also included:
 
@@ -66,17 +49,13 @@ Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.1
 ```
 
-Then pick a model under **OpenCode Bridge** in the model picker. If none appears,
-restart that DSH profile.
+Then pick a model under **OpenCode Bridge** in the model picker. If none appears, restart that DSH profile.
 
-No API key or hand-edited configuration is needed. Model-list changes reach the picker
-without restarting the plugin. Refresh intervals and the rest of the configuration are
-in the [configuration reference](TECHNICAL.us.md#7-configuration).
+No API key or hand-edited configuration is needed. Model-list changes reach the picker without restarting the plugin. Refresh intervals and the rest of the configuration are in the [configuration reference](TECHNICAL.us.md#7-configuration).
 
 ## How OpenCode identifies a client
 
-Everything below was measured — one variable at a time, from a single runtime, against
-the real gateway.
+Everything below was measured — one variable at a time, from a single runtime, against the real gateway.
 
 ### What the gateway checks
 
@@ -88,60 +67,33 @@ the real gateway.
 | **Tool name shape** | An unrecognized name with underscores, dashes, dots or capitals is refused; a name the gateway recognises may carry separators. The plugin converts names. |
 | **Tool declaration content** | Declaring many rich tools at once (real descriptions + complex schemas) is refused; a same-size neutral tool block passes. |
 
-These checks are satisfied by the official client's own form, which is why they work as a
-client check. A user can rewrite the system prompt and prune the tool list, but the client
-still appends an `<env>` block and still declares tools. The declaration-content check is
-satisfied by the official client's Code Mode — only a few tools on the wire, the full
-catalog in the system prompt; the plugin uses Code Mode for the free models too.
+These checks are satisfied by the official client's own form, which is why they work as a client check. A user can rewrite the system prompt and prune the tool list, but the client still appends an `<env>` block and still declares tools. The declaration-content check is satisfied by the official client's Code Mode — only a few tools on the wire, the full catalog in the system prompt; the plugin uses Code Mode for the free models too.
 
-Tool names are easy to misread: the gateway answers a non-conforming name with
-`FreeUsageLimitError`, the same error it returns when the quota is spent. The plugin
-converts names on the way out and restores the original on the way back, so tool calls
-are unaffected.
+Tool names are easy to misread: the gateway answers a non-conforming name with `FreeUsageLimitError`, the same error it returns when the quota is spent. The plugin converts names on the way out and restores the original on the way back, so tool calls are unaffected.
 
 ### What the gateway does not check
 
 Unchecked things come in two kinds, and the plugin treats them differently.
 
-**One kind is always-sent official detail the gateway does not currently compare.** The
-plugin still replicates it as insurance: if a future gate starts comparing item by item,
-this traffic remains indistinguishable from the official client. At the transport layer
-that is the TLS/HTTP fingerprints (next chapter); at the body and system-prompt layer it is a
-set of fidelity details (see "Preventive body & system-prompt fidelity" below). None was a
-gate condition in the 2026-11-17 probes; removing them still passes.
+**One kind is always-sent official detail the gateway does not currently compare.** The plugin still replicates it as insurance: if a future gate starts comparing item by item, this traffic remains indistinguishable from the official client. At the transport layer that is the TLS/HTTP fingerprints (next chapter); at the body and system-prompt layer it is a set of fidelity details (see "Preventive body & system-prompt fidelity" below). None was a gate condition in the 2026-11-17 probes; removing them still passes.
 
-**The other kind is content left to the user by design.** The gateway ignores it, so the
-plugin does not imitate it: the system-prompt body, the tool-list content, and the specific
-tools in a Code Mode catalogue.
+**The other kind is content left to the user by design.** The gateway ignores it, so the plugin does not imitate it: the system-prompt body, the tool-list content, and the specific tools in a Code Mode catalogue.
 
-The two do not conflict — take `<env>`: the gateway only checks that an `<env>` block exists.
-The official default wording around it (the date line, the intro sentence, the 5th line) we
-copy as insurance (first kind); but the actual values written inside (paths, git flag,
-platform) are not validated — anything passes (second kind). "Copy the official wording" and
-"the values don't matter" are two sides of the same fact: only the block's presence is
-checked; neither the wording nor the content is.
+The two do not conflict — take `<env>`: the gateway only checks that an `<env>` block exists. The official default wording around it (the date line, the intro sentence, the 5th line) we copy as insurance (first kind); but the actual values written inside (paths, git flag, platform) are not validated — anything passes (second kind). "Copy the official wording" and "the values don't matter" are two sides of the same fact: only the block's presence is checked; neither the wording nor the content is.
 
 ### Scope and evidence
 
-"Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). All of the
-above are observations from 2026-11-13 through 2026-11-17, not a specification. The full
-evidence trail and the hypotheses that were ruled out are in the
-[camouflage policy](CAMOUFLAGE.us.md).
+"Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). All of the above are observations from 2026-11-13 through 2026-11-17, not a specification. The full evidence trail and the hypotheses that were ruled out are in the [camouflage policy](CAMOUFLAGE.us.md).
 
 ## TLS and HTTP fingerprint camouflage (not currently checked — preventive)
 
 **Status: aligned; as of 2026-11-17, necessity unproven.**
 
-It exists to cover fingerprint checks that may be added later, and to make this traffic
-indistinguishable from the official client at those layers.
+It exists to cover fingerprint checks that may be added later, and to make this traffic indistinguishable from the official client at those layers.
 
 ### TLS fingerprint
 
-Node cannot express the official handshake. OpenSSL orders extensions itself and offers
-no post-quantum key share, producing a different hello (roughly 270 bytes against 1482).
-The plugin therefore delegates the handshake to
-[`wreq-js`](https://github.com/sqdshguy/wreq-js), a Rust engine on BoringSSL — the same
-underlying TLS library the official client uses.
+Node cannot express the official handshake. OpenSSL orders extensions itself and offers no post-quantum key share, producing a different hello (roughly 270 bytes against 1482). The plugin therefore delegates the handshake to [`wreq-js`](https://github.com/sqdshguy/wreq-js), a Rust engine on BoringSSL — the same underlying TLS library the official client uses.
 
 | Element | Value |
 |---|---|
@@ -162,22 +114,15 @@ underlying TLS library the official client uses.
 | `Connection` | `keep-alive`, over a persistent pooled connection reused across turns |
 | Deliberately absent | No `sec-ch-ua*`, `sec-fetch-*`, `priority` or `accept-language` — browser emulation adds these by default and the official client never sends them, so they are explicitly suppressed |
 
-The resulting request **headers** (dynamic values normalised) match the capture apart from
-`x-opencode-project`, which is derived from the working directory. This is a header-shape
-comparison, not a whole-request byte match: the bodies differ in size because the prompts
-differ (23,073 bytes captured vs 951 in the plugin example).
+The resulting request **headers** (dynamic values normalised) match the capture apart from `x-opencode-project`, which is derived from the working directory. This is a header-shape comparison, not a whole-request byte match: the bodies differ in size because the prompts differ (23,073 bytes captured vs 951 in the plugin example).
 
-`wreq-js` is an **optional** dependency. Without its native binding the plugin falls back
-to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups
-plain `fetch` cannot connect at all, so the transport has value beyond fingerprinting.
+`wreq-js` is an **optional** dependency. Without its native binding the plugin falls back to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups plain `fetch` cannot connect at all, so the transport has value beyond fingerprinting.
 
 ## Preventive body & system-prompt fidelity (not currently checked)
 
 **Status: aligned to the official source, but as of 2026-11-17 none is a gate condition.**
 
-Beyond the transport, the official client always sends a set of details in the body and
-system prompt. The gateway does not currently compare them; the plugin copies them only so a
-future item-by-item gate cannot distinguish it. Item by item (source locations in TECHNICAL §2.2):
+Beyond the transport, the official client always sends a set of details in the body and system prompt. The gateway does not currently compare them; the plugin copies them only so a future item-by-item gate cannot distinguish it. Item by item (source locations in TECHNICAL §2.2):
 
 | Element | Official behavior | Note |
 |---|---|---|
@@ -189,19 +134,13 @@ future item-by-item gate cannot distinguish it. Item by item (source locations i
 | Reasoning replay | A catalog reasoning field replays an empty string on every assistant message | e.g. big-pickle |
 | Body key order | `model, messages, tools, stream, stream_options, …` | `tools` before `stream` |
 
-This does not conflict with "the `<env>` values don't matter" above: only the block's
-presence is checked; neither the official wording nor the concrete values are.
+This does not conflict with "the `<env>` values don't matter" above: only the block's presence is checked; neither the official wording nor the concrete values are.
 
 ## Optional context trimming
 
-Open **Settings → OpenCode Bridge → Context trimming** and enable **Trim reasoning from
-completed turns**. Off by default (full replay).
+Open **Settings → OpenCode Bridge → Context trimming** and enable **Trim reasoning from completed turns**. Off by default (full replay).
 
-Only reasoning from confirmed successful turns is cleared; the current tool chain and
-uncertain or interrupted history stay intact, and required `reasoning_content` fields
-are still sent. The setting affects new requests only, leaves local history untouched, and
-does not interrupt a running request. Savings depend on the upstream, and DSH's local
-estimate may still count the full history — turn it off if continuity suffers.
+Only reasoning from confirmed successful turns is cleared; the current tool chain and uncertain or interrupted history stay intact, and required `reasoning_content` fields are still sent. The setting affects new requests only, leaves local history untouched, and does not interrupt a running request. Savings depend on the upstream, and DSH's local estimate may still count the full history — turn it off if continuity suffers.
 
 ## Optional egress rotation
 
@@ -213,8 +152,7 @@ Without configuration the plugin connects directly.
 
 Entries are tried in list order; connection failures cool an entry temporarily. **Clear cooldowns** immediately clears live egress waits and legacy cooldown records, without restarting.
 
-A `FreeUsageLimitError` ends the current run without automatic retries, egress rotation or a saved model cooldown. Sending another message makes a new upstream request.
-DSH makes at most two automatic retries for transient throttling, accepting retry delays of at most 15 minutes. Replies that have already started producing output are never replayed.
+A `FreeUsageLimitError` ends the current run without automatic retries, egress rotation or a saved model cooldown. Sending another message makes a new upstream request. DSH makes at most two automatic retries for transient throttling, accepting retry delays of at most 15 minutes. Replies that have already started producing output are never replayed.
 
 **HTTP(S), SOCKS4/4a and SOCKS5/5h** are supported.
 
@@ -234,14 +172,11 @@ DSH makes at most two automatic retries for transient throttling, accepting retr
 | HTTP 403 or 503 | Check for plugin updates and upstream status, then retry. These do not trigger proxy failover. Report persistent cases. |
 | Tool calls fail | Check the **Diagnostic log** tab; a call DSH never declared cannot be dispatched. |
 
-For bugs or feature requests, [choose an Issue form](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose)
-and include versions, reproduction steps and expected versus actual behaviour. Redact
-logs first — never include API keys, proxy passwords or private conversations.
+For bugs or feature requests, [choose an Issue form](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose) and include versions, reproduction steps and expected versus actual behaviour. Redact logs first — never include API keys, proxy passwords or private conversations.
 
 ## Development and documentation
 
-<details>
-<summary>Build and install from source</summary>
+<details> <summary>Build and install from source</summary>
 
 Requires **Node.js ≥ 20.18.1** and pnpm; Node.js 22 or 24 LTS is recommended.
 
@@ -262,23 +197,17 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.1.tgz
 
 </details>
 
-[Technical documentation](TECHNICAL.us.md) ([中文](TECHNICAL.md)) covers the wire
-protocol, module layout, full configuration, testing and maintenance rules.
+[Technical documentation](TECHNICAL.us.md) ([中文](TECHNICAL.md)) covers the wire protocol, module layout, full configuration, testing and maintenance rules.
 
 ## Cumulative downloads
 
 ![Cumulative npm downloads from the first release through the latest statistics day](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/generated-data/npm-downloads/downloads.us.svg)
 
-Includes the full history since the first release, summed from [npm's official daily statistics](https://github.com/npm/registry/blob/main/docs/download-counts.md)
-and updated automatically each day. The chart shows its cutoff date.
+Includes the full history since the first release, summed from [npm's official daily statistics](https://github.com/npm/registry/blob/main/docs/download-counts.md) and updated automatically each day. The chart shows its cutoff date.
 
 ## References and credits
 
-Every protocol behaviour was established by measuring the official client. The captures and
-the principles derived from them are collected in the
-[camouflage policy](CAMOUFLAGE.us.md). The design stage also compared the following
-community projects, to decide which approaches were worth following and which were not. No
-code was copied from any of them.
+Every protocol behaviour was established by measuring the official client. The captures and the principles derived from them are collected in the [camouflage policy](CAMOUFLAGE.us.md). The design stage also compared the following community projects, to decide which approaches were worth following and which were not. No code was copied from any of them.
 
 - [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)
 - [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free)
@@ -286,10 +215,9 @@ code was copied from any of them.
 - [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter)
 - [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen)
 - [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter)
-- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) — consulted only
-  for its issue discussion of the free allowance decaying with egress IP; no code was used
-  (that project is GPL-3.0)
+- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) — consulted only for its issue discussion of the free allowance decaying with egress IP; no code was used (that project is GPL-3.0)
 
 ## License
 
 Licensed under [MIT](LICENSE).
+

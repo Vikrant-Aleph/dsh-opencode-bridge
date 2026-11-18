@@ -2,10 +2,7 @@
 
 [中文](CAMOUFLAGE.md) | English · [Technical design](TECHNICAL.us.md)
 
-What the bridge imitates, and why. This is the authority for the code: any imitation
-not listed here should be removed. The measurements, controls and evidence live in
-[TECHNICAL §2](TECHNICAL.us.md); this file lists only the conclusions and the trade-offs,
-without repeating that data.
+What the bridge imitates, and why. This is the authority for the code: any imitation not listed here should be removed. The measurements, controls and evidence live in [TECHNICAL §2](TECHNICAL.us.md); this file lists only the conclusions and the trade-offs, without repeating that data.
 
 ---
 
@@ -13,15 +10,9 @@ without repeating that data.
 
 > **Keep official-consistent details that user settings cannot change.**
 
-The plugin emulates the official client by reproducing its always-sent details. The retention
-boundary is "user configuration cannot change it": official, user-invariant shapes and details
-may be kept; content left to the user by design (the system-prompt body, tool-list content, etc.)
-is not imitated.
+The plugin emulates the official client by reproducing its always-sent details. The retention boundary is "user configuration cannot change it": official, user-invariant shapes and details may be kept; content left to the user by design (the system-prompt body, tool-list content, etc.) is not imitated.
 
-Within that boundary, attitude splits by whether the gateway currently checks it: checked
-details must match; unchecked ones may still be kept as insurance against a future item-by-item
-gate. Both are "official details the user cannot change", so keeping the latter is not an
-exception but the same principle extended.
+Within that boundary, attitude splits by whether the gateway currently checks it: checked details must match; unchecked ones may still be kept as insurance against a future item-by-item gate. Both are "official details the user cannot change", so keeping the latter is not an exception but the same principle extended.
 
 ---
 
@@ -36,16 +27,13 @@ exception but the same principle extended.
 | Tool declarations | At least one tool (a placeholder only when the caller has none); separator-free names with a map back; free models use Code Mode | §2.2, §5 |
 | An `<env>` block in the system prompt | Environment instructions appended after the DSH prompt | §2.2 |
 
-The official client always sends these shapes, so a user cannot remove them. The three
-tool-declaration gates — at least one tool, name shape, and not many rich tools at once —
-are together in §2.2.
+The official client always sends these shapes, so a user cannot remove them. The three tool-declaration gates — at least one tool, name shape, and not many rich tools at once —are together in §2.2.
 
 ---
 
 ## Not checked, but still replicated (preventive only)
 
-These are always-sent official features that, as of 2026-11-17, are **not** checked. They
-are replicated only so a future gate comparing them item by item cannot distinguish the bridge.
+These are always-sent official features that, as of 2026-11-17, are **not** checked. They are replicated only so a future gate comparing them item by item cannot distinguish the bridge.
 
 | Surface | Note | Detail |
 |---|---|---|
@@ -93,3 +81,4 @@ Each of these was disproved by measurement and is recorded so the work is not re
 | TLS fingerprint alone | Byte-identical, still refused |
 | Runtime | Bun with the same body fails identically |
 | "The lane opens in windows" | An artefact: hand-built probes lacked the `<env>` block, so they were always refused and looked like a closed lane |
+

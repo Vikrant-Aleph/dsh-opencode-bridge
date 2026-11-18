@@ -1,24 +1,12 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="128" height="128" alt="OpenCode Bridge 图标">
-</p>
+<p align="center"> <img src="https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/icon.webp" width="128" height="128" alt="OpenCode Bridge 图标"> </p>
 
 <h1 align="center">OpenCode Bridge</h1>
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a>
-  <a href="https://dshfind.com/zh/plugins/Vikrant-Aleph/dsh-opencode-bridge?ref=badge"><img src="https://dshfind.com/api/badge/Vikrant-Aleph/dsh-opencode-bridge?lang=zh" alt="dshfind"></a>
-  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads" alt="Total npm downloads"></a>
-  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers"><img src="https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github" alt="GitHub stars"></a>
-  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main"><img src="https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge" alt="Last commit"></a>
-  <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge" alt="License"></a>
-  <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js" alt="Node.js requirement"></a>
-</p>
+<p align="center"> <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a> <a href="https://dshfind.com/zh/plugins/Vikrant-Aleph/dsh-opencode-bridge?ref=badge"><img src="https://dshfind.com/api/badge/Vikrant-Aleph/dsh-opencode-bridge?lang=zh" alt="dshfind"></a> <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads" alt="Total npm downloads"></a> <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers"><img src="https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github" alt="GitHub stars"></a> <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main"><img src="https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge" alt="Last commit"></a> <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Vikrant-Aleph/dsh-opencode-bridge" alt="License"></a> <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/node/v/dsh-opencode-bridge?logo=node.js" alt="Node.js requirement"></a> </p>
 
 中文 | [English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/README.us.md)
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里使用
-[OpenCode](https://opencode.ai) 的免费模型——无需 OpenCode 账号或 API Key。
-另含可选的上下文精简与出口轮换。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里使用[OpenCode](https://opencode.ai) 的免费模型——无需 OpenCode 账号或 API Key。另含可选的上下文精简与出口轮换。
 
 ![OpenCode Bridge 在 DSH 中的位置：DSH agent loop 经 LlmAdapter 调用本插件，插件复刻官方客户端协议后请求 opencode.ai 网关](https://raw.githubusercontent.com/Vikrant-Aleph/dsh-opencode-bridge/main/assets/dsh-opencode-bridge-updated-zh.webp)
 
@@ -63,8 +51,7 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.1
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
 
-日常使用无需 API Key，也无需手改配置文件。模型列表变化会通知选择器重新读取，无需重启插件。
-刷新间隔等完整配置见[配置参考](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md#7-%E9%85%8D%E7%BD%AE)。
+日常使用无需 API Key，也无需手改配置文件。模型列表变化会通知选择器重新读取，无需重启插件。刷新间隔等完整配置见[配置参考](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md#7-%E9%85%8D%E7%BD%AE)。
 
 ## OpenCode 如何判定客户端
 
@@ -80,34 +67,23 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.1
 | **工具名形状** | 未识别的名称含下划线、连字符、点号或大写会被拒；网关认识的名称可带分隔符。插件会自动转换名称。 |
 | **工具声明内容** | 一次声明大量富工具（真实描述 + 复杂 schema）会被拒；同尺寸的中性工具块可通过。 |
 
-这些检查由官方客户端的形态满足，因此能当作客户端检查。用户可以改写系统提示、裁剪工具清单，
-但客户端仍会追加 `<env>` 块、声明工具。工具声明内容这条，官方客户端靠 Code Mode 满足——线上只留
-少量工具，完整目录进系统提示词；插件对免费模型也改用 Code Mode 规避。
+这些检查由官方客户端的形态满足，因此能当作客户端检查。用户可以改写系统提示、裁剪工具清单，但客户端仍会追加 `<env>` 块、声明工具。工具声明内容这条，官方客户端靠 Code Mode 满足——线上只留少量工具，完整目录进系统提示词；插件对免费模型也改用 Code Mode 规避。
 
-工具名这条容易被误读：网关对不合规的名称返回 `FreeUsageLimitError`，与配额耗尽的报错一样。
-插件在发送前转换名称，收到模型返回的调用后再还原，所以工具调用不受影响。
+工具名这条容易被误读：网关对不合规的名称返回 `FreeUsageLimitError`，与配额耗尽的报错一样。插件在发送前转换名称，收到模型返回的调用后再还原，所以工具调用不受影响。
 
 ### 网关不检查什么
 
 不检查的东西分两种，插件对它们的态度不一样。
 
-**一种是官方恒发、但网关目前并不比对的细节。** 插件仍然把它们复刻出来当保险：万一将来网关
-开始逐项比对，这些流量依然和官方无法区分。传输层是 TLS/HTTP 指纹（见下章）；请求体与系统提示
-层面另有一批保真细节（见「请求体与系统提示的预防性保真」一章）。它们在 2026-11-17 的实测里
-都不是过闸条件，去掉也能通过。
+**一种是官方恒发、但网关目前并不比对的细节。** 插件仍然把它们复刻出来当保险：万一将来网关开始逐项比对，这些流量依然和官方无法区分。传输层是 TLS/HTTP 指纹（见下章）；请求体与系统提示层面另有一批保真细节（见「请求体与系统提示的预防性保真」一章）。它们在 2026-11-17 的实测里都不是过闸条件，去掉也能通过。
 
-**另一种是本来就交给用户自由决定的内容。** 网关不看，插件也就不模仿：系统提示正文、工具清单
-内容、Code Mode 目录的具体工具。
+**另一种是本来就交给用户自由决定的内容。** 网关不看，插件也就不模仿：系统提示正文、工具清单内容、Code Mode 目录的具体工具。
 
-这两者不矛盾，拿 `<env>` 举例：网关只查「有没有 `<env>` 块」。块里那套官方默认措辞——日期行、
-引导句、第 5 行——我们照抄当保险（属第一种）；但具体填什么值（路径、git 标志、平台）网关并不
-校验，写任何值都过（属第二种）。所以「照抄官方措辞」和「值无所谓」是同一件事的两面：被检查的
-只是块存在，措辞与内容都不被检查。
+这两者不矛盾，拿 `<env>` 举例：网关只查「有没有 `<env>` 块」。块里那套官方默认措辞——日期行、引导句、第 5 行——我们照抄当保险（属第一种）；但具体填什么值（路径、git 标志、平台）网关并不校验，写任何值都过（属第二种）。所以「照抄官方措辞」和「值无所谓」是同一件事的两面：被检查的只是块存在，措辞与内容都不被检查。
 
 ### 口径与证据
 
-「目前」= **2026-11-17**（最后一次活体探针；本文更新于 2026-11-18）。以上为 2026-11-13 至
-2026-11-17 的观测，不是规范。完整证据链与被排除的假设见[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
+「目前」= **2026-11-17**（最后一次活体探针；本文更新于 2026-11-18）。以上为 2026-11-13 至2026-11-17 的观测，不是规范。完整证据链与被排除的假设见[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
 
 ## TLS 与 HTTP 指纹伪装（目前不检测，仅预防）
 
@@ -138,18 +114,15 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 | `Connection` | `keep-alive`，并使用跨轮次复用的持久连接池 |
 | 刻意不发送 | 不发送 `sec-ch-ua*`、`sec-fetch-*`、`priority`、`accept-language`——浏览器模拟会默认加上这些，而官方客户端从不发送，因此显式抑制 |
 
-最终伪装的请求**头**（动态值归一化后）与官方抓包一致，唯一例外是 `x-opencode-project`——它由工作目录推导。
-这是头形态比对，不是整请求逐字节一致：正文因提示不同而尺寸不同（抓包 23,073 字节、插件示例 951 字节）。
+最终伪装的请求**头**（动态值归一化后）与官方抓包一致，唯一例外是 `x-opencode-project`——它由工作目录推导。这是头形态比对，不是整请求逐字节一致：正文因提示不同而尺寸不同（抓包 23,073 字节、插件示例 951 字节）。
 
-`wreq-js` 是**可选**依赖。缺少原生绑定时，插件回退到普通 `fetch`，失去 TLS 对齐但仍能工作。
-某些代理环境下普通 `fetch` 根本连不上，所以这层传输的价值不止于指纹。
+`wreq-js` 是**可选**依赖。缺少原生绑定时，插件回退到普通 `fetch`，失去 TLS 对齐但仍能工作。某些代理环境下普通 `fetch` 根本连不上，所以这层传输的价值不止于指纹。
 
 ## 请求体与系统提示的预防性保真（目前不检测，仅预防）
 
 **状态：已按官方源码对齐，但截至 2026-11-17 均非过闸条件。**
 
-传输层之外，官方客户端还在请求体与系统提示里恒发一批细节。网关目前不比对它们；插件照抄只为
-将来若逐项比对时不被识别。逐项如下（源码位置见技术文档 §2.2）：
+传输层之外，官方客户端还在请求体与系统提示里恒发一批细节。网关目前不比对它们；插件照抄只为将来若逐项比对时不被识别。逐项如下（源码位置见技术文档 §2.2）：
 
 | 元素 | 官方做法 | 说明 |
 |---|---|---|
@@ -167,9 +140,7 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 
 打开 **设置 → OpenCode Bridge → 上下文精简**，启用 **精简已完成轮次的思考**。默认关闭（完整回放）。
 
-只清除已确认成功完成轮次的思考。当前工具链、不确定或被中断的历史保持不变，必需的
-`reasoning_content` 字段照常发送。该设置只影响新请求，不删除本地历史，也不打断进行中的请求。
-节省幅度取决于上游，DSH 的本地估算可能仍按完整历史计算；影响连续性就关掉。
+只清除已确认成功完成轮次的思考。当前工具链、不确定或被中断的历史保持不变，必需的`reasoning_content` 字段照常发送。该设置只影响新请求，不删除本地历史，也不打断进行中的请求。节省幅度取决于上游，DSH 的本地估算可能仍按完整历史计算；影响连续性就关掉。
 
 ## 可选出口轮换
 
@@ -181,8 +152,7 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 
 条目按列表顺序尝试，连接失败会让该条目短暂冷却。点击 **清除冷却** 会立即清空当前出口池的等待和旧版冷却记录，无需重启。
 
-`FreeUsageLimitError` 会结束本轮，不自动重试、不自动换出口，也不保存按模型冷却；再次发送会重新请求上游。
-普通临时限流由 DSH 最多自动重试两次，重试等待最多接受 15 分钟。已经开始输出的回复不会自动重放。
+`FreeUsageLimitError` 会结束本轮，不自动重试、不自动换出口，也不保存按模型冷却；再次发送会重新请求上游。普通临时限流由 DSH 最多自动重试两次，重试等待最多接受 15 分钟。已经开始输出的回复不会自动重放。
 
 支持 **HTTP(S)、SOCKS4/4a、SOCKS5/5h**。
 
@@ -202,13 +172,11 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 | HTTP 403 或 503 | 检查插件更新与上游状态后重试；这类错误不会触发代理轮换。持续出现请反馈。 |
 | 工具调用失败 | 查看 **诊断日志** 标签；DSH 从未声明的调用无法被派发。 |
 
-发现 bug 或想提需求，请[选择 Issue 表单](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose)，
-并附上版本、复现步骤与预期/实际行为。提交前请先脱敏——不要包含 API Key、代理密码或私人对话。
+发现 bug 或想提需求，请[选择 Issue 表单](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/new/choose)，并附上版本、复现步骤与预期/实际行为。提交前请先脱敏——不要包含 API Key、代理密码或私人对话。
 
 ## 开发与文档
 
-<details>
-<summary>从源码构建并安装</summary>
+<details> <summary>从源码构建并安装</summary>
 
 需要 **Node.js ≥ 20.18.1** 与 pnpm；建议 Node.js 22 或 24 LTS。
 
@@ -229,8 +197,7 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.1.tgz
 
 </details>
 
-[技术文档](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md)（[English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.us.md)）涵盖线上协议、模块结构、完整配置、
-测试与维护规则。
+[技术文档](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.md)（[English](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/TECHNICAL.us.md)）涵盖线上协议、模块结构、完整配置、测试与维护规则。
 
 ## 累计下载量
 
@@ -240,8 +207,7 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.1.tgz
 
 ## 参考与致谢
 
-协议行为全部通过对官方客户端的实测确定，抓包与据此得出的原则汇总在[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
-设计阶段还对照过以下社区项目，用来判断哪些做法值得沿用、哪些不值得。没有复制它们的代码。
+协议行为全部通过对官方客户端的实测确定，抓包与据此得出的原则汇总在[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。设计阶段还对照过以下社区项目，用来判断哪些做法值得沿用、哪些不值得。没有复制它们的代码。
 
 - [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)
 - [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free)
@@ -249,9 +215,9 @@ dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.1.tgz
 - [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter)
 - [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen)
 - [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter)
-- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) —— 只参考了其 issue
-  中关于免费额度随出口 IP 累积衰减的记录，未使用其代码（该项目为 GPL-3.0）
+- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) —— 只参考了其 issue中关于免费额度随出口 IP 累积衰减的记录，未使用其代码（该项目为 GPL-3.0）
 
 ## 许可
 
 基于 [MIT](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/LICENSE) 许可。
+

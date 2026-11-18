@@ -1,23 +1,16 @@
 # Evidence
 
-Dated captures behind the claims in [TECHNICAL.us.md](../../TECHNICAL.us.md) and the
-[camouflage policy](../../CAMOUFLAGE.us.md). The records preserve observed results and experiment context so readers can check the claims.
+Dated captures behind the claims in [TECHNICAL.us.md](../../TECHNICAL.us.md) and the [camouflage policy](../../CAMOUFLAGE.us.md). The records preserve observed results and experiment context so readers can check the claims.
 
-**These are dated observations.** The free tier changes; a capture from
-2026-11-13 may describe a gate that no longer behaves that way.
+**These are dated observations.** The free tier changes; a capture from 2026-11-13 may describe a gate that no longer behaves that way.
 
 ## How the captures were produced
 
-1. Run the installed official CLI with `--standalone`, an isolated config directory and
-   a loopback endpoint, so its real request is recorded without touching the upstream.
+1. Run the installed official CLI with `--standalone`, an isolated config directory and a loopback endpoint, so its real request is recorded without touching the upstream.
 2. Replay the request from a single runtime, changing **one field per request**.
 3. Keep a change only when the outcome flips; revert everything that does not.
 
-A request is refused with `FreeUsageLimitError` (429) when it fails the check and with
-`FreeTierError` (403) when the identity shape is rejected. A plain `curl` request
-receives the same 429 as a fully aligned one, because the quota check runs before the
-identity check — so a 429 alone says nothing about whether an imitation
-succeeded.
+A request is refused with `FreeUsageLimitError` (429) when it fails the check and with `FreeTierError` (403) when the identity shape is rejected. A plain `curl` request receives the same 429 as a fully aligned one, because the quota check runs before the identity check — so a 429 alone says nothing about whether an imitation succeeded.
 
 ## What each file shows
 
@@ -40,3 +33,4 @@ succeeded.
 | `tool-gate-codemode-2026-11-17.json` | The free lane refuses rich tool declarations (real description text and complex schemas each trigger it); a same-size neutral block passes. Records the Code Mode fix, the real-return-type catalog, and end-to-end verification |
 | `codemode-agent-test-2026-11-17.json` | End-to-end four-step task in a real free-model session: read package.json, glob src, write a report, read it back — all through `execute` |
 | `codemode-complex-test-2026-11-17.json` | End-to-end six-step complex task: glob + grep + parallel reads with import parsing + write + `edit` append + read-back verification, completed correctly |
+

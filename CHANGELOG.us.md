@@ -1,11 +1,8 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Releases are published from `v*` tags, and the notes on the release page are taken from
-the matching section of this file.
+Releases are published from `v*` tags, and the notes on the release page are taken from the matching section of this file.
 
 ## [Unreleased]
 
@@ -32,9 +29,7 @@ the matching section of this file.
 - **The Code Mode catalog shows real return types.** It renders the SDK from each tool's actual output schema (e.g. `read` returns `{lines,totalLines}`), so the model parses returns by type instead of guessing. Verified end-to-end in a real free-model session: a simple reply, a four-step read/write task, and a six-step complex task with parallel reads and an `edit` append all completed correctly.
 - **Persistent redacted request summaries.** Failures record route, transport, controls and message/tool structure by default; successful requests record summaries only at Debug. Message text, tool arguments, images, keys and arbitrary schema literals are excluded, with size and depth budgets.
 - The log tool's `stat` reports the diagnostics format version so a running-code update can be checked.
-- Cumulative npm download charts in both READMEs, including the full history since the first release,
-  the total count and the statistics cutoff date. GitHub Actions updates the charts and daily data
-  each day; a failed statistics request preserves the previous charts.
+- Cumulative npm download charts in both READMEs, including the full history since the first release, the total count and the statistics cutoff date. GitHub Actions updates the charts and daily data each day; a failed statistics request preserves the previous charts.
 
 ### Changed
 
@@ -53,66 +48,41 @@ This release updates the icon and documentation layout without changing model re
 
 ### Changed
 
-- **Replaced the shared plugin icon.** A 256×256 WebP replaces the SVG. The icon export,
-  package file list and both READMEs use the new file.
-- **Updated the README header.** The title and badges are centred, with the icon directly
-  to the title's left and aligned along its bottom edge. The language switcher stays left-aligned.
-- Replaced the four plugin marks in the Chinese and English structure diagrams, preserving
-  the remaining text and graphics.
+- **Replaced the shared plugin icon.** A 256×256 WebP replaces the SVG. The icon export, package file list and both READMEs use the new file.
+- **Updated the README header.** The title and badges are centred, with the icon directly to the title's left and aligned along its bottom edge. The language switcher stays left-aligned.
+- Replaced the four plugin marks in the Chinese and English structure diagrams, preserving the remaining text and graphics.
 
 ## [1.0.7] - 2026-11-15
 
 ### Changed
 
-- **A new plugin icon.** It follows the official `artwork.md` rules: a 36x36 canvas, no
-  tile of its own, the subject drawn inside the margins, pure SVG geometry, 2.9 KB. The
-  old one used a 64x64 canvas with its own dark tile, which stacked a second tile inside
-  the one Plugin Manager draws.
+- **A new plugin icon.** It follows the official `artwork.md` rules: a 36x36 canvas, no tile of its own, the subject drawn inside the margins, pure SVG geometry, 2.9 KB. The old one used a 64x64 canvas with its own dark tile, which stacked a second tile inside the one Plugin Manager draws.
 - The README shows the icon at the top, by absolute URL so the npm page renders it too.
 
-This release includes everything in 1.0.6. That version has a GitHub tag and release but
-never reached npm, because the publish was refused for a missing two-factor code.
+This release includes everything in 1.0.6. That version has a GitHub tag and release but never reached npm, because the publish was refused for a missing two-factor code.
 
 ## [1.0.6] - 2026-11-15
 
-The model list now refreshes the way the official client does, along with the documentation
-that accumulated after 1.0.5.
+The model list now refreshes the way the official client does, along with the documentation that accumulated after 1.0.5.
 
 ### Changed
 
-- **One catalog source.** The plugin reads only `https://models.opencode.ai/api.json`, the
-  same catalog the official client's `ModelsDev.Service` reads, and refreshes on the
-  official five-minute TTL instead of ten minutes.
-- **The live `/models` probe is gone.** It existed to decide which models were actually
-  served. Measurement showed it added nothing: the twelve zero-cost, non-deprecated
-  catalog entries matched the live list exactly, and the 74 extra ids the listing returned
-  were paid models. Availability is already carried by the catalog's `status` field. As a
-  side effect the plugin no longer sends a request the official client never makes.
+- **One catalog source.** The plugin reads only `https://models.opencode.ai/api.json`, the same catalog the official client's `ModelsDev.Service` reads, and refreshes on the official five-minute TTL instead of ten minutes.
+- **The live `/models` probe is gone.** It existed to decide which models were actually served. Measurement showed it added nothing: the twelve zero-cost, non-deprecated catalog entries matched the live list exactly, and the 74 extra ids the listing returned were paid models. Availability is already carried by the catalog's `status` field. As a side effect the plugin no longer sends a request the official client never makes.
 
 ### Fixed
 
-- **The README's document links are absolute now.** npm renders the page outside any
-  repository, where a relative `TECHNICAL.md`, `CAMOUFLAGE.md` or `LICENSE` points at
-  nothing. On GitHub the links behave as before.
-- This also ships the documentation accumulated since 1.0.5: the structure diagram, the
-  stars and last-commit badges, the consulted-projects list, and the install section moved
-  up.
+- **The README's document links are absolute now.** npm renders the page outside any repository, where a relative `TECHNICAL.md`, `CAMOUFLAGE.md` or `LICENSE` points at nothing. On GitHub the links behave as before.
+- This also ships the documentation accumulated since 1.0.5: the structure diagram, the stars and last-commit badges, the consulted-projects list, and the install section moved up.
 
 ## [1.0.5] - 2026-11-15
 
-Copy only. After 1.0.0 removed the tool bridge and the offline audit, the package
-description, the marketplace copy and the settings-page intro still advertised both.
+Copy only. After 1.0.0 removed the tool bridge and the offline audit, the package description, the marketplace copy and the settings-page intro still advertised both.
 
 ### Fixed
 
-- **The package description and two copies are updated.** `package.json`,
-  `locale/en.json`, `locale/zh.json` and the plugin's settings intro now describe what
-  the plugin does: no account or API key, the official client's request shape and
-  fingerprints, automatic model refresh, optional context trimming, optional egress
-  rotation.
-- Added a regression check: the description fails if either the tool bridge or the audit
-  reappears. A test had been asserting the old wording, which is how the stale copy
-  survived.
+- **The package description and two copies are updated.** `package.json`, `locale/en.json`, `locale/zh.json` and the plugin's settings intro now describe what the plugin does: no account or API key, the official client's request shape and fingerprints, automatic model refresh, optional context trimming, optional egress rotation.
+- Added a regression check: the description fails if either the tool bridge or the audit reappears. A test had been asserting the old wording, which is how the stale copy survived.
 
 ## [1.0.4] - 2026-11-14
 
@@ -120,130 +90,81 @@ The release that explains why the UI never worked.
 
 ### Fixed
 
-- **Tool names containing separators are refused by the gateway.** Almost every one of
-  DSH's 46 tools carries an underscore (`ask_user_question`, `job_list`, `web_search`,
-  and so on), and the gateway answers such a request with `FreeUsageLimitError`, which
-  reads like an exhausted quota. All 12 official tools are free of separators. Declared
-  names are now reduced to `[a-z0-9]` and a returned call is mapped back to the caller's
-  real tool, so dispatch is unaffected.
-- The model listing request carried only `user-agent`, without `authorization` or the
-  `x-opencode-*` headers. The official client never sends that shape; the listing now
-  carries the full identity.
-- All system text is folded into one message, matching the official client, with the
-  `<env>` block after the prompt.
+- **Tool names containing separators are refused by the gateway.** Almost every one of DSH's 46 tools carries an underscore (`ask_user_question`, `job_list`, `web_search`, and so on), and the gateway answers such a request with `FreeUsageLimitError`, which reads like an exhausted quota. All 12 official tools are free of separators. Declared names are now reduced to `[a-z0-9]` and a returned call is mapped back to the caller's real tool, so dispatch is unaffected.
+- The model listing request carried only `user-agent`, without `authorization` or the `x-opencode-*` headers. The official client never sends that shape; the listing now carries the full identity.
+- All system text is folded into one message, matching the official client, with the `<env>` block after the prompt.
 
 ## [1.0.3] - 2026-11-14
 
 ### Fixed
 
-- The gateway's `Retry-After` points at UTC midnight, but it serves again within
-  minutes. The plugin used to lock the model for the stated duration, turning a
-  transient refusal into hours of downtime. It now retries with an exponential backoff:
-  60 seconds, doubling, capped at 15 minutes. The server's deadline is still recorded,
-  but only as an upper bound and for diagnostics.
-- The cooldown message now says the pause is this client's own backoff rather than the
-  server's requested wait, and reports when the next automatic attempt is allowed.
+- The gateway's `Retry-After` points at UTC midnight, but it serves again within minutes. The plugin used to lock the model for the stated duration, turning a transient refusal into hours of downtime. It now retries with an exponential backoff: 60 seconds, doubling, capped at 15 minutes. The server's deadline is still recorded, but only as an upper bound and for diagnostics.
+- The cooldown message now says the pause is this client's own backoff rather than the server's requested wait, and reports when the next automatic attempt is allowed.
 
 ## [1.0.2] - 2026-11-14
 
 ### Fixed
 
-- A byte-order mark made the state file look corrupt, after which the store rebuilt
-  cooldowns from the log and undid a clear. A BOM is now tolerated when reading.
-- An unreadable state file no longer rebuilds cooldowns from the log. Recovery runs only
-  when the file is genuinely absent; an existing file is authoritative, so a clear cannot
-  be reverted by the log.
+- A byte-order mark made the state file look corrupt, after which the store rebuilt cooldowns from the log and undid a clear. A BOM is now tolerated when reading.
+- An unreadable state file no longer rebuilds cooldowns from the log. Recovery runs only when the file is genuinely absent; an existing file is authoritative, so a clear cannot be reverted by the log.
 
 ## [1.0.1] - 2026-11-14
 
 ### Fixed
 
-- A stored cooldown was read once at startup, so clearing the file had no effect until a
-  restart. The store now re-reads it before every check, and an external clear applies
-  immediately.
-- Cooldowns are recorded with the egress that produced them and stop applying once that
-  egress is no longer configured. Previously a wait from a removed proxy kept blocking
-  the model.
-- The cooldown error now states that no request was sent and reports when and on which
-  egress the rejection was recorded, so it cannot be mistaken for a live 429.
+- A stored cooldown was read once at startup, so clearing the file had no effect until a restart. The store now re-reads it before every check, and an external clear applies immediately.
+- Cooldowns are recorded with the egress that produced them and stop applying once that egress is no longer configured. Previously a wait from a removed proxy kept blocking the model.
+- The cooldown error now states that no request was sent and reports when and on which egress the rejection was recorded, so it cannot be mistaken for a live 429.
 
 ### Added
 
-- Settings → Egress rotation → **Clear cooldowns**, which retires stale records without
-  a restart.
+- Settings → Egress rotation → **Clear cooldowns**, which retires stale records without a restart.
 
 ## [1.0.0] - 2026-11-13
 
-The release that answers the question the project was built around: what does the free
-tier actually check?
+The release that answers the question the project was built around: what does the free tier actually check?
 
 ### Found
 
-Measured against the real gateway, one variable at a time from a single runtime. Three
-things are checked:
+Measured against the real gateway, one variable at a time from a single runtime. Three things are checked:
 
 - The `User-Agent` must be `opencode/latest/2.2.0/cli`.
-- **At least one tool must be declared.** The name does not matter; an empty array is
-  refused.
-- **The system prompt must contain an `<env>` block.** A 177-byte prompt containing
-  nothing else passes.
+- **At least one tool must be declared.** The name does not matter; an empty array is refused.
+- **The system prompt must contain an `<env>` block.** A 177-byte prompt containing nothing else passes.
 
-The last two were the missing pieces. The plugin declared only the caller's tools — often
-none — and sent DSH's prompt unchanged, so every request was refused with
-`FreeUsageLimitError` however closely the headers matched.
+The last two were the missing pieces. The plugin declared only the caller's tools — often none — and sent DSH's prompt unchanged, so every request was refused with `FreeUsageLimitError` however closely the headers matched.
 
 ### Added
 
-- `src/bun-transport.ts`: reproduces the official client's TLS handshake through the
-  optional `wreq-js` dependency — cipher suites, supported groups, signature algorithms
-  (including `ed25519` as `0x0807` and `ecdsa_secp521r1_sha512` as `0x0603`), extension
-  order, and `http/1.1`-only ALPN. The `ClientHello` matches the capture byte for byte
-  once random fields are normalised.
-- HTTP framing alignment: header names, casing and order, `accept-encoding`,
-  `keep-alive`, and a persistent connection pool reused across turns.
-- An environment block generated from the real working directory and appended after the
-  DSH prompt.
-- `docs/evidence/`: the captures behind every claim, published so a reader can check
-  them. Guarded by `tests/evidence-links.test.mjs` and `tests/doc-links.test.mjs`.
-- `scripts/clean.mjs`, run before every build, so removed modules cannot leave compiled
-  output behind.
-- `CHANGELOG.md`, with the release page generated from it by
-  `scripts/release-notes.mjs`.
-- Chinese is now the primary documentation language: `README.md`, `TECHNICAL.md` and
-  `CAMOUFLAGE.md` are Chinese, and the English versions carry a `.us` suffix.
+- `src/bun-transport.ts`: reproduces the official client's TLS handshake through the optional `wreq-js` dependency — cipher suites, supported groups, signature algorithms (including `ed25519` as `0x0807` and `ecdsa_secp521r1_sha512` as `0x0603`), extension order, and `http/1.1`-only ALPN. The `ClientHello` matches the capture byte for byte once random fields are normalised.
+- HTTP framing alignment: header names, casing and order, `accept-encoding`, `keep-alive`, and a persistent connection pool reused across turns.
+- An environment block generated from the real working directory and appended after the DSH prompt.
+- `docs/evidence/`: the captures behind every claim, published so a reader can check them. Guarded by `tests/evidence-links.test.mjs` and `tests/doc-links.test.mjs`.
+- `scripts/clean.mjs`, run before every build, so removed modules cannot leave compiled output behind.
+- `CHANGELOG.md`, with the release page generated from it by `scripts/release-notes.mjs`.
+- Chinese is now the primary documentation language: `README.md`, `TECHNICAL.md` and `CAMOUFLAGE.md` are Chinese, and the English versions carry a `.us` suffix.
 
 ### Changed
 
-- Tool declarations are exactly the caller's tools. A placeholder is added only when the
-  caller declares none; its description says not to call it, and a call that happens
-  anyway is dropped with a `warn` log entry instead of failing the turn.
-- The adapter waits for a transport that is still resolving, so the first request after
-  plugin load no longer falls back silently to plain `fetch`.
-- The egress pool's selected proxy URL now reaches non-undici transports, so rotation
-  works while the Bun-shaped transport is active.
+- Tool declarations are exactly the caller's tools. A placeholder is added only when the caller declares none; its description says not to call it, and a call that happens anyway is dropped with a `warn` log entry instead of failing the turn.
+- The adapter waits for a transport that is still resolving, so the first request after plugin load no longer falls back silently to plain `fetch`.
+- The egress pool's selected proxy URL now reaches non-undici transports, so rotation works while the Bun-shaped transport is active.
 
 ### Fixed
 
-- The Bun-shaped transport was never wired to the adapter, so earlier transport work had
-  no effect on requests.
-- `package.json` carried a byte-order mark, which made it invalid JSON for strict
-  parsers.
+- The Bun-shaped transport was never wired to the adapter, so earlier transport work had no effect on requests.
+- `package.json` carried a byte-order mark, which made it invalid JSON for strict parsers.
 - Stale compiled modules and a missing published-docs entry were shipping in the package.
 
 ### Removed
 
 - **Breaking:** `toolFingerprint` and `toolTranslation` configuration keys.
-- **Breaking:** the `opencode_bridge_audit` tool, along with the tool-bridge layer it
-  described.
-- `docs/COMPARISON.zh.md` and `docs/research-notes/`, which documented that removed
-  architecture.
+- **Breaking:** the `opencode_bridge_audit` tool, along with the tool-bridge layer it described.
+- `docs/COMPARISON.zh.md` and `docs/research-notes/`, which documented that removed architecture.
 
 ### Upgrade
 
-Configuration keys that no longer exist are ignored, so an existing config keeps working.
-If you relied on `opencode_bridge_audit`, that tool is gone. `wreq-js` is an optional
-dependency: without its native binding the plugin falls back to plain `fetch` and loses
-only the TLS alignment.
+Configuration keys that no longer exist are ignored, so an existing config keeps working. If you relied on `opencode_bridge_audit`, that tool is gone. `wreq-js` is an optional dependency: without its native binding the plugin falls back to plain `fetch` and loses only the TLS alignment.
 
 ## [0.5.5] - 2026-10-23
 
@@ -262,15 +183,13 @@ only the TLS alignment.
 
 ### Fixed
 
-- Assistant reasoning history is replayed for thinking-mode tool calls, including an
-  explicitly empty reasoning field where the model requires one.
+- Assistant reasoning history is replayed for thinking-mode tool calls, including an explicitly empty reasoning field where the model requires one.
 
 ## [0.5.2] - 2026-10-19
 
 ### Changed
 
-- Bounded retries with safe 429 diagnostics and a strict cooldown that never shortens a
-  server-requested wait.
+- Bounded retries with safe 429 diagnostics and a strict cooldown that never shortens a server-requested wait.
 
 ## [0.5.1] - 2026-10-19
 
@@ -296,13 +215,5 @@ only the TLS alignment.
 
 - First release: gate reproduction, `OpenCodeFreeAdapter`, and the model catalog.
 
-[Unreleased]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v1.0.0
-[0.5.5]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.5
-[0.5.4]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.4
-[0.5.3]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.3
-[0.5.2]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.2
-[0.5.1]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.1
-[0.4.1]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.4.1
-[0.3.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.3.0
-[0.1.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/compare/v1.0.0...HEAD [1.0.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v1.0.0 [0.5.5]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.5 [0.5.4]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.4 [0.5.3]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.3 [0.5.2]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.2 [0.5.1]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.5.1 [0.4.1]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.4.1 [0.3.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.3.0 [0.1.0]: https://github.com/Vikrant-Aleph/dsh-opencode-bridge/releases/tag/v0.1.0
+

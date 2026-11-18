@@ -220,7 +220,7 @@ All offline; `tests/*-live.mjs` probes need explicit `--run` and refuse to overw
 
 | Suite | Coverage |
 |---|---|
-| `current-protocol`/`alignment`/`gateway-requirements`/`official-fidelity` | wire shape, headers, tool declarations, `<env>`, placeholder, preventive fidelity |
+| `current-protocol`/`alignment`/`gateway-requirements`/`official-fidelity` | wire shape, headers, tool declarations, `<env>`, placeholder, preventive camouflage |
 | `bun-transport` | captured cipher/extension config |
 | `bridge-integration`/`bridge-stream` | batch atomicity, stream assembly |
 | `reasoning-*` | replay, trimming eligibility |

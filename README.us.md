@@ -75,7 +75,7 @@ Tool names are easy to misread: the gateway answers a non-conforming name with `
 
 Unchecked things come in two kinds, and the plugin treats them differently.
 
-**One kind is always-sent official detail the gateway does not currently compare.** The plugin still replicates it as insurance: if a future gate starts comparing item by item, this traffic remains indistinguishable from the official client. At the transport layer that is the TLS/HTTP fingerprints (next chapter); at the body and system-prompt layer it is a set of fidelity details (see "Preventive body & system-prompt fidelity" below). None was a gate condition in the 2026-11-17 probes; removing them still passes.
+**One kind is always-sent official detail the gateway does not currently compare.** The plugin still replicates it as insurance: if a future gate starts comparing item by item, this traffic remains indistinguishable from the official client. At the transport layer that is the TLS/HTTP fingerprints (next chapter); at the body and system-prompt layer it is a set of camouflage details (see "Preventive body & system-prompt camouflage" below). None was a gate condition in the 2026-11-17 probes; removing them still passes.
 
 **The other kind is content left to the user by design.** The gateway ignores it, so the plugin does not imitate it: the system-prompt body, the tool-list content, and the specific tools in a Code Mode catalogue.
 
@@ -116,7 +116,7 @@ The resulting request **headers** (dynamic values normalised) match the capture 
 
 `wreq-js` is an **optional** dependency. Without its native binding the plugin falls back to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups plain `fetch` cannot connect at all, so the transport has value beyond fingerprinting.
 
-## Preventive body & system-prompt fidelity (not currently checked)
+## Preventive body & system-prompt camouflage (not currently checked)
 
 **Status: aligned to the official source, but as of 2026-11-17 none is a gate condition.**
 

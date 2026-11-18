@@ -219,7 +219,7 @@ node --test tests/*.test.mjs                            # 全量离线
 
 | 套件 | 覆盖 |
 |---|---|
-| `current-protocol`/`alignment`/`gateway-requirements`/`official-fidelity` | 线上形态、头、工具声明、`<env>`、占位、预防保真 |
+| `current-protocol`/`alignment`/`gateway-requirements`/`official-fidelity` | 线上形态、头、工具声明、`<env>`、占位、预防伪装 |
 | `bun-transport` | 抓包加密套件/扩展配置 |
 | `bridge-integration`/`bridge-stream` | 批次原子性、流式组装 |
 | `reasoning-*` | 回放、精简资格 |

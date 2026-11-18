@@ -79,8 +79,6 @@ Unchecked things come in two kinds, and the plugin treats them differently.
 
 **The other kind is content left to the user by design.** The gateway ignores it, so the plugin does not imitate it: the system-prompt body, the tool-list content, and the specific tools in a Code Mode catalogue.
 
-The two do not conflict — take `<env>`: the gateway only checks that an `<env>` block exists. The official default wording around it (the date line, the intro sentence, the 5th line) we copy as insurance (first kind); but the actual values written inside (paths, git flag, platform) are not validated — anything passes (second kind). "Copy the official wording" and "the values don't matter" are two sides of the same fact: only the block's presence is checked; neither the wording nor the content is.
-
 ### Scope and evidence
 
 "Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). All of the above are observations from 2026-11-13 through 2026-11-17, not a specification. The full evidence trail and the hypotheses that were ruled out are in the [camouflage policy](CAMOUFLAGE.us.md).
@@ -133,8 +131,6 @@ Beyond the transport, the official client always sends a set of details in the b
 | Output limit | Primary requests always send `max_completion_tokens` | Catalog default 32000 |
 | Reasoning replay | A catalog reasoning field replays an empty string on every assistant message | e.g. big-pickle |
 | Body key order | `model, messages, tools, stream, stream_options, …` | `tools` before `stream` |
-
-This does not conflict with "the `<env>` values don't matter" above: only the block's presence is checked; neither the official wording nor the concrete values are.
 
 ## Optional context trimming
 

@@ -79,8 +79,6 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.1
 
 **另一种是本来就交给用户自由决定的内容。** 网关不看，插件也就不模仿：系统提示正文、工具清单内容、Code Mode 目录的具体工具。
 
-这两者不矛盾，拿 `<env>` 举例：网关只查「有没有 `<env>` 块」。块里那套官方默认措辞——日期行、引导句、第 5 行——我们照抄当保险（属第一种）；但具体填什么值（路径、git 标志、平台）网关并不校验，写任何值都过（属第二种）。所以「照抄官方措辞」和「值无所谓」是同一件事的两面：被检查的只是块存在，措辞与内容都不被检查。
-
 ### 口径与证据
 
 「目前」= **2026-11-17**（最后一次活体探针；本文更新于 2026-11-18）。以上为 2026-11-13 至2026-11-17 的观测，不是规范。完整证据链与被排除的假设见[伪装原则](https://github.com/Vikrant-Aleph/dsh-opencode-bridge/blob/main/CAMOUFLAGE.md)。
@@ -133,8 +131,6 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 | 输出上限 | primary 请求恒发 `max_completion_tokens` | 目录默认 32000 |
 | reasoning 回放 | 目录声明 reasoning 字段时每条 assistant 消息回放空串 | 如 big-pickle |
 | body 键序 | `model, messages, tools, stream, stream_options, …` | `tools` 在 `stream` 前 |
-
-这与上节「`<env>` 值无所谓」不冲突：被检查的只是块存在，官方措辞与具体值都不被检查。
 
 ## 可选上下文精简
 

@@ -31,7 +31,7 @@
 2. 输入：
 
    ```text
-   dsh-opencode-bridge@1.1.1
+   dsh-opencode-bridge@1.2.0
    ```
 
 3. **安装源**优先选官方 npm registry；镜像可能滞后。
@@ -40,13 +40,13 @@
 ### 命令行安装
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.1.1
+dsh plugin --profile desktop add dsh-opencode-bridge@1.2.0
 ```
 
 把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.1.1
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.0
 ```
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
@@ -188,7 +188,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.1.1.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.0.tgz
 ```
 
 </details>

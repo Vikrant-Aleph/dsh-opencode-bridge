@@ -6,6 +6,8 @@ Releases are published from `v*` tags, and the notes on the release page are tak
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-19
+
 ### Added
 
 - **Preventive camouflage (not currently checked; preempts future fingerprinting).** Replicated a set of always-sent, non-gate official details from source (cross-checked against v2.2.0): the system-prompt date line (frozen per session), the `<env>` intro line and 5th line (tmp preference), `Workspace root folder` = git worktree root, upward `.git` discovery for the git flag, multi-turn changes as `<system-update>` user messages (baseline not re-appended), always-on `max_completion_tokens` (default 32000) on primary requests, empty-string reasoning replay on every assistant message when the catalog declares a reasoning field (e.g. big-pickle), and body key order with `tools` before `stream`. None of these was a gate condition in the 2026-11-17 probes.

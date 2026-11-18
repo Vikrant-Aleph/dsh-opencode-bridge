@@ -78,7 +78,7 @@ in the [configuration reference](TECHNICAL.us.md#7-configuration).
 Everything below was measured — one variable at a time, from a single runtime, against
 the real gateway.
 
-### Block 1: currently checked (must replicate)
+### What the gateway checks
 
 | Requirement | What we measured |
 |---|---|
@@ -99,26 +99,25 @@ Tool names are easy to misread: the gateway answers a non-conforming name with
 converts names on the way out and restores the original on the way back, so tool calls
 are unaffected.
 
-### User-variable, not checked (content is free)
+### What the gateway does not check
 
-None of these is part of the client check, and the plugin does not replicate their content:
+Unchecked things come in two kinds, and the plugin treats them differently.
 
-- **The official tool manifest.** A custom agent with a single tool passes.
-- **The official system prompt.** A user's own prompt passes.
-- **The values inside `<env>`.** Anything works (only the block's presence is checked).
-- **The Code Mode catalogue.** A catalogue synthesised from different tool names passes (the names must still be separator-free).
-- **The runtime.** Bun and Node sending a zero-tool body are refused the same way.
+**One kind is always-sent official detail the gateway does not currently compare.** The
+plugin still replicates it as insurance: if a future gate starts comparing item by item,
+this traffic remains indistinguishable from the official client. That includes the TLS/HTTP
+fingerprints (below), the system-prompt date line and the `<env>` intro/5th line,
+worktree/git derivations, multi-turn `<system-update>`, always-on `max_completion_tokens`,
+catalog reasoning-field replay, and body key order (TECHNICAL §3.7). None was a gate
+condition in the 2026-11-17 probes; removing them still passes.
 
-### Block 2: not currently checked — preventive only (replicated, not required)
+**The other kind is content left to the user by design.** The gateway ignores it, so the
+plugin does not imitate it: the system-prompt body, the tool-list content, the values inside
+`<env>`, and the specific tools in a Code Mode catalogue. Rewriting the prompt, pruning to a
+single tool, or writing anything into `<env>` all still pass — what is checked is the
+*shape* ("is there an `<env>` block", "is a tool declared"), not the content.
 
-These are always-sent official features that, as of 2026-11-17, are **not** checked; the
-plugin replicates them only so a future gate comparing them item by item cannot distinguish it:
-
-- **TLS / HTTP fingerprints.** Byte alignment does not change the current outcome (below).
-- **Built-in system-prompt instructions.** The date line, the `<env>` intro and 5th line, worktree/git derivations, multi-turn `<system-update>`.
-- **Always-on `max_completion_tokens`, catalog reasoning-field replay, body key order.** See TECHNICAL §3.7.
-
-### Caveats
+### Scope and evidence
 
 "Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). All of the
 above are observations from 2026-11-13 through 2026-11-17, not a specification. The full

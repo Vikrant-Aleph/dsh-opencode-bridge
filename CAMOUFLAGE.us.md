@@ -20,7 +20,7 @@ protocol precondition. The test is therefore "is it checked", not "is it configu
 
 ---
 
-## Block 1: currently checked (must replicate)
+## What the gateway checks (must replicate)
 
 "Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). Mismatch is refused.
 
@@ -37,7 +37,7 @@ are together in §3.3.
 
 ---
 
-## Block 2: not currently checked — preventive only (replicated, not required)
+## Not checked, but still replicated (preventive only)
 
 These are always-sent official features that, as of 2026-11-17, are **not** checked. They
 are replicated only so a future gate comparing them item by item cannot distinguish the bridge.
@@ -55,7 +55,7 @@ are replicated only so a future gate comparing them item by item cannot distingu
 
 ---
 
-## User-variable, not replicated (content is free)
+## Not checked and not replicated (user-free content)
 
 | Surface | Note |
 |---|---|

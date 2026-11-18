@@ -93,7 +93,9 @@ test('a caller prompt that already contains an env block still sends one block f
 test('an empty caller prompt still yields the environment block', async t => {
   const { sent } = await run(t, [{ name: 'pwsh', arguments: '{"command":"echo"}' }], { system: '' })
   assert.equal(sent.messages[0].role, 'system')
-  assert.ok(sent.messages[0].content.startsWith('<env>'))
+  // The official baseline leads with the frozen date + env intro, then the block.
+  assert.ok(sent.messages[0].content.startsWith("Today's date:"))
+  assert.ok(sent.messages[0].content.includes('<env>'))
   assert.ok(sent.messages[0].content.endsWith('</env>'))
 })
 

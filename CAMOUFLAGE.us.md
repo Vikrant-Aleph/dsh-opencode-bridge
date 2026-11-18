@@ -20,14 +20,16 @@ protocol precondition. The test is therefore "is it checked", not "is it configu
 
 ---
 
-## What is checked
+## Block 1: currently checked (must replicate)
+
+"Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). Mismatch is refused.
 
 | Requirement | How the bridge satisfies it | Detail |
 |---|---|---|
 | `User-Agent` | Sends the captured `opencode/latest/2.2.0/cli` byte-identically | §3.1 |
 | Session and request identity | One session id in four headers; `x-opencode-project` derived from the real directory | §3.2 |
-| Tool declarations | At least one tool (a placeholder only when the caller has none); names sanitized to separator-free with a map back; free models use Code Mode to avoid declaring many rich tools at once | §3.3, §5.3 |
-| An `<env>` block in the system prompt | `environmentBlock()` appended after the DSH prompt, from the real working directory | §3.4 |
+| Tool declarations | At least one tool (a placeholder only when the caller has none); separator-free names with a map back; free models use Code Mode | §3.3, §5.3 |
+| An `<env>` block in the system prompt | Environment instructions appended after the DSH prompt | §3.4 |
 
 The official client always sends these shapes, so a user cannot remove them. The three
 tool-declaration gates — at least one tool, name shape, and not many rich tools at once —
@@ -35,28 +37,32 @@ are together in §3.3.
 
 ---
 
-## What is not checked
+## Block 2: not currently checked — preventive only (replicated, not required)
 
-| Surface | Note |
-|---|---|
-| System prompt | `agents.<name>.system`, `agents/<name>.md` can replace it entirely; still passes |
-| Tool list | Content is free; 12 tools down to 1 still passes |
-| Contents of `<env>` | Rewriting paths or flipping the git flag still passes |
-| Code Mode catalogue | A catalogue synthesised from different tool names still passes |
-| `b3`, `traceparent` | Minted per request; no fixed value |
-| `x-opencode-project` | Derived from the working directory |
-| Runtime | Bun and Node are refused identically (zero-tool body) |
-| Transport fingerprint | Not currently checked; reproduced only for the future (below) |
+These are always-sent official features that, as of 2026-11-17, are **not** checked. They
+are replicated only so a future gate comparing them item by item cannot distinguish the bridge.
+
+| Surface | Note | Detail |
+|---|---|---|
+| Transport TLS / header order / connection reuse | `ClientHello` byte-aligned, http/1.1, keep-alive; necessity unproven | §3.5 |
+| Date line / `<env>` intro / 5th line | Official built-in instructions, replicated | §3.7 |
+| env derivations | worktree root, upward git discovery | §3.7 |
+| Multi-turn `<system-update>` | frozen baseline; changes go in user messages | §3.7 |
+| Always-on `max_completion_tokens` | catalog default 32000 | §3.7 |
+| Catalog reasoning-field replay | empty string on every assistant message for e.g. big-pickle | §3.7 |
+| Body key order | tools before stream | §3.7 |
+| `b3`/`traceparent` | official sends them only with OTEL on, not by default; bridge can disable `tracing` | §3.7 |
 
 ---
 
-## Transport (TLS)
+## User-variable, not replicated (content is free)
 
-**The gate does not currently check this layer.** `src/bun-transport.ts` delegates the
-handshake to `wreq-js` (BoringSSL, the same library the official client uses). The
-`ClientHello` is aligned byte for byte with the capture, but its **necessity is
-unproven** — it exists to cover fingerprint checks that may appear later. The handshake
-parameters and the four corrections are in [TECHNICAL §3.5](TECHNICAL.us.md).
+| Surface | Note |
+|---|---|
+| System prompt body | `agents.<name>.system`, `agents/<name>.md` can replace it entirely; still passes |
+| Tool list content | Content is free; 12 tools down to 1 still passes |
+| Contents of `<env>` | Rewriting paths or flipping the git flag still passes (only presence is checked) |
+| Code Mode catalogue | A catalogue synthesised from different tool names still passes |
 
 ---
 

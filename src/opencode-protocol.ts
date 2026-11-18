@@ -32,8 +32,9 @@
  * remains independent from protocol compatibility declarations.
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
+import os from 'node:os'
 
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, ImageBlock, Message, ToolSchema } from '@deepseek-ai/dsh-llm'
@@ -343,12 +344,15 @@ export interface ChatMessageBuildOptions {
 
 /**
  * Mirror OpenCode's `requireReasoning` defaulting for the OpenAI Chat route:
- * an explicit compatibility flag, a declared reasoning field, or a DeepSeek
- * model/endpoint. Free-tier models that do not think then omit the field.
+ * a catalog-declared reasoning field (e.g. `big-pickle`'s
+ * `interleaved.field:"reasoning_content"`), an explicit compatibility flag, or a
+ * DeepSeek model/endpoint. When true, every assistant message replays the field
+ * (empty string when there is no reasoning text), matching the official encoder.
  */
 export function requiresReasoningReplay(
-  meta: { id?: string } | undefined | null, model: string, baseUrl: string,
+  meta: { id?: string; reasoningField?: string } | undefined | null, model: string, baseUrl: string,
 ): boolean {
+  if (meta?.reasoningField) return true
   const id = (meta?.id ?? model).toLowerCase()
   const url = baseUrl.toLowerCase()
   return id.includes('deepseek') || url.includes('deepseek.com')
@@ -364,25 +368,78 @@ export function requiresReasoningReplay(
  * still passes — so the block is generated from the real environment rather than
  * copied from a capture.
  */
-export function environmentBlock(cwd: string, isGitRepo: boolean, platform: NodeJS.Platform = process.platform): string {
+/** Upward `.git` discovery, as the official client's worktree detection does. */
+export function gitRootOf(cwd: string): string | undefined {
+  let dir = cwd
+  for (;;) {
+    try {
+      if (existsSync(join(dir, '.git'))) return dir
+    } catch { /* treat as non-git */ }
+    const parent = join(dir, '..')
+    if (parent === dir) return undefined
+    dir = parent
+  }
+}
+
+/** The official client prefers its own pre-created tmp dir (`<os.tmpdir>/opencode`). */
+export function opencodeTmpDir(): string {
+  const base = join(os.tmpdir(), 'opencode')
+  try {
+    return realpathSync(base)
+  } catch {
+    return base
+  }
+}
+
+/**
+ * The `<env>` block the official harness always appends. Five lines: the working
+ * directory, the workspace (git worktree) root, the git flag, the platform, and a
+ * preference for the client's own tmp dir. The gateway only requires the block's
+ * presence; the extra lines and derivations are fidelity for future checks.
+ */
+export function environmentBlock(
+  cwd: string, isGitRepo: boolean, platform: NodeJS.Platform = process.platform,
+  workspaceRoot: string = cwd, tmp: string = opencodeTmpDir(),
+): string {
   return [
     '<env>',
     `  Working directory: ${cwd}`,
-    `  Workspace root folder: ${cwd}`,
+    `  Workspace root folder: ${workspaceRoot}`,
     `  Is directory a git repo: ${isGitRepo ? 'yes' : 'no'}`,
     `  Platform: ${platform}`,
+    `  Prefer ${tmp} over generic system temporary directories such as /tmp; it is pre-created and approved for external access.`,
     '</env>',
   ].join('\n')
 }
 
-/** The block for this process's working directory. */
+/** The block for this process's working directory, with official derivations. */
 export function defaultEnvironmentBlock(): string {
   const cwd = process.cwd()
-  let isGitRepo = false
-  try {
-    isGitRepo = existsSync(join(cwd, '.git'))
-  } catch { /* treat as non-git */ }
-  return environmentBlock(cwd, isGitRepo)
+  const root = gitRootOf(cwd)
+  return environmentBlock(cwd, root !== undefined, process.platform, root ?? cwd)
+}
+
+/**
+ * The built-in instruction text the official client always renders into the system
+ * prompt: a session-start date line, then the environment intro + `<env>` block.
+ * The date is frozen at session start by the caller (adapter), not per request.
+ */
+export function environmentInstructions(envBlock: string, date: string): string {
+  return `Today's date: ${date}\n\nHere is some useful information about the environment you are running in:\n${envBlock}`
+}
+
+export function defaultEnvironmentInstructions(date: string = new Date().toDateString()): string {
+  return environmentInstructions(defaultEnvironmentBlock(), date)
+}
+
+/** XML-escape for `<system-update>` wrappers, matching the official encoder. */
+export function escapeSystemUpdateText(text: string): string {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+/** A mid-conversation instruction change is a user message, never a re-appended env. */
+export function systemUpdateBlock(text: string): string {
+  return `<system-update>\n${escapeSystemUpdateText(text)}\n</system-update>`
 }
 
 export function buildChatMessages(
@@ -403,7 +460,9 @@ export function buildChatMessages(
     ...callerSystems,
     build.environment ?? '',
   ].filter((part) => part.trim().length > 0)
-  if (systemParts.length > 0) out.push({ role: 'system', content: systemParts.join('\n\n') })
+  // The official encoder joins the prompt and the built-in instructions with a
+  // single newline (ProviderShared.joinText), not a blank line.
+  if (systemParts.length > 0) out.push({ role: 'system', content: systemParts.join('\n') })
 
   const sentName = (name: string) => name
   let toolImages: ChatContentPart[] = []

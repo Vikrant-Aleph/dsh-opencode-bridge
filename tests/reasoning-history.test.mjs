@@ -89,7 +89,7 @@ test('non-assistant roles never acquire reasoning_content and developer is still
   assert.deepEqual(messages, [
     // Every system text is folded into the single leading message, matching the
     // official client's wire shape (it never sends two).
-    { role: 'system', content: 'top system\n\nsystem\nsystem-note' },
+    { role: 'system', content: 'top system\nsystem\nsystem-note' },
     { role: 'user', content: 'user' },
     { role: 'tool', tool_call_id: 'c1', content: 'tool\ntool-note' },
   ])

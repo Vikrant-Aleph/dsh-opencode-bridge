@@ -95,10 +95,23 @@ Other modules:
 
 ## 3. The gate, as observed
 
-The requirements below were all measured; they are dated observations, not a
-specification (§8 explains how to re-derive each). The *content* of the tool list and
-system prompt does not identify the client, but their *shape* is constrained; the
-transport fingerprint is not currently checked (§3.5).
+**"Currently" means 2026-11-17** — the date of the last live probe against the free lane
+(this document was updated 2026-11-18). "Checked / not checked" below is relative to that
+date; these are dated observations, not a specification (§8 explains how to re-derive each).
+
+The camouflage splits into two blocks:
+
+**A. Currently checked (must match or be refused).** User-Agent (§3.1), session & request
+identity (§3.2), tool-declaration shape (§3.3), and the presence of an `<env>` block in the
+system prompt (§3.4).
+
+**B. Not currently checked — replicated only to preempt future fingerprinting.** The
+transport TLS fingerprint / header casing & order / connection reuse (§3.5), plus a set of
+always-sent official fidelity details (§3.7): the date line, the `<env>` intro and 5th line,
+env value derivations, multi-turn `<system-update>`, always-on `max_completion_tokens`,
+catalog reasoning-field replay, and body key order. None of these was a gate condition in
+the 2026-11-17 probes; they are replicated only so a future gate that compares them item by
+item cannot distinguish the bridge.
 
 ### 3.1 User-Agent
 
@@ -184,12 +197,16 @@ real working directory so its contents are useful to the model. The official har
 text and the Code Mode catalogue are **not** required — a synthetic catalogue of DSH's
 own tools passes too (`docs/evidence/bun-synthetic-catalog.json`).
 
-### 3.5 Transport
+Note: only the *presence* of the `<env>` block is checked. The official date line, intro
+line, 5th line, worktree/git derivations and multi-turn `<system-update>` are **not**
+checked; they are preventive fidelity, see §3.7.
 
-**The gate does not currently check this layer.** Reproducing the official `ClientHello`
-covers fingerprint checks that may appear later, making the traffic indistinguishable
-from the official client at the TLS layer; it is aligned byte for byte, but its
-necessity is unproven.
+### 3.5 Transport (not currently checked — preventive)
+
+**As of 2026-11-17 the gate does not check this layer.** Reproducing the official
+`ClientHello` covers fingerprint checks that may appear later, making the traffic
+indistinguishable from the official client at the TLS layer; it is aligned byte for byte,
+but its necessity is unproven.
 
 The official client runs on Bun. Node's TLS cannot express the same
 `ClientHello`: OpenSSL orders extensions itself and offers no post-quantum key
@@ -226,29 +243,57 @@ differentiator either: Bun 1.4.4 with a zero-tool body is refused exactly like N
 
 ### 3.6 Field-level differences from the official encoder
 
-After reading the official OpenAI Chat encoder end to end (`openai-chat.ts`, 1288 lines),
-three differences remain. Each was measured inside one open window with a control on
-either side (`docs/evidence/tools-field-and-token-budget-2026-11-14.json`):
+After reading the official OpenAI Chat encoder end to end (`openai-chat.ts`), the
+differences fall into two categories.
+
+**Gate-relevant (must keep):**
 
 | Difference | Official | This bridge | Measured |
 |---|---|---|---|
 | `tools` when empty | The whole field is omitted | A `read` placeholder is declared | **Omitting it is refused (429)**; the placeholder is required |
-| `max_completion_tokens` | The caller's value is sent | Raised to `minOutputTokens` (32000) | A small value (1000) is **accepted**; the floor is a configuration choice, not a requirement |
-| A system message inside `messages` | Rendered as a user message | Folded into the leading system message | The gateway accepts either, but the official form is **not adopted**: the only system message DSH sends is the system prompt itself |
 
-The first row is worth recording: the official `Generate.text` path (title generation)
-really does send a body without `tools`, and such a request is refused — a failed title
-is silent, so nobody notices.
+The official `Generate.text` path (title generation) really does send a body without
+`tools`, and such a request is refused — a failed title is silent, so nobody notices.
+
+**Fidelity-relevant (not currently checked; replicated per the official, see §3.7):**
+always-on `max_completion_tokens`, system joining, the date/intro/5th lines, reasoning
+replay, and key order. None of these was a gate condition in the 2026-11-14 controls
+(`docs/evidence/tools-field-and-token-budget-2026-11-14.json`); aligning them is only
+preemption of future checks.
 
 Every other field is aligned: `store` and `prompt_cache_key` are both omitted (the
 official client sends them only where a provider declares support), `temperature`,
 `stop` and `reasoning_effort` are forwarded when present, and the assistant message's
-`content: null`, empty-string `reasoning_content` and `tool_calls` shape match.
+`content: null` and `tool_calls` shape match.
 
-The adapter appends `environmentBlock()` after the DSH prompt, matching where the
-official client puts it, so the agent's own instructions still lead. With both in place
+The adapter appends the environment instructions after the DSH prompt, matching where the
+official client puts them, so the agent's own instructions still lead. With both in place
 the adapter's own path returns 200 repeatedly (`docs/evidence/verify-env-fix.json`,
 `docs/evidence/placeholder-verify.json`).
+
+### 3.7 Preventive fidelity list (not currently checked)
+
+These are always-sent official features that, as of 2026-11-17, are **not** gate
+conditions. The bridge replicates them from source (`anomalyco/opencode`, cross-checked
+against v2.2.0) solely so a future gate comparing them item by item cannot distinguish it:
+
+| Feature | Official behavior | Source |
+|---|---|---|
+| Date line | System prompt always carries `Today's date: <session-start date>`, frozen per session | `instructions/builtins.ts` |
+| `<env>` intro line | `Here is some useful information about the environment you are running in:` before the block | same |
+| `<env>` 5th line | `Prefer <tmp>/opencode over …/tmp…` | same |
+| env derivations | `Workspace root folder` = git worktree root; git flag = upward `.git` discovery | `location.ts`/`project.ts` |
+| Multi-turn changes | Date/env changes arrive as `<system-update>` user messages; the baseline is not re-appended | `instruction-state.ts`/`openai-chat.ts` |
+| Output limit | Primary requests always send `max_completion_tokens` (catalog default 32000) | `model-request.ts` |
+| Reasoning replay | A catalog reasoning field (e.g. big-pickle) replays an empty string on every assistant message | `openai-chat.ts` |
+| Body key order | `model, messages, tools, stream, stream_options, max_completion_tokens` | `openai-chat.ts` |
+| Transport | TLS ClientHello, header casing/order, connection reuse, http/1.1 | §3.5 |
+| Tracing headers | `b3`/`traceparent` only when OTEL is enabled; **not sent** by default | effect/http |
+
+Note `b3`/`traceparent` are not default official behavior: they are gated on
+`OTEL_EXPORTER_OTLP_ENDPOINT`, and the default client sends neither. The bridge's early
+capture-based default minted a pair per request, which is an *addition*; set `tracing`
+off to match the default official client.
 
 ## 4. Wire reference
 

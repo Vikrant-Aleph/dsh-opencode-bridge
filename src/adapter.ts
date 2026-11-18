@@ -37,6 +37,8 @@ import {
   mintRequestId,
   mintSessionId,
   defaultEnvironmentBlock,
+  defaultEnvironmentInstructions,
+  systemUpdateBlock,
   normalizeToolCall,
   planTools,
   READ_ANCHOR,
@@ -133,6 +135,8 @@ interface ChatChunk {
 
 export class OpenCodeFreeAdapter extends LlmAdapter {
   private readonly sessions = new Map<string, string>()
+  /** Frozen per-session system baseline (date + env), as the official client keeps it. */
+  private readonly sessionBaselines = new Map<string, { instructions: string; env: string; date: string }>()
   private readonly imagePolicy: Readonly<ImageInputPolicy>
 
   /**
@@ -270,7 +274,26 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         && (options.tools ?? []).some(tool => tool.name === CODE_MODE_TOOL_NAME)
       let wireTools = plan.tools
       let codeModeAnchorNames = new Set<string>()
-      let environment = this.options.environment ?? defaultEnvironmentBlock()
+      // The official client freezes the date+env baseline at session start and re-sends
+      // it unchanged; later changes arrive as <system-update> user messages, not a
+      // re-appended env block. Preventive fidelity (not a current gate requirement).
+      let systemUpdate: string | undefined
+      let environment: string
+      if (this.options.environment !== undefined) {
+        environment = this.options.environment
+      } else {
+        const currentDate = new Date().toDateString()
+        const currentEnv = defaultEnvironmentBlock()
+        let baseline = this.sessionBaselines.get(sessionId)
+        if (!baseline) {
+          baseline = { instructions: defaultEnvironmentInstructions(currentDate), env: currentEnv, date: currentDate }
+          if (this.sessionBaselines.size >= 64) this.sessionBaselines.delete(this.sessionBaselines.keys().next().value!)
+          this.sessionBaselines.set(sessionId, baseline)
+        } else if (baseline.env !== currentEnv || baseline.date !== currentDate) {
+          systemUpdate = systemUpdateBlock(defaultEnvironmentInstructions(currentDate))
+        }
+        environment = baseline.instructions
+      }
       if (codeModeActive) {
         const transport = plan.tools.find(tool => tool.function.name === CODE_MODE_TOOL_NAME)
         const anchors = CODE_MODE_ANCHOR_NAMES.map(name => ({
@@ -301,23 +324,27 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         // block; the values inside it are not checked.
         environment,
       })
+      if (systemUpdate) messages.push({ role: 'user', content: systemUpdate })
 
+      // Key order mirrors the official encoder: model, messages, tools, stream,
+      // stream_options, then the output limit (JSON.stringify keeps insertion order).
       const body: Record<string, unknown> = {
         model: options.model,
         messages,
+        tools: wireTools,
         stream: true,
         stream_options: { include_usage: true },
-        tools: wireTools,
       }
       // Match the current OpenCode OpenAI Chat encoder. `auto` is the API
       // default; cache affinity remains in headers instead of an undeclared
       // prompt_cache_key body option. Never send both token-limit spellings.
-      // The official client sends its catalog output limit (32000 for the free
-      // models we captured), not a caller-supplied smaller budget.
+      // The official client always sends a catalog-derived output limit (32000
+      // for the free models we captured); a caller override wins. Preventive
+      // fidelity, not a current gate requirement.
       const outputLimit = options.maxTokens && options.maxTokens > 0
         ? Math.max(options.maxTokens, this.options.minOutputTokens ?? 0)
-        : undefined
-      if (outputLimit) body.max_completion_tokens = outputLimit
+        : (this.options.minOutputTokens ?? 32000)
+      body.max_completion_tokens = outputLimit
       if (options.temperature !== undefined) body.temperature = options.temperature
       if (options.stop?.length) body.stop = options.stop
       if (options.reasoningEffort && meta?.efforts?.some((e) => e.id === String(options.reasoningEffort))) {

@@ -78,7 +78,7 @@ in the [configuration reference](TECHNICAL.us.md#7-configuration).
 Everything below was measured — one variable at a time, from a single runtime, against
 the real gateway.
 
-### What is checked
+### Block 1: currently checked (must replicate)
 
 | Requirement | What we measured |
 |---|---|
@@ -99,26 +99,35 @@ Tool names are easy to misread: the gateway answers a non-conforming name with
 converts names on the way out and restores the original on the way back, so tool calls
 are unaffected.
 
-### What is not checked
+### User-variable, not checked (content is free)
 
-None of these is part of the client check:
+None of these is part of the client check, and the plugin does not replicate their content:
 
 - **The official tool manifest.** A custom agent with a single tool passes.
 - **The official system prompt.** A user's own prompt passes.
-- **The values inside `<env>`.** Anything works.
+- **The values inside `<env>`.** Anything works (only the block's presence is checked).
 - **The Code Mode catalogue.** A catalogue synthesised from different tool names passes (the names must still be separator-free).
 - **The runtime.** Bun and Node sending a zero-tool body are refused the same way.
-- **The TLS fingerprint alone.** Aligning it byte for byte (cipher suites, curves, extension order, signature algorithms) does not change the outcome.
+
+### Block 2: not currently checked — preventive only (replicated, not required)
+
+These are always-sent official features that, as of 2026-11-17, are **not** checked; the
+plugin replicates them only so a future gate comparing them item by item cannot distinguish it:
+
+- **TLS / HTTP fingerprints.** Byte alignment does not change the current outcome (below).
+- **Built-in system-prompt instructions.** The date line, the `<env>` intro and 5th line, worktree/git derivations, multi-turn `<system-update>`.
+- **Always-on `max_completion_tokens`, catalog reasoning-field replay, body key order.** See TECHNICAL §3.7.
 
 ### Caveats
 
-All of the above are observations from 2026-11-13 through 2026-11-17. The full
+"Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). All of the
+above are observations from 2026-11-13 through 2026-11-17, not a specification. The full
 evidence trail and the hypotheses that were ruled out are in the
 [camouflage policy](CAMOUFLAGE.us.md).
 
-## TLS and HTTP fingerprint camouflage
+## TLS and HTTP fingerprint camouflage (not currently checked — preventive)
 
-**Status: aligned; necessity unproven.**
+**Status: aligned; as of 2026-11-17, necessity unproven.**
 
 It exists to cover fingerprint checks that may be added later, and to make this traffic
 indistinguishable from the official client at those layers.

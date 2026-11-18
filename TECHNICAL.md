@@ -84,8 +84,19 @@ https://opencode.ai/inference/...
 
 ## 3. 实测到的门禁
 
-以下是实测到的门禁要求，均为带日期的观测，不是规范（§8 说明如何重新推导）。工具清单与系统提示的
-**内容**不标识客户端，但它们的**形态**有要求；传输层指纹目前不被检测（§3.5）。
+**「目前」的口径：2026-11-17** —— 最后一次对免费通道做活体探针的日期（本文更新于 2026-11-18）。
+下文的「检测 / 不检测」均以该日为准，是带日期的观测，不是规范（§8 说明如何重新推导）。
+
+伪装手段分成两大块：
+
+**A. 目前被检测的形态（不匹配即被拒，必须复刻）**
+User-Agent（§3.1）、会话与请求身份（§3.2）、工具声明形态（§3.3）、系统提示含 `<env>` 块（§3.4）。
+
+**B. 目前不被检测、仅为预防未来特征检测（复刻但非必需）**
+传输层 TLS 指纹 / 头名称大小写与顺序 / 连接复用（§3.5），以及一批官方恒发的保真细节（§3.7）：
+日期行、`<env>` 引导句与第 5 行、env 取值推导、多轮 `<system-update>`、恒发
+`max_completion_tokens`、目录 reasoning 字段回放、body 键序等。这些在 2026-11-17 的探针里
+都**不是**过闸条件；复刻它们只为将来网关若开始逐项比对时不被识别。
 
 ### 3.1 User-Agent
 
@@ -149,10 +160,13 @@ DSH 署名是可选项（`userAgentAttribution`），默认关闭。
 官方 harness 原文与 Code Mode 目录**不**需要——用 DSH 自己工具合成的目录同样通过
 （`docs/evidence/bun-synthetic-catalog.json`）。
 
-### 3.5 传输层
+注意：被检测的只是「`<env>` 块存在」这一形态。官方的日期行、引导句、第 5 行、worktree/git 推导与
+多轮 `<system-update>` 都**不被检测**，属预防性保真，见 §3.7。
 
-**门禁目前不检测这一层。** 复刻官方 `ClientHello` 是为了应对将来可能出现的指纹检查，让流量在 TLS
-层面无法区分于官方客户端；现状是已逐字节对齐，但未被证明必需。
+### 3.5 传输层（目前不检测，仅预防）
+
+**截至 2026-11-17，门禁不检测这一层。** 复刻官方 `ClientHello` 是为了应对将来可能出现的指纹检查，
+让流量在 TLS 层面无法区分于官方客户端；现状是已逐字节对齐，但未被证明必需。
 
 官方客户端运行在 Bun 上。Node 的 TLS 表达不出同样的 `ClientHello`：OpenSSL 自行排列
 扩展顺序，也不提供后量子 key share。实测 Node 的 `tls`/`tls-impersonate` 路径扩展顺序不同，
@@ -183,25 +197,47 @@ Hello 约 274 字节，官方是 1482。
 
 ### 3.6 与官方编码器的字段级差异
 
-逐行读过官方 OpenAI Chat 编码器（`openai-chat.ts`，1288 行）后，只剩三处差异。每一条都在
-同一开放窗口内测过，前后各有对照（`docs/evidence/tools-field-and-token-budget-2026-11-14.json`）：
+逐行读过官方 OpenAI Chat 编码器（`openai-chat.ts`）后，与官方的差异分成两类。
+
+**门禁相关（必须保留）**：
 
 | 差异 | 官方做法 | 桥接做法 | 实测 |
 |---|---|---|---|
 | `tools` 为空时 | 省略整个字段 | 补一个 `read` 占位声明 | **省略会被拒（429）**，占位是必需的 |
-| `max_completion_tokens` | 发调用方给的值 | 抬到 `minOutputTokens`（默认 32000） | 小值（1000）**被接受**，抬高不是必需，但保留为配置选择 |
-| `messages` 里的 system 消息 | 渲染成 user 消息 | 并入开头的 system 消息 | 网关接受两种形态，但**不采用官方做法**：DSH 唯一的 system 消息就是系统提示本身 |
 
-第一条值得记下：官方客户端的 `Generate.text`（标题生成）确实发不含 `tools` 的请求体，而这类请求
-会被网关拒绝——只是标题失败是静默的，所以从未被发现。
+官方客户端的 `Generate.text`（标题生成）确实发不含 `tools` 的请求体，而这类请求会被网关拒绝——
+只是标题失败是静默的，所以从未被发现。
+
+**保真相关（目前不检测，已按官方复刻，见 §3.7）**：`max_completion_tokens` 恒发、system 拼接、
+日期/引导句/第 5 行、reasoning 回放、键序等。这些在 2026-11-14 的对照里都**不是**过闸条件
+（`docs/evidence/tools-field-and-token-budget-2026-11-14.json`），对齐只为预防未来检测。
 
 其余字段均已对齐：`store` 与 `prompt_cache_key` 都不发（官方仅在 provider 声明支持时发送），
-`temperature`、`stop`、`reasoning_effort` 有则转发，助手消息的 `content: null`、
-`reasoning_content` 空串、`tool_calls` 形状与官方一致。
+`temperature`、`stop`、`reasoning_effort` 有则转发，助手消息的 `content: null`、`tool_calls` 形状与官方一致。
 
-适配器把 `environmentBlock()` 追加在 DSH 提示**之后**，与官方客户端的位置一致，
-使 agent 自身的指令仍然主导。两者到位后，适配器自身路径可稳定返回 200
-（`docs/evidence/verify-env-fix.json`、`docs/evidence/placeholder-verify.json`）。
+适配器把环境指令追加在 DSH 提示**之后**，与官方客户端的位置一致，使 agent 自身的指令仍然主导。
+两者到位后，适配器自身路径可稳定返回 200（`docs/evidence/verify-env-fix.json`、`docs/evidence/placeholder-verify.json`）。
+
+### 3.7 预防性保真清单（目前不检测，仅防未来）
+
+以下都是官方客户端恒发、但截至 2026-11-17 **不被门禁检测**的特征。桥接已按源码复刻
+（`anomalyco/opencode`，v2.2.0 交叉验证），目的仅是将来网关若开始逐项比对时不被识别：
+
+| 特征 | 官方做法 | 源码位置 |
+|---|---|---|
+| 日期行 | 系统提示恒含 `Today's date: <会话启动日期>`，会话内冻结 | `instructions/builtins.ts` |
+| `<env>` 引导句 | 块前有 `Here is some useful information about the environment you are running in:` | 同上 |
+| `<env>` 第 5 行 | `Prefer <tmp>/opencode over …/tmp…` | 同上 |
+| env 取值推导 | `Workspace root folder`=git worktree 根；git 标志=向上查找 `.git` | `location.ts`/`project.ts` |
+| 多轮变化 | 日期/环境变化以 `<system-update>` user 消息插入，基线不重拼 | `instruction-state.ts`/`openai-chat.ts` |
+| 输出上限 | primary 请求恒发 `max_completion_tokens`（目录默认 32000） | `model-request.ts` |
+| reasoning 回放 | 目录声明 reasoning 字段（如 big-pickle）时每条 assistant 消息回放空串 | `openai-chat.ts` |
+| body 键序 | `model, messages, tools, stream, stream_options, max_completion_tokens` | `openai-chat.ts` |
+| 传输层 | TLS ClientHello、头大小写/顺序、连接复用、http/1.1 | §3.5 |
+| 追踪头 | `b3`/`traceparent` 仅 OTEL 开启时发，默认**不发** | effect/http |
+
+注意 `b3`/`traceparent` 不是官方默认行为：它们由 `OTEL_EXPORTER_OTLP_ENDPOINT` 开关，默认客户端
+两个都不发。桥接早期按抓包默认 mint 一对，属于「多加」；如要贴近默认官方行为可关闭 `tracing`。
 
 ## 4. 线上协议
 

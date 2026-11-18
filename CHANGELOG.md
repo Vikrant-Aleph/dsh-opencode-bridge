@@ -8,6 +8,15 @@
 
 ## [未发布]
 
+### 新增
+
+- **预防性保真（目前不检测，仅防未来特征检测）。** 按官方源码（v2.2.0 交叉验证）复刻一批恒发但非过闸条件的细节：系统提示的日期行（会话内冻结）、`<env>` 引导句与第 5 行（tmp 偏好）、`Workspace root folder` 取 git worktree 根、git 标志向上查找、多轮变化以 `<system-update>` user 消息插入（基线不重拼）、primary 请求恒发 `max_completion_tokens`（默认 32000）、目录声明 reasoning 字段（如 big-pickle）时每条 assistant 消息回放空串、body 键序 `tools` 在 `stream` 前。这些在 2026-11-17 的探针里都不是门禁条件。
+
+### 变更
+
+- **文档按「目前检测 / 不检测仅预防」两大块重组**（README、TECHNICAL、CAMOUFLAGE，中英），并明确「目前」口径为 2026-11-17（最后活体探针）。TLS 指纹与上述保真细节均归入「不检测、仅预防」；新增 TECHNICAL §3.7 预防性保真清单。
+- 澄清 `b3`/`traceparent` 非官方默认行为（仅 OTEL 开启时发送），文档注明可关 `tracing` 以贴近默认官方客户端。
+
 ## [1.1.1] - 2026-11-18
 
 ### 修复

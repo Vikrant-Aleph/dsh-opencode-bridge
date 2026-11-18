@@ -25,6 +25,8 @@ export interface FreeModel {
   inputModalities?: Array<'text' | 'image'>
   efforts?: Array<{ id: string; name: string }>
   api?: string
+  /** Catalog-declared reasoning replay field (e.g. `interleaved.field`). */
+  reasoningField?: string
 }
 
 interface CatalogModel {
@@ -32,6 +34,7 @@ interface CatalogModel {
   name?: string
   description?: string
   reasoning_options?: Array<{ type?: string; values?: string[] }>
+  interleaved?: { field?: string }
   modalities?: { input?: string[] }
   limit?: { context?: number; output?: number }
   status?: string
@@ -217,6 +220,7 @@ export class FreeModelCatalog {
         ...(Array.isArray(meta.modalities?.input) ? { inputModalities: meta.modalities.input.filter((m): m is 'text' | 'image' => m === 'text' || m === 'image') } : {}),
         ...(efforts.length ? { efforts } : {}),
         ...(typeof meta.provider?.api === 'string' ? { api: meta.provider.api } : {}),
+        ...(typeof meta.interleaved?.field === 'string' && meta.interleaved.field ? { reasoningField: meta.interleaved.field } : {}),
       })
     }
     for (const id of this.options.extraModels) {

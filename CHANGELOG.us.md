@@ -9,6 +9,15 @@ the matching section of this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Preventive fidelity (not currently checked; preempts future fingerprinting).** Replicated a set of always-sent, non-gate official details from source (cross-checked against v2.2.0): the system-prompt date line (frozen per session), the `<env>` intro line and 5th line (tmp preference), `Workspace root folder` = git worktree root, upward `.git` discovery for the git flag, multi-turn changes as `<system-update>` user messages (baseline not re-appended), always-on `max_completion_tokens` (default 32000) on primary requests, empty-string reasoning replay on every assistant message when the catalog declares a reasoning field (e.g. big-pickle), and body key order with `tools` before `stream`. None of these was a gate condition in the 2026-11-17 probes.
+
+### Changed
+
+- **Docs reorganized into two blocks — "currently checked" vs "not checked, preventive only"** (README, TECHNICAL, CAMOUFLAGE, both languages), with "currently" pinned to 2026-11-17 (last live probe). TLS fingerprints and the fidelity details above are classed as not-checked/preventive; added TECHNICAL §3.7 preventive-fidelity list.
+- Clarified that `b3`/`traceparent` are not default official behavior (sent only with OTEL enabled); docs note `tracing` can be disabled to match the default official client.
+
 ## [1.1.1] - 2026-11-18
 
 ### Fixed

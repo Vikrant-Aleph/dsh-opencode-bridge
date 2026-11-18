@@ -229,8 +229,11 @@ diff:
 | Header positions | `Host`, `Accept-Encoding` and `Content-Length` are supplied explicitly so they land at positions 14–16; the transport would otherwise append them at the end. |
 
 With those in place the `ClientHello` has **zero extension mismatches** and the
-same 1482-byte record as the capture, and the request headers are byte-identical
-apart from `x-opencode-project`, which is derived from the caller's directory
+same 1482-byte record as the capture. The request **header** text (dynamic values
+normalised) matches the capture apart from `x-opencode-project`, derived from the
+caller's directory. Note this is a header-shape comparison, not a whole-request byte
+comparison: the two records have different full sizes (23,073 vs 951 bytes, different
+prompts), so the "single difference" claim applies only to the normalised header text
 (`docs/evidence/clienthello-deep-2026-11-13.json`, `docs/evidence/byte-exact-2026-11-13.json`).
 
 A persistent `wreq` Transport keeps one pooled connection across turns, matching
@@ -239,7 +242,10 @@ response body has been fully read.
 
 The client offers **only `http/1.1`** — no `h2` — so HTTP/2 SETTINGS
 fingerprinting is not part of this client's traffic. The runtime is not the
-differentiator either: Bun 1.4.4 with a zero-tool body is refused exactly like Node
+differentiator either: a zero-tool body is refused with `FreeUsageLimitError` on both
+Bun (2026-11-13) and Node (supplement record 2026-11-18). The evidence holds two records;
+the Bun probe's glm-5.3-flash-free is now deprecated and the Node supplement used
+big-pickle — both are "zero-tool refused", the variable being the runtime, not the model
 (`docs/evidence/bun-runtime-test.json`).
 
 ### 3.6 Field-level differences from the official encoder
@@ -544,7 +550,7 @@ tests passed while every real request was refused.
 | Probe | What it verifies |
 |---|---|
 | `smoke.mjs --run` | Session and request id shape, separator-free tool names and their round trip, catalog reachability, one live completion with a full tool set, and that a returned call carries the caller name. |
-| `tool-loop-live.mjs --run` | A multi-turn tool loop: three sequential calls where each result feeds the next, and later requests must replay the assistant history and `reasoning_content`. Ran 10/10 with deepseek-v4.1-flash-free on 2026-11-14 (`docs/evidence/tool-loop-live-2026-11-14.json`). |
+| `tool-loop-live.mjs --run` | A multi-turn tool loop: three sequential calls where each result feeds the next, and later requests must replay the assistant history and `reasoning_content`. Ran live on 2026-11-14 with deepseek-v4.1-flash-free: **one three-round session**, all 10 checks passed (not ten independent runs) (`docs/evidence/tool-loop-live-2026-11-14.json`). |
 | `proxy-live.mjs` | A proxy tunnel carrying real traffic. |
 | `vision-compat-live.mjs` | Image input and tool-result images. |
 | `reasoning-compat-live.mjs`, `reasoning-roundtrip-live.mjs` | Reasoning replay and round trips. |

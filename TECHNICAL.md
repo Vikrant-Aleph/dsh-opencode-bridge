@@ -184,15 +184,19 @@ Hello 约 274 字节，官方是 1482。
 | 头名称大小写 | `Authorization`、`Content-Type`、`User-Agent`、`Connection`、`Accept`、`Host`、`Accept-Encoding`、`Content-Length`——传输层的默认值是小写。 |
 | 头位置 | `Host`、`Accept-Encoding`、`Content-Length` 显式提供，使其落在第 14–16 位；否则传输层会把它们追加到末尾。 |
 
-完成上述修正后，`ClientHello` **扩展零差异**、记录长度与抓包同为 1482 字节；请求头除
-`x-opencode-project`（由调用方目录推导）外逐字节一致
+完成上述修正后，`ClientHello` **扩展零差异**、记录长度与抓包同为 1482 字节。请求**头**文本
+（动态值归一化后）除 `x-opencode-project`（由调用方目录推导）外与抓包一致。注意这是头形态比对，
+不是整请求逐字节比对：两条记录全文尺寸不同（23,073 与 951 字节，正文提示不同），「仅一处差异」
+只针对归一化后的头文本
 （`docs/evidence/clienthello-deep-2026-11-13.json`、`docs/evidence/byte-exact-2026-11-13.json`）。
 
 持久化的 `wreq` Transport 跨轮次复用一条连接，与官方客户端一致；只有响应体被完整读取后，
 连接才会归还连接池。
 
 客户端**只提供 `http/1.1`**，没有 `h2`，因此 HTTP/2 SETTINGS 指纹不属于本客户端的流量特征。
-运行时本身也不是门禁差异来源：Bun 1.4.4 用零工具请求体同样被拒
+运行时本身也不是门禁差异来源：零工具请求体在 Bun（2026-11-13）与 Node（2026-11-18 补充记录）
+下都被拒为 `FreeUsageLimitError`。证据含两条记录；Bun 当时用的 glm-5.3-flash-free 现已弃用，
+Node 补充用 big-pickle，二者同为「零工具被拒」，变量是运行时而非模型
 （`docs/evidence/bun-runtime-test.json`）。
 
 ### 3.6 与官方编码器的字段级差异
@@ -458,7 +462,7 @@ node --test tests/*.test.mjs                            # 全量离线测试
 | 探针 | 验证 |
 |---|---|
 | `smoke.mjs --run` | 会话/请求 id 形态、工具名无分隔符且能回映射、目录可达、带完整工具集的一次真实完成、返回调用名正确还原。 |
-| `tool-loop-live.mjs --run` | 多轮工具循环：三轮串行调用，每轮结果喂回下一轮，后续请求必须回放 assistant 历史与 `reasoning_content`。2026-11-14 以 deepseek-v4.1-flash-free 实跑 10/10 通过（`docs/evidence/tool-loop-live-2026-11-14.json`）。 |
+| `tool-loop-live.mjs --run` | 多轮工具循环：三轮串行调用，每轮结果喂回下一轮，后续请求必须回放 assistant 历史与 `reasoning_content`。2026-11-14 以 deepseek-v4.1-flash-free 实跑：**一次三轮会话**，10 项检查全部通过（不是十次独立运行）（`docs/evidence/tool-loop-live-2026-11-14.json`）。 |
 | `proxy-live.mjs` | 代理隧道承载真实流量。 |
 | `vision-compat-live.mjs` | 图片输入与工具结果图片。 |
 | `reasoning-compat-live.mjs`、`reasoning-roundtrip-live.mjs` | 思考字段的回放与往返。 |

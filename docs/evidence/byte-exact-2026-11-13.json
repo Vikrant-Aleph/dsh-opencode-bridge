@@ -1,5 +1,7 @@
 {
   "at": "2026-11-13T08:33:15.756Z",
+  "scope": "Comparison is over the request HEADER text with dynamic values normalized (session/host/b3/traceparent as X, Content-Length as N). It is not a whole-request byte comparison.",
+  "sizeNote": "officialBytes (23073) and pluginBytes (951) are full-request sizes; the bodies differ because the prompts differ, so the single-difference claim applies only to the normalized header text.",
   "officialBytes": 23073,
   "pluginBytes": 951,
   "identicalHeaders": false,

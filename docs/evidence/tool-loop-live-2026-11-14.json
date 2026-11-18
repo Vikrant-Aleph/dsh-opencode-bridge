@@ -5,6 +5,9 @@
   "note": "Live multi-turn tool loop through the real adapter. Three rounds, each tool result fed back; the later requests must replay the assistant turn and its reasoning. Produced by `node tests/tool-loop-live.mjs --run <model> --out <file>`.",
   "passed": 10,
   "failed": 0,
+  "sessions": 1,
+  "rounds": 3,
+  "runsNote": "The 10 passed checks come from ONE three-round session, not ten independent runs.",
   "checks": [
     {
       "name": "round 1 reached a tool call",

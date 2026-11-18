@@ -1,14 +1,28 @@
 {
-  "at": "2026-11-13T09:05:22.241Z",
-  "runtime": "bun 1.4.4",
-  "model": "glm-5.3-flash-free",
-  "bodyBytes": 294,
-  "tools": 0,
-  "status": 429,
-  "retryAfter": "53670",
-  "errorType": "FreeUsageLimitError",
-  "ok": false,
-  "answerMatches": false,
-  "textSample": null,
-  "snippet": "{\"type\":\"error\",\"error\":{\"type\":\"FreeUsageLimitError\",\"message\":\"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to Open"
+  "note": "Zero-tool bodies are refused with FreeUsageLimitError on both runtimes, so the runtime is not the gate differentiator. The Bun probe (2026-11-13) used glm-5.3-flash-free, which has since been deprecated; the Node supplement (2026-11-18) used big-pickle. Same refusal class for a zero-tool body, recorded at different dates/models; the Node side was originally only manually exercised via DSH and left no record, so it is supplemented here.",
+  "bun": {
+    "at": "2026-11-13T09:05:22.241Z",
+    "runtime": "bun 1.4.4",
+    "model": "glm-5.3-flash-free",
+    "bodyBytes": 294,
+    "tools": 0,
+    "status": 429,
+    "retryAfter": "53670",
+    "errorType": "FreeUsageLimitError",
+    "ok": false,
+    "answerMatches": false,
+    "textSample": null,
+    "snippet": "{\"type\":\"error\",\"error\":{\"type\":\"FreeUsageLimitError\",\"message\":\"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to Open"
+  },
+  "node": {
+    "at": "2026-11-18T16:47:21.786Z",
+    "runtime": "node v24.21.0",
+    "model": "big-pickle",
+    "bodyBytes": 117,
+    "tools": 0,
+    "status": 429,
+    "errorType": "FreeUsageLimitError",
+    "ok": false,
+    "snippet": "{\"type\":\"error\",\"error\":{\"type\":\"FreeUsageLimitError\",\"message\":\"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to Open"
+  }
 }

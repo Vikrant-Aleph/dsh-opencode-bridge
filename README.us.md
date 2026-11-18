@@ -162,8 +162,10 @@ underlying TLS library the official client uses.
 | `Connection` | `keep-alive`, over a persistent pooled connection reused across turns |
 | Deliberately absent | No `sec-ch-ua*`, `sec-fetch-*`, `priority` or `accept-language` — browser emulation adds these by default and the official client never sends them, so they are explicitly suppressed |
 
-The result is byte-identical to the captured request apart from `x-opencode-project`,
-which is derived from the working directory.
+The resulting request **headers** (dynamic values normalised) match the capture apart from
+`x-opencode-project`, which is derived from the working directory. This is a header-shape
+comparison, not a whole-request byte match: the bodies differ in size because the prompts
+differ (23,073 bytes captured vs 951 in the plugin example).
 
 `wreq-js` is an **optional** dependency. Without its native binding the plugin falls back
 to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups

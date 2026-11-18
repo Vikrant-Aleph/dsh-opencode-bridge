@@ -12,8 +12,14 @@ Releases are published from `v*` tags, and the notes on the release page are tak
 
 ### Changed
 
-- **Docs reorganized into two blocks — "currently checked" vs "not checked, preventive only"** (README, TECHNICAL, CAMOUFLAGE, both languages), with "currently" pinned to 2026-11-17 (last live probe). TLS fingerprints and the fidelity details above are classed as not-checked/preventive; added TECHNICAL §3.7 preventive-fidelity list.
-- Clarified that `b3`/`traceparent` are not default official behavior (sent only with OTEL enabled); docs note `tracing` can be disabled to match the default official client.
+- **Technical design rewritten.** New order: architecture → client camouflage → model catalog → messages & attachments → tool execution → error handling & diagnostics → configuration → testing → document maintenance rules (moved to the end), credits as an appendix. The camouflage chapter follows the request composition (headers & session info / body, system prompt & tool declarations / TLS & HTTP transport), tagging each item checked / preventive / user-free; Code Mode's declaration shape lives in the camouflage chapter and its execution & permissions in tool execution, no longer explained twice. The architecture diagram shows both declaration paths and the no-PTC fallback.
+- **Camouflage principle reworded** to "keep official-consistent details that user settings cannot change": checked ones must match, unchecked ones are kept as prevention; removed the absolute "do not imitate what the gateway does not check".
+- **Unwrapped mid-sentence hard line breaks in all md**, so rendered Chinese has no stray spaces (code fences, tables, headings, lists preserved).
+- **Maintenance rules strengthened**: plugin logic changes must update the technical design in both languages with a full re-read for coherence, clarity and no ambiguity; every plugin change is recorded in the standalone CHANGELOG; "re-derive a constant" is now a five-step procedure with its purpose stated.
+
+### Fixed
+
+- **Corrected three evidence claims.** The runtime comparison gained a real Node zero-tool record paired with the Bun one; "byte-identical apart from one field" is scoped to the normalized request header text (full request sizes differ); the tool-loop "10/10" is now "one three-round session, all 10 checks passed", not ten independent runs.
 
 ## [1.1.1] - 2026-11-18
 

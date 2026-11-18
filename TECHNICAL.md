@@ -233,11 +233,18 @@ node --test tests/*.test.mjs                            # 全量离线
 ## 9. 文档维护规则
 
 - 本文件与[英文版](TECHNICAL.us.md)同步修改；用户可见功能、协议原则、已记录常量、构建/发布流程或版本号变化须同改两份。版本号还须同步 README 中英安装命令，使其与 `package.json` 的 `version` 一致（`tests/readme-version.test.mjs` 校验）。
-- 每次变更记录在独立更新日志（[CHANGELOG.md](CHANGELOG.md)/[CHANGELOG.us.md](CHANGELOG.us.md)）。
+- **插件逻辑变化时必须同步更新本技术文档**（中英两份），并通读全文，保证上下文通顺、结构清晰、无歧义；不能只改局部而留下前后矛盾。
+- 插件的每次变更（功能、修复、协议、文档）都记录在独立更新日志（[CHANGELOG.md](CHANGELOG.md)/[CHANGELOG.us.md](CHANGELOG.us.md)），本文不另设变更记录。
 - 参考新项目时同步更新 [README 致谢](README.md#参考与致谢)与本文 §10。
 - 证据两条规则（`tests/evidence-links.test.mjs` 强制）：引用的每个文件必须随仓库发布（抓包放[`docs/evidence/`](docs/evidence/README.md)）；绝不提及未发布内容。
 
-重新推导某个常量：用已安装官方客户端抓包（本机回环、隔离配置、本地假模型），记录头/体/`ClientHello`；与 `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION` 对比；只改抓包矛盾处且按抓包方向改；在 `tests/`固定该值；记入 CHANGELOG。
+**重新推导某个常量**：本文的常量（UA、头、工具形态、TLS 参数等）都是有日期的观测。当上游变化使某个常量不再成立时，按以下步骤重新测量，而不是凭猜修改：
+
+1. 用已安装的官方客户端抓包：走本机回环端点、隔离配置、本地假模型，记录请求头、请求体与 TLS `ClientHello`。
+2. 与 `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION` 的当前值对比。
+3. 只改与抓包矛盾之处，且按抓包所指方向改。
+4. 在 `tests/` 新增或更新固定该值的断言。
+5. 同步本文与英文版，并记入 CHANGELOG。
 
 ## 10. 参考的社区项目
 

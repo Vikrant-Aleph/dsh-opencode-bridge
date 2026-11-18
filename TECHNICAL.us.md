@@ -234,11 +234,18 @@ Live probes (consume real quota): `smoke`, `tool-loop-live` (one three-round ses
 ## 9. Document maintenance rules
 
 - This file and the [Chinese version](TECHNICAL.md) change together; user-visible features, protocol principles, recorded constants, build/release flow or version changes update both. Version changes also sync the README install commands in both languages to match `package.json`'s `version` (`tests/readme-version.test.mjs` enforces).
-- Every change is recorded in the standalone changelog ([CHANGELOG.us.md](CHANGELOG.us.md)/[CHANGELOG.md](CHANGELOG.md)).
+- **When plugin logic changes, this technical design must be updated in both languages**, and the whole document re-read to keep the context coherent, the structure clear and nothing ambiguous; do not patch one spot and leave contradictions elsewhere.
+- Every change to the plugin (feature, fix, protocol, docs) is recorded in the standalone changelog ([CHANGELOG.us.md](CHANGELOG.us.md)/[CHANGELOG.md](CHANGELOG.md)); this file keeps no separate change log.
 - Consulting a new project updates [README credits](README.us.md#references-and-credits) and §10 here.
 - Two evidence rules (`tests/evidence-links.test.mjs` enforces): every referenced file ships with the repo (captures go in [`docs/evidence/`](docs/evidence/README.md)); never mention unpublished content.
 
-To re-derive a constant: capture with the installed official client (local loopback, isolated config, local fake model), record headers/body/`ClientHello`; compare against `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION`; change only what the capture contradicts, in the capture's direction; pin the value in `tests/`; record in the CHANGELOG.
+**Re-deriving a constant**: the constants here (UA, headers, tool shape, TLS parameters) are dated observations. When upstream changes make one stale, re-measure it instead of guessing:
+
+1. Capture with the installed official client: local loopback endpoint, isolated config, local fake model; record request headers, body and TLS `ClientHello`.
+2. Compare against the current values in `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION`.
+3. Change only what the capture contradicts, in the capture's direction.
+4. Add or update an assertion pinning the value in `tests/`.
+5. Sync this file and the Chinese version, and record it in the CHANGELOG.
 
 ## 10. Community projects consulted
 

@@ -24,11 +24,12 @@ the build/pack/publish flow, or the version moves. A version bump must also upda
 install command in both READMEs to match `version` in `package.json`;
 `tests/readme-version.test.mjs` enforces it.
 
-READMEs are for visitors; this file is for maintainers. Record every change in §11.
+READMEs are for visitors; this file is for maintainers. Record every change in the separate
+changelog ([CHANGELOG.us.md](CHANGELOG.us.md), Chinese [CHANGELOG.md](CHANGELOG.md)).
 
 **Update the list when you consult a new project.** After reading or comparing another
 project, add it in the same change to the
-[README references](README.us.md#references-and-credits) and to §13 here. A project read only
+[README references](README.us.md#references-and-credits) and to §12 here. A project read only
 for comparison, with no code copied, is recorded as exactly that; anything reused needs its
 source and licence stated.
 
@@ -498,7 +499,7 @@ Re-deriving a constant:
 2. Compare against `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION`.
 3. Change only what the capture contradicts, and only in the direction it shows.
 4. Add or update the assertion in `tests/` that pins the new value.
-5. Record the change in §11.
+5. Record the change in the changelog (CHANGELOG).
 
 ### 8.1 Request structure summaries
 
@@ -566,22 +567,7 @@ if only the plugin is refused, vary tools, messages and request parameters one a
 - The plugin adds no `exec`/`spawn` call. Attribution to DSH is available via
   `userAgentAttribution` and is off by default for protocol reasons (§3.1).
 
-## 11. Change log
-
-| Date | Version | Change |
-|---|---|---|
-| 2026-11-17 | Unreleased | Removed cross-request model cooldowns; clearing resets live egress waits and legacy state; quota handling follows the official default and retry hints are capped at 15 minutes. |
-| 2026-11-13 | **1.0.0** | **Gateway requirements found and met.** Two structural requirements are now satisfied: at least one declared tool (any name) and an `<env>` block in the system prompt. The `read` placeholder is added only when the caller declares no tools, its description says not to call it, and a call to it is dropped rather than failing the turn. Transport: `wreq-js` persistent Transport with connection pooling, `Connection: keep-alive`, official header casing/positions, `curvesList` trimmed, `sigalgsList` completed (`ed25519` + `ECDSA+SHA512`), and the wiring fix that had left the transport unused; the selected proxy URL now reaches a non-undici transport, so rotation works with the Bun-shaped transport. Removed the tool-bridge layer, `opencode_bridge_audit`, and the dead `harnessSystem` option. |
-| 2026-10-23 | 0.5.5 | Optional completed-turn reasoning trimming with a persistent settings tab. |
-| 2026-10-22 | 0.5.4 | Official attachment-backed images (Issue #3); tool-result image hoisting. |
-| 2026-10-21 | 0.5.3 | Assistant reasoning replay (Issue #2). |
-| 2026-10-19 | 0.5.2 | Bounded retries with safe 429 diagnostics and strict cooldown. |
-| 2026-10-19 | 0.5.1 | Dynamic model catalog refresh. |
-| 2026-10-18 | 0.4.1 | SOCKS4/4a/5/5h support, DNS modes, credential handling. |
-| 2026-10-18 | 0.3.0 | Egress proxy pool and rotation. |
-| 2026-10-17 | 0.1.0 | First release: gate reproduction, `OpenCodeFreeAdapter`, catalog. |
-
-## 12. Glossary
+## 11. Glossary
 
 | Term | Meaning |
 |---|---|
@@ -594,7 +580,7 @@ if only the plugin is refused, vary tools, messages and request parameters one a
 | **egress** | One configured route to upstream (`direct` or a proxy). |
 | **Bun-shaped transport** | The wreq-js handshake reproducing the official client's `ClientHello`. |
 
-## 13. Community projects consulted
+## 12. Community projects consulted
 
 Every protocol behaviour comes from measuring the official client, not from any community
 project. The projects below were compared during design, to judge whether an approach was

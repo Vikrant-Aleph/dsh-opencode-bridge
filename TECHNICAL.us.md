@@ -1,609 +1,365 @@
-# dsh-opencode-bridge — Technical Design
+# dsh-opencode-bridge — technical design
 
 [中文](TECHNICAL.md) | English · [Camouflage policy](CAMOUFLAGE.us.md)
 
-How the OpenCode free-tier gate was reverse-engineered, how the wire protocol is
-reproduced, how the adapter maps onto the DSH LLM contract, and how to respond
-when upstream changes. Also covers optional context trimming of completed-turn
-reasoning and the safeguards around it.
+For maintainers of this plugin, and DSH plugin authors who want a reference `LlmAdapter`
+implementation of a provider's wire protocol. It also covers optional context trimming and its
+safety constraints.
 
-Audience: maintainers of this plugin, and DSH plugin authors building a
-provider-wire `LlmAdapter`.
+> **A dated snapshot.** Upstream facts were established by measurement in 2026-10/11: probes
+> against `https://opencode.ai/inference/*`, captures of the installed official CLI (2.2.0), and
+> reading `anomalyco/opencode` source (cross-checked at v2.2.0). "Currently checked" is relative to
+> **2026-11-17** (the last live probe). The gate evolves; constants are dated observations, not a
+> specification. How to refresh them is in §9.
 
-> **Dated snapshot.** Every upstream fact here was established empirically in
-> 2026-10/11 against `https://opencode.ai/inference/*`, the installed official
-> CLI (2.2.0), and a read of `anomalyco/opencode`. The gate evolves; treat all
-> constants as dated observations. §8 is the update
-> playbook.
+Overarching rule: **keep official-consistent details that user settings cannot change.** Checked
+ones must match; unchecked ones are kept as prevention; content left to the user is not imitated.
+The trade-off list is in the [camouflage policy](CAMOUFLAGE.us.md).
 
-## 0. Documentation maintenance
-
-This file and its [Chinese counterpart](TECHNICAL.md) change together. Update both in
-the same change when a user-visible feature, a protocol principle, a documented constant,
-the build/pack/publish flow, or the version moves. A version bump must also update the
-install command in both READMEs to match `version` in `package.json`;
-`tests/readme-version.test.mjs` enforces it.
-
-READMEs are for visitors; this file is for maintainers. Record every change in the separate
-changelog ([CHANGELOG.us.md](CHANGELOG.us.md), Chinese [CHANGELOG.md](CHANGELOG.md)).
-
-**Update the list when you consult a new project.** After reading or comparing another
-project, add it in the same change to the
-[README references](README.us.md#references-and-credits) and to §12 here. A project read only
-for comparison, with no code copied, is recorded as exactly that; anything reused needs its
-source and licence stated.
-
-**Two rules for citing evidence.** Both are enforced by
-`tests/evidence-links.test.mjs`:
-
-1. **Every file a document cites must be published in this repository.** A claim whose
-   evidence is unavailable cannot be checked, which defeats the point of citing it. Put
-   the capture under [`docs/evidence/`](docs/evidence/README.md) and link it there.
-2. **Never mention an artefact that is not published.** Do not describe what was
-   withheld, where it lives, or why. A reader can only be confused by a pointer to
-   something they cannot reach.
-
----
-
-## 1. What this plugin is
-
-An `LlmAdapter` that speaks the official OpenCode client's wire protocol, so DSH
-can use the keyless `-free` models at `opencode.ai` without an account.
-
-It does **not** modify the agent loop, execute tools itself, or patch global
-HTTP entry points. Tool execution, permissions and schema validation stay in DSH.
-
-Two rules govern the design:
-
-1. **Keep official-consistent details that user settings cannot change.** Checked ones must match; unchecked ones are kept as prevention. See [CAMOUFLAGE.us.md](CAMOUFLAGE.us.md).
-2. **Dated evidence over assumption.** A constant stays only while a capture supports it;
-   §8 explains how to re-derive each one.
-
-## 2. Architecture
+## 1. Architecture
 
 ```
 DSH agent loop
    │  GenerateOptions / messages / tools
    ▼
-OpenCodeFreeAdapter            src/adapter.ts
-   ├── planTools               src/opencode-protocol.ts   declare caller tools (+ placeholder)
-   ├── buildChatMessages       src/opencode-protocol.ts   DSH messages → OpenAI chat
-   ├── buildHeaders            src/opencode-protocol.ts   identity headers + tracing
-   ├── prepareImageProjection  src/image-input.ts         official attachment seam
-   └── fetchWithPool           src/proxy-pool.ts          egress pool, cooldown, failover
-          │
-          ├── bunFetch        src/bun-transport.ts        Bun-shaped TLS (wreq-js)
-          └── plain fetch                                 fallback when unavailable
+OpenCodeFreeAdapter              src/adapter.ts
+   ├── planTools                 declare caller tools (placeholder only if none)
+   ├── code-mode (free routes)   wire keeps anchors + execute; real catalog in system prompt
+   ├── buildChatMessages         DSH messages → OpenAI chat, append environment instructions
+   ├── buildHeaders              identity headers + optional tracing
+   ├── prepareImageProjection    official attachment API
+   └── fetchWithPool             egress pool, cooling, failover
+         ├── bunFetch            Bun-shaped TLS (wreq-js, optional)
+         └── plain fetch         fallback when the transport is unavailable
    ▼
 https://opencode.ai/inference/...
 ```
 
+There are two declaration paths. What the model sees is in §2.2; who executes a call is in §5:
+
+- **Direct declaration**: sanitized caller tools go on the wire. Used for non-free routes, or as the
+  fallback when the host has no PTC runtime.
+- **Code Mode**: on free routes where the step admits `execute`, the wire declares only a few anchor
+  tools plus `execute`; the full catalog goes into the system prompt; `execute`'s body delegates to
+  DSH's native PTC (§5). Without a host PTC runtime it falls back to direct declaration.
+
 Other modules:
 
-| Module | Responsibility |
+| Module | Role |
 |---|---|
-| `src/catalog.ts` | Free-model discovery: reads the official catalog, with TTL and retry. |
-| `src/project-identity.ts` | Derives the official `x-opencode-project` id from a real directory. |
-| `src/request-waits.ts` | Reads and clears legacy cooldown files; current requests do not read or write per-model waits. |
-| `src/http-errors.ts` | Typed upstream classification; safe, bounded diagnostics. |
-| `src/retry-after.ts` | Strict `Retry-After` parsing (ms, seconds, HTTP-date). |
-| `src/reasoning-policy.ts` | Host-only completed-turn reasoning projection for optional trimming. |
-| `src/context-service.ts` | The Context-trimming preference (RPC + agent tool, one operation). |
-| `src/logger.ts`, `log-service.ts` | Leveled, redacted diagnostic logging. |
-| [request-diagnostics.ts](src/request-diagnostics.ts) | Bounded, content-free facts about the actual serialized request. |
-| `src/proxy-service.ts` | Egress pool editing and probing for the Settings page. |
+| [catalog.ts](src/catalog.ts) | Free-model discovery from the official catalog, TTL + retry (§3). |
+| [opencode-protocol.ts](src/opencode-protocol.ts) | Wire shape of headers, messages, tool declarations, environment instructions (§2). |
+| [code-mode.ts](src/code-mode.ts) | Code Mode catalog rendering and `execute` registration (§2.2, §5). |
+| [project-identity.ts](src/project-identity.ts) | Derives `x-opencode-project` from the real directory (§2.1). |
+| [image-input.ts](src/image-input.ts) | Attachment image projection and budgets (§4). |
+| [reasoning-policy.ts](src/reasoning-policy.ts) | Completed-turn reasoning projection for optional trimming (§4). |
+| [http-errors.ts](src/http-errors.ts), [retry-after.ts](src/retry-after.ts) | Upstream classification, `Retry-After` parsing (§6). |
+| [request-waits.ts](src/request-waits.ts) | Cleans legacy cooldown files; current requests read/write no per-model waits (§6). |
+| [proxy-pool.ts](src/proxy-pool.ts), [proxy-service.ts](src/proxy-service.ts) | Egress pool and Settings editing (§6, §7). |
+| [request-diagnostics.ts](src/request-diagnostics.ts), [logger.ts](src/logger.ts) | Bounded, content-free request summaries; redacted logs (§6). |
+| [context-service.ts](src/context-service.ts) | Context-trimming preference (RPC + agent tool, one operation). |
 | `client.js` | Settings page (browser module, not a tsc product). |
 
-## 3. The gate, as observed
+Terms: **free tier** = the keyless model set offered to the official client; **gate** = the upstream
+check deciding whether to serve a non-official client; **placeholder** = the single tool sent only when
+the caller declares none; **wire name** = the separator-free declared name, mapped back on return;
+**egress** = one configured route upstream (`direct` or a proxy).
 
-**"Currently" means 2026-11-17** — the date of the last live probe against the free lane
-(this document was updated 2026-11-18). "Checked / not checked" below is relative to that
-date; these are dated observations, not a specification (§8 explains how to re-derive each).
+## 2. Client camouflage
 
-The camouflage splits into two blocks:
+Three sections by request composition: headers & session info; body, system prompt & tool
+declarations; transport. Each says what the plugin does first, then why. Every item is tagged:
+**[checked]** the gateway checks it now, mismatch is refused; **[preventive]** not checked now, kept
+only so a future item-by-item gate cannot distinguish us; **[user-free]** content left to the user,
+ignored by the gateway, so not imitated.
 
-**A. Currently checked (must match or be refused).** User-Agent (§3.1), session & request
-identity (§3.2), tool-declaration shape (§3.3), and the presence of an `<env>` block in the
-system prompt (§3.4).
+### 2.1 Headers and session info
 
-**B. Not currently checked — replicated only to preempt future fingerprinting.** The
-transport TLS fingerprint / header casing & order / connection reuse (§3.5), plus a set of
-always-sent official fidelity details (§3.7): the date line, the `<env>` intro and 5th line,
-env value derivations, multi-turn `<system-update>`, always-on `max_completion_tokens`,
-catalog reasoning-field replay, and body key order. None of these was a gate condition in
-the 2026-11-17 probes; they are replicated only so a future gate that compares them item by
-item cannot distinguish the bridge.
+The bridge generates:
 
-### 3.1 User-Agent
-
-`opencode/<channel>/<version>/<name>`, e.g. `opencode/latest/2.2.0/cli`. The
-captured value is sent byte-identically. A versioned foreign token such as
-`deepseek-harness/<n>` is refused; DSH attribution is therefore opt-in
-(`userAgentAttribution`) and off by default.
-
-### 3.2 Session and request identity
-
-`ses_` ids encode a 48-bit time field: the CLI's descending encoding
-`~(ms * 0x1000 + counter)`, with a small counter, followed by 14 base62
-characters. The same id is sent as `x-opencode-session`,
-`x-opencode-session-id`, `x-session-affinity` and `x-session-id`.
-
-`x-opencode-project` is derived from the caller's directory, matching the
-official rule verified by capture:
-
-- git checkout → `sha1("git-remote:" + normalized remote)`
-- otherwise → `sha1("directory:" + resolved path)`
-
-### 3.3 Tool declarations
-
-The *content* of the tool list does not identify the client: a user can emit any tool
-list and system prompt from the official client itself (`agents.<name>.system` and
-`agents/<name>.md` replace the whole system prompt; a custom agent without tools drops
-the list from 12 to 1; a plugin can register tools with arbitrary names and schemas —
-`docs/evidence/user-customization-round2-2026-11-13.json`,
-`docs/evidence/user-add-tools-2026-11-13.json`). An earlier revision injected OpenCode's
-built-in manifest and cloaked colliding caller tools behind `*_client` aliases; that
-premise was disproved by those experiments, and the bridge now declares exactly the
-caller's tools. This is why the rule is phrased as "what is checked" rather than "what
-is configurable".
-
-Content being free does not make the *shape* free. Tool declarations face three gate
-requirements:
-
-**At least one declared tool.** An empty list is refused (`FreeUsageLimitError`). Any
-name works — the community claim that a tool **named** `read` is required did not
-reproduce: measured from a single runtime with only the tool array varying, a lone tool
-called `dsh_probe_tool` passes just as well (`docs/evidence/bun-tool-minimum.json`,
-`docs/evidence/any-tool-vs-read.json`). The caller's own tools satisfy the requirement;
-`planTools` adds a placeholder only when the caller declares none. Its description tells
-the model not to call it, and a call that happens anyway is **dropped** (logged at
-`warn`) so the turn still ends normally. Normal traffic therefore never carries a tool
-DSH cannot execute.
-
-**Name shape.** An unrecognized name with underscores, dashes, dots or capitals is
-refused; a name the gateway recognises may carry separators (`web_search` passes as
-`websearch`). A declaration also needs at least one name the gateway recognises: purely
-invented names are refused even without separators. This requirement was identified on
-2026-11-14 and is why every request was refused before 1.0.4 — the gateway's
-`FreeUsageLimitError` looks exactly like an exhausted quota, so it was treated as rate
-limiting for a long time:
-
-| Body | Tool names | Result |
+| Header | Value | Class |
 |---|---|---|
-| The full UI request (46 tools, 69 KB) | Original, with underscores | 429 |
-| The same body | Separators removed (`askuserquestion`) | **200** |
-| Six tiny tools | `job_list`, `web_search`, … | 429 |
-| The same six objects | `pwsh`, `read`, `glob`, … | 200 |
+| `user-agent` | `opencode/latest/2.2.0/cli`, byte-identical | [checked] |
+| `x-opencode-session` / `-session-id` / `x-session-affinity` / `x-session-id` | one session id | [checked] |
+| `x-opencode-client` | `cli` | [checked] shape |
+| `authorization` | `Bearer public` (signed-out sentinel) | [checked] shape |
+| `x-opencode-project` | derived from the real directory (below) | [preventive] value not checked |
+| `b3` / `traceparent` | minted per request; `tracing:false` disables | [preventive] official default omits |
+| `content-type` / `accept` / `accept-encoding` | `application/json` / `*/*` / `gzip, deflate, br, zstd` | [preventive] |
+| `x-opencode-request` | not sent (2.x); `requestIdHeader:true` for 1.x relays | — |
 
-All 12 official tools are free of separators (`edit`, `glob`, `grep`, `question`,
-`read`, `shell`, `skill`, `subagent`, `webfetch`, `websearch`, `write`, `execute`).
-`planTools` therefore reduces every name to `[a-z0-9]` (appending a counter on collision)
-and keeps a sanitized-to-real map, applied to returned calls so DSH's dispatch is
-unaffected.
+`host`, `content-length`, `connection` are written by the transport (§2.3).
 
-**Not many rich tools at once.** The real description text and the complex schemas each
-trigger `FreeUsageLimitError` independently; a same-size neutral tool block passes while
-the real block is refused (`docs/evidence/tool-gate-codemode-2026-11-17.json`). The
-official client avoids this with Code Mode, and the bridge does the same for the
-free-model routes (§5.3).
+The session id reproduces the CLI encoding: `ses_` + a 48-bit time field (descending
+`~(ms*0x1000+counter)`, small counter) + 14 base62 chars. `x-opencode-project` follows the
+capture-verified official rule: git checkout → `sha1("git-remote:"+normalized remote)`; otherwise →
+`sha1("directory:"+realpath)` ([project-identity.ts](src/project-identity.ts)).
 
-### 3.4 System prompt
+Why: the gateway compares UA and session headers as client identity; missing or wrong is refused. A
+versioned foreign product token (e.g. `deepseek-harness/<n>`) is refused, so DSH attribution is off by
+default (`userAgentAttribution` enables it). The project value is not checked; deriving it only matches
+the official client. Tracing headers are sent by the official client only with OTEL on; the bridge's
+early capture-based default minted a pair, an addition — disable `tracing` to match the default.
 
-The system prompt must contain an `<env>` block: a 177-byte prompt containing nothing
-but the block passes; a prompt without one is refused
-(`docs/evidence/bun-env-hypothesis.json`). The `<env>` values are not checked: rewriting
-the paths or flipping the git flag still passes
-(`docs/evidence/bun-env-strictness.json`). The plugin still generates the block from the
-real working directory so its contents are useful to the model. The official harness
-text and the Code Mode catalogue are **not** required — a synthetic catalogue of DSH's
-own tools passes too (`docs/evidence/bun-synthetic-catalog.json`).
+### 2.2 Body, system prompt and tool declarations
 
-Note: only the *presence* of the `<env>` block is checked. The official date line, intro
-line, 5th line, worktree/git derivations and multi-turn `<system-update>` are **not**
-checked; they are preventive fidelity, see §3.7.
-
-### 3.5 Transport (not currently checked — preventive)
-
-**As of 2026-11-17 the gate does not check this layer.** Reproducing the official
-`ClientHello` covers fingerprint checks that may appear later, making the traffic
-indistinguishable from the official client at the TLS layer; it is aligned byte for byte,
-but its necessity is unproven.
-
-The official client runs on Bun. Node's TLS cannot express the same
-`ClientHello`: OpenSSL orders extensions itself and offers no post-quantum key
-share. Measured against the captured handshake, Node's `tls`/`tls-impersonate`
-paths produce a different extension order and a ~274-byte hello versus 1482.
-
-`src/bun-transport.ts` delegates the handshake to `wreq-js` (Rust + BoringSSL),
-configured from the capture. The library is an **optional** dependency; without
-its native binding the adapter falls back to plain `fetch`.
-
-Matching the capture required four corrections, each found by a deep extension
-diff:
-
-| Correction | Detail |
-|---|---|
-| `curvesList` | Drop the extra `MLKEM768` group; the client offers `X25519MLKEM768`, `X25519`, `P-256`, `P-384` only. |
-| `sigalgsList` | `0x0807` is **ed25519**, not `rsa_pss_pss_sha256` (which is `0x0809`). `0x0603` is spelled `ECDSA+SHA512`. Both are needed for the captured 11-entry list. |
-| Header casing | `Authorization`, `Content-Type`, `User-Agent`, `Connection`, `Accept`, `Host`, `Accept-Encoding`, `Content-Length` — the transport's lowercase defaults differ. |
-| Header positions | `Host`, `Accept-Encoding` and `Content-Length` are supplied explicitly so they land at positions 14–16; the transport would otherwise append them at the end. |
-
-With those in place the `ClientHello` has **zero extension mismatches** and the
-same 1482-byte record as the capture. The request **header** text (dynamic values
-normalised) matches the capture apart from `x-opencode-project`, derived from the
-caller's directory. Note this is a header-shape comparison, not a whole-request byte
-comparison: the two records have different full sizes (23,073 vs 951 bytes, different
-prompts), so the "single difference" claim applies only to the normalised header text
-(`docs/evidence/clienthello-deep-2026-11-13.json`, `docs/evidence/byte-exact-2026-11-13.json`).
-
-A persistent `wreq` Transport keeps one pooled connection across turns, matching
-the official client; a pooled connection returns to the pool only once its
-response body has been fully read.
-
-The client offers **only `http/1.1`** — no `h2` — so HTTP/2 SETTINGS
-fingerprinting is not part of this client's traffic. The runtime is not the
-differentiator either: a zero-tool body is refused with `FreeUsageLimitError` on both
-Bun (2026-11-13) and Node (supplement record 2026-11-18). The evidence holds two records;
-the Bun probe's glm-5.3-flash-free is now deprecated and the Node supplement used
-big-pickle — both are "zero-tool refused", the variable being the runtime, not the model
-(`docs/evidence/bun-runtime-test.json`).
-
-### 3.6 Field-level differences from the official encoder
-
-After reading the official OpenAI Chat encoder end to end (`openai-chat.ts`), the
-differences fall into two categories.
-
-**Gate-relevant (must keep):**
-
-| Difference | Official | This bridge | Measured |
-|---|---|---|---|
-| `tools` when empty | The whole field is omitted | A `read` placeholder is declared | **Omitting it is refused (429)**; the placeholder is required |
-
-The official `Generate.text` path (title generation) really does send a body without
-`tools`, and such a request is refused — a failed title is silent, so nobody notices.
-
-**Fidelity-relevant (not currently checked; replicated per the official, see §3.7):**
-always-on `max_completion_tokens`, system joining, the date/intro/5th lines, reasoning
-replay, and key order. None of these was a gate condition in the 2026-11-14 controls
-(`docs/evidence/tools-field-and-token-budget-2026-11-14.json`); aligning them is only
-preemption of future checks.
-
-Every other field is aligned: `store` and `prompt_cache_key` are both omitted (the
-official client sends them only where a provider declares support), `temperature`,
-`stop` and `reasoning_effort` are forwarded when present, and the assistant message's
-`content: null` and `tool_calls` shape match.
-
-The adapter appends the environment instructions after the DSH prompt, matching where the
-official client puts them, so the agent's own instructions still lead. With both in place
-the adapter's own path returns 200 repeatedly (`docs/evidence/verify-env-fix.json`,
-`docs/evidence/placeholder-verify.json`).
-
-### 3.7 Preventive fidelity list (not currently checked)
-
-These are always-sent official features that, as of 2026-11-17, are **not** gate
-conditions. The bridge replicates them from source (`anomalyco/opencode`, cross-checked
-against v2.2.0) solely so a future gate comparing them item by item cannot distinguish it:
-
-| Feature | Official behavior | Source |
-|---|---|---|
-| Date line | System prompt always carries `Today's date: <session-start date>`, frozen per session | `instructions/builtins.ts` |
-| `<env>` intro line | `Here is some useful information about the environment you are running in:` before the block | same |
-| `<env>` 5th line | `Prefer <tmp>/opencode over …/tmp…` | same |
-| env derivations | `Workspace root folder` = git worktree root; git flag = upward `.git` discovery | `location.ts`/`project.ts` |
-| Multi-turn changes | Date/env changes arrive as `<system-update>` user messages; the baseline is not re-appended | `instruction-state.ts`/`openai-chat.ts` |
-| Output limit | Primary requests always send `max_completion_tokens` (catalog default 32000) | `model-request.ts` |
-| Reasoning replay | A catalog reasoning field (e.g. big-pickle) replays an empty string on every assistant message | `openai-chat.ts` |
-| Body key order | `model, messages, tools, stream, stream_options, max_completion_tokens` | `openai-chat.ts` |
-| Transport | TLS ClientHello, header casing/order, connection reuse, http/1.1 | §3.5 |
-| Tracing headers | `b3`/`traceparent` only when OTEL is enabled; **not sent** by default | effect/http |
-
-Note `b3`/`traceparent` are not default official behavior: they are gated on
-`OTEL_EXPORTER_OTLP_ENDPOINT`, and the default client sends neither. The bridge's early
-capture-based default minted a pair per request, which is an *addition*; set `tracing`
-off to match the default official client.
-
-## 4. Wire reference
-
-### 4.1 Headers
-
-| Header | Value |
-|---|---|
-| `authorization` | `Bearer public` (the signed-out sentinel) |
-| `content-type` | `application/json` |
-| `accept` | `*/*` |
-| `accept-encoding` | `gzip, deflate, br, zstd` |
-| `user-agent` | `opencode/latest/2.2.0/cli` |
-| `x-opencode-client` | `cli` |
-| `x-opencode-project` | derived (§3.2) |
-| `x-opencode-session`, `x-opencode-session-id`, `x-session-affinity`, `x-session-id` | the session id |
-| `b3`, `traceparent` | minted per request in the captured shape (`tracing: false` disables) |
-| `x-opencode-request` | **not sent** (2.x omits it; `requestIdHeader: true` for 1.x relays) |
-
-`host`, `content-length` and `connection` are written by the transport.
-
-### 4.2 Body
+The outgoing body consists of (key order matches the official):
 
 ```jsonc
 {
-  "model": "deepseek-v4.1-flash-free",
+  "model": "...",
   "messages": [...],
+  "tools": [...],                 // caller tools; a placeholder if none
   "stream": true,
   "stream_options": { "include_usage": true },
-  "tools": [...],            // the caller's tools, or one placeholder if there are none
-  "max_completion_tokens": 32000
+  "max_completion_tokens": 32000  // always sent, catalog default; caller may override
 }
 ```
 
-`tool_choice` and `prompt_cache_key` are **not** sent: the captured client omits
-both. `max_completion_tokens` is raised to `minOutputTokens` (default 32000),
-matching the client's catalog-derived budget.
+`tool_choice` and `prompt_cache_key` are not sent (the captured client has neither);
+`temperature`/`stop`/`reasoning_effort` are forwarded when present. [preventive] The always-on output
+limit and key order are not currently checked; aligning them is preemption
+(`docs/evidence/tools-field-and-token-budget-2026-11-14.json`).
 
-### 4.3 Message mapping
+**System prompt**: one `system` message = DSH prompt + environment instructions, joined with `\n`.
+[checked] It must contain an `<env>` block: a 177-byte prompt with only the block passes, without it is
+refused (`docs/evidence/bun-env-hypothesis.json`). [user-free] The values are not checked — rewriting
+paths or flipping the git flag still passes (`docs/evidence/bun-env-strictness.json`); the plugin still
+generates them from the real directory so they are useful. [preventive] The official date line (frozen
+per session), intro sentence, 5th line (tmp preference), worktree-root/upward-git derivations and
+multi-turn `<system-update>` are not checked; the bridge copies them as insurance. The official harness
+text and Code Mode catalogue are not required — a synthetic catalogue passes too
+(`docs/evidence/bun-synthetic-catalog.json`).
+
+**Tool declarations**: [user-free] the list content does not identify the client (a user can send any
+list/prompt via the official client, `docs/evidence/user-customization-round2-2026-11-13.json`,
+`user-add-tools-2026-11-13.json`), so only the caller's own tools are declared. But the shape has three
+[checked] requirements:
+
+1. **At least one tool.** Empty is refused; any name works (`dsh_probe_tool` passes,
+   `docs/evidence/bun-tool-minimum.json`, `any-tool-vs-read.json`). Caller tools suffice; with none,
+   `planTools` adds a placeholder whose description discourages calls, and a stray call is dropped.
+2. **Name shape.** Unrecognized names with underscores/dashes/dots/capitals are refused; recognized
+   names may carry separators; at least one recognized name. `planTools` reduces to `[a-z0-9]`
+   (counter on collision) and keeps a map back. This caused every refusal before 1.0.4 (error looked
+   like quota exhaustion).
+3. **Not many rich tools at once.** Real descriptions and complex schemas each trigger refusal
+   (`docs/evidence/tool-gate-codemode-2026-11-17.json`).
+
+Requirement 3 is met by **Code Mode** (what the model sees): the wire declares only a few simple anchors
+(`read`/`write`/`edit`, recognized names, trivial schemas) plus `execute`; anchors exist only for the
+shape check, the model is told not to call them, stray calls are dropped. The real catalog is rendered
+into the system prompt with DSH `renderToolsSdk`, carrying each tool's real return schema
+(`read`→`{lines,totalLines}` etc.) and an "only `execute` is directly callable" instruction. Who executes
+a call, permissions and results are in §5.
+
+### 2.3 TLS and HTTP transport
+
+The transport makes the handshake and header shape look official. [preventive] As of 2026-11-17 the
+gate does not check this layer; reproduction only covers a future fingerprint check.
+
+The official client runs on Bun; Node's TLS cannot express the same `ClientHello` (OpenSSL orders
+extensions itself, no post-quantum key share; ~274-byte hello vs 1482).
+[bun-transport.ts](src/bun-transport.ts) delegates to `wreq-js` (Rust+BoringSSL, same library as the
+official), configured from the capture with four corrections:
+
+| Correction | Detail |
+|---|---|
+| `curvesList` | Drop the extra `MLKEM768` group; keep `X25519MLKEM768:X25519:P-256:P-384`. |
+| `sigalgsList` | `0x0807` is ed25519, `0x0603` spelled `ECDSA+SHA512`; completes the captured 11. |
+| Header casing | `Authorization`/`Content-Type`/`User-Agent`/`Connection`/`Accept`/`Host`/`Accept-Encoding`/`Content-Length` capitalised as captured. |
+| Header positions | `Host`/`Accept-Encoding`/`Content-Length` supplied explicitly at positions 14–16. |
+
+After these, the `ClientHello` has zero extension mismatches and is 1482 bytes. The request **header**
+text (dynamic values normalised) matches the capture apart from `x-opencode-project`; this is a
+header-shape comparison, not a whole-request byte match (the two records are 23,073 vs 951 bytes,
+different bodies) (`docs/evidence/clienthello-deep-2026-11-13.json`, `byte-exact-2026-11-13.json`).
+A persistent Transport reuses one connection across turns; only `http/1.1` is offered, no `h2`.
+
+**Fallback**: `wreq-js` is optional; without its native binding or with `bunTransport:false` the adapter
+falls back to plain `fetch`, losing TLS alignment but still working (in some proxy setups plain fetch
+cannot connect at all, so the transport has value beyond fingerprinting). The runtime is not the gate
+differentiator: a zero-tool body is refused with `FreeUsageLimitError` on both Bun and Node
+(`docs/evidence/bun-runtime-test.json`, two records).
+
+## 3. Model catalog
+
+[catalog.ts](src/catalog.ts) reads the official stable v1 catalog
+`https://models.opencode.ai/api.json`, taking `opencode`-provider models with zero cost and not
+`deprecated`. Official v2.3.0 reads the same service's v2 catalog with cache/bundled snapshot; same
+origin, the plugin has not migrated to v2.
+
+| Item | Value |
+|---|---|
+| Refresh | 5 min (official TTL); `modelRefreshIntervalMs:0` disables polling, keeps startup prefetch + on-demand cache |
+| Failure | keep last snapshot, retry after 60s; atomic commit, `onUpdated` only on real change |
+
+No more `/models` probe: on 2026-11-15 the catalog and live availability matched exactly, the probe added
+nothing and is a request shape the official client never sends. The catalog also carries
+`interleaved.field` (reasoning replay field, §2.2/§4) and `limit.output` (output limit).
+
+## 4. Messages and attachments
+
+Message mapping (DSH → wire):
 
 | DSH | Wire |
 |---|---|
-| `options.system` | leading `{role:'system'}` |
-| `role:'system'` | `{role:'system'}` |
-| `role:'developer'` | dropped — tool changes are already in `options.tools` |
-| `role:'tool'` | `{role:'tool', tool_call_id, content}`; empty → `''` |
-| `role:'assistant'` | `{role:'assistant', content, reasoning_content?, tool_calls?}`; text joins with `''`, `content` is `null` only when tool calls exist without text, `reasoning_content` sent only when reasoning exists or the model requires it |
-| user content | ordered text/`image_url` parts on vision routes |
+| `options.system` / `role:system` | folded into the leading `system` (§2.2) |
+| `role:developer` | dropped — tool changes already in `options.tools` |
+| `role:tool` | `{role:tool, tool_call_id, content}`; empty result sends `''` |
+| `role:assistant` | `content` texts joined with `''`; `null` only when tool calls exist and no text; `reasoning_content` when reasoning exists or the model requires it |
+| user content | text/`image_url` kept in order on vision routes |
 
-Returned calls keep their id, name and raw argument bytes: DSH owns lookup and
-validation. The batch is buffered until `finish_reason: tool_calls`; a truncated
-batch yields `TOOL_BRIDGE_INCOMPLETE` and dispatches nothing.
+**Reasoning replay**: when the catalog declares a reasoning field (e.g. big-pickle), every assistant row
+replays it (empty string when no reasoning). Optional trimming (`trimCompletedReasoning`) removes only
+completed-turn reasoning, verified by message id + SHA-256; in-flight/failed/interrupted chains are kept;
+affects new requests only, never deletes local history.
 
-## 5. Adapter behaviour
+**Images**: [image-input.ts](src/image-input.ts) uses only the public attachment API, never guesses store
+paths; only routes declaring `image` input read bytes. Default budgets 4 MP, 1 MiB per image, 20 MiB
+total, 20 occurrences; over budget returns `IMAGE_OFFLOAD_REQUIRED`, never silently drops. Tool-result
+images are hoisted after the contiguous tool-result group as one associated user message.
 
-- **Streaming**: SSE is parsed incrementally; text, reasoning and tool-call
-  deltas map to DSH chunks. A stream failure after output starts is never
-  replayed (`PARTIAL_STREAM_ERROR`).
-- **Free-usage rejection**: HTTP 429 with type `FreeUsageLimitError` produces `FREE_USAGE_LIMIT`. It ends the run without automatic retries or a retry-delay hint to the host. The raw `Retry-After` is kept only in diagnostics.
-- **Wait scope**: a new request does not inherit a previous run's model wait. The adapter has no in-memory model lock and writes no model cooldown records. Startup clears legacy files instead of recovering waits from logs.
-- **Transient throttling**: DSH schedules retries, with a budget of two, an initial 2s delay and 0.2 jitter. Eligible provider hints are capped at 15 minutes; diagnostics retain the raw value. Waits are not saved across manual requests.
-- **Clear cooldowns**: the same RPC synchronously clears live pool waits, failure backoff counters and legacy model state. Entries stay in place and no restart is needed.
+## 5. Tool execution
 
-This follows v2.3.0's [error classification](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/ai/src/provider-error.ts) and
-[ModelRetry](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/model-retry.ts): quota errors are not automatically retried by default;
-only transient rate limits and provider-internal errors use retry hints, capped at 15 minutes.
-The official CLI has a general budget of ten retries; this plugin retains its two-retry budget executed by DSH.
-The alignment covers quota handling, wait scope and the hint ceiling, not a replacement of the host's entire retry loop.
+After the model issues a call, execution and permissions stay in DSH; the bridge adds no separate flow.
 
-On 2026-11-17 the old adapter reproduced the failed clear: the store returned zero, but another in-memory Map still produced
-`REQUEST_COOLING` and no next request was sent. Regression tests cover clearing the same instances, legacy migration and sending again after that cross-request state was removed.
-- **Cancellation**: checked before the POST, after buffering and before each
-  tool chunk.
+- Returned calls keep id, name and raw argument bytes; lookup and schema validation are DSH's. The batch
+  is buffered until `finish_reason:tool_calls`; a truncated batch returns `TOOL_BRIDGE_INCOMPLETE` and
+  dispatches nothing.
+- A stray call to the placeholder or a Code Mode anchor is dropped (logged `warn`) and the turn ends
+  normally — normal traffic never carries a tool DSH cannot execute.
+- **Code Mode execution side**: `execute` is an ordinary registered tool whose body delegates to a
+  `PtcExecutor` running `run_code`, reusing DSH's native PTC sandboxed runtime and guarded nested
+  dispatch; nested tool calls still go through DSH permissions and dispatch. DSH's `run_code` is
+  executor-private and unregistrable, so `execute` carries it. Enabled only on free routes admitting
+  `execute`; without a host PTC it falls back to direct declaration. Behavior is closer to DSH's PTC
+  mode. Verified end to end: simple answer, four-step read/write, six-step task with parallel reads and
+  `edit` (`docs/evidence/codemode-complex-test-2026-11-17.json`). Known boundary: the SDK renders
+  parameters as TypeScript types and cannot express numeric caps like `read`'s `limit<=2000`, so the
+  model may guess large, get refused, then correct (same as native PTC rendering).
 
-### 5.1 Images
+## 6. Error handling and diagnostics
 
-`src/image-input.ts` uses only the public attachment seam
-(`readImageRequest`). It never guesses storage paths. Model declarations decide
-reads: only routes declaring `image` input read bytes. Budgets default to 4 MP,
-1 MiB per image, 20 MiB total, 20 occurrences; over-budget calls return
-`IMAGE_OFFLOAD_REQUIRED` rather than dropping images silently. Tool-result images
-are hoisted as one associated user message **after** the whole contiguous tool
-result group.
+- **Streaming**: incremental SSE parse; a stream failure after output starts is not replayed
+  (`PARTIAL_STREAM_ERROR`).
+- **Free-quota refusal**: 429 + `FreeUsageLimitError` → `FREE_USAGE_LIMIT`, turn ends, no auto-retry, no
+  retry wait passed on; raw `Retry-After` kept only in diagnostics.
+- **Wait scope**: new requests inherit no per-model wait; no in-memory model lock, no cooldown files;
+  upgrade clears legacy files.
+- **Transient rate limit**: retries scheduled by DSH (max 2, initial 2s, jitter 0.2); retryable wait
+  capped at 15 min, raw value in diagnostics.
+- **Clear cooling**: one RPC synchronously clears pool waits, backoff counters and legacy files; no
+  restart needed.
+- **Cancellation**: checked before POST, after buffering, before each tool block.
 
-### 5.2 Reasoning replay
+Per official v2.3.0 error classification and ModelRetry: quota refusal is not auto-retried; only
+transient/internal errors use retry waits, capped at 15 min. Official general retry budget is 10; the
+plugin keeps DSH's 2. What is aligned is quota handling and wait scope, not replacing the host retry loop.
 
-Every assistant history row carries `reasoning_content` when the model requires
-it or reasoning exists. Optional trimming (`trimCompletedReasoning`) removes
-reasoning only from canonical **completed** turns, verified by message id and a
-SHA-256 fingerprint; active, failed or interrupted chains are retained. It
-applies to new requests only and never deletes local history.
+Upstream-change table:
 
-### 5.3 Code Mode (tool declarations for free models)
-
-To satisfy the §3.3 gate against declaring many rich tools at once, the free-model
-routes use Code Mode, matching the official client: keep the wire tool list small, move
-the full catalog into the system prompt, and reach tools through a single code-execution
-entry.
-
-The concrete shape in [code-mode.ts](src/code-mode.ts):
-
-- The wire declares only a few simple anchor tools (recognized names such as
-  `read`/`write`/`edit` with trivial schemas) plus `execute`. The anchors exist to
-  satisfy the gateway's shape checks; the model is told not to call them directly, and
-  the adapter drops a stray call to one.
-- The real tool catalog is rendered into the system prompt with DSH's `renderToolsSdk`,
-  alongside an "only `execute` is callable directly" instruction. The catalog carries each
-  tool's real output schema (e.g. `read` returns `{lines,totalLines}`, `glob` returns
-  `{root,paths}`), so the model parses returns by type instead of guessing the structure.
-- `execute` is an ordinary registered tool whose body delegates to a `PtcExecutor`
-  instance running `run_code`, reusing DSH's native PTC sandboxed runtime and guarded
-  nested dispatch. DSH's `run_code` is executor-owned and cannot be registered, so
-  `execute` carries it.
-- Enabled only when the step admits `execute` (the free-model routes); other agents keep
-  their executor and tool declarations.
-
-The behavior is closer to DSH's PTC mode. Without a host PTC runtime it falls back to
-direct declaration.
-
-Verified end-to-end in a real free-model session: a simple reply, a four-step read/write
-task, and a six-step complex task with parallel reads and an `edit` append all completed
-correctly (see the [complex-task record](docs/evidence/codemode-complex-test-2026-11-17.json)).
-One known boundary: the SDK renders parameters as TypeScript types, which cannot express
-numeric bounds such as `read`'s `limit<=2000`; a model may guess a larger value and correct
-after the tool rejects it. This matches DSH's native PTC rendering.
-
-## 6. Model catalog
-
-[catalog.ts](src/catalog.ts) reads the stable v1 catalog at `https://models.opencode.ai/api.json`, keeping zero-cost models under `opencode` and dropping `status: deprecated`.
-Official v2.3.0 [ModelsDev](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/models-dev.ts) defaults to the same service's
-`/experimental/v2.0/api.json?type=chat,decision,image`, with a cache and bundled snapshot.
-The upstream service is shared, but the API path and cache layers differ. The plugin has not yet migrated to the v2 catalog.
-
-| Item | Value | Why |
+| Symptom | Likely cause | Action |
 |---|---|---|
-| Source | One, the official stable v1 catalog | Same upstream service, different API version |
-| Refresh | Five minutes, the official TTL | `Duration.minutes(5)` |
-| Failure | Keep the previous snapshot, retry after 60s | Same effect as the official cache fallback |
+| `403 FreeTierError` | identity shape refused | check UA, session headers, ≥1 tool, `<env>` block (§2). |
+| `429 FreeUsageLimitError` | free-lane refusal or real quota | compare same egress/model/time; the error name cannot confirm IP quota. |
+| `400 MissingSessionID` | missing session header | session generation broken. |
+| endpoint `404`/`426` | route migration | re-read catalog `provider.api`. |
+| empty catalog | catalog request failed | check logs; last snapshot retained. |
 
-**Why the `/models` probe is gone.** Earlier versions intersected the catalog with a live
-`/models` request to decide which models were actually being served. Measurement on
-2026-11-15 showed the step added nothing: the twelve zero-cost, non-deprecated catalog
-entries matched the served set exactly (nothing was in the catalog but missing from the
-live listing), and the other 74 ids the listing returned were paid models. Availability is
-already carried by the catalog's `status` field, so the probe was removed — it was also a
-request shape the official client never sends.
+**Diagnostics**: failed requests append `request shape` and `tool schema shape` summaries sharing the
+`request` id; success summaries only at `debug`. Summaries carry metadata only (path, transport, bytes,
+roles/lengths, env-block count, image count, tool pairing, schema structure stats) — never bodies,
+arguments, results, images or secrets; caps 8 MiB/512 messages/128 tools/8192 nodes/depth 32, over-cap
+marked `capped`. `transport:configured` only means a dedicated transport was set, not TLS byte proof.
 
-Snapshots commit atomically and `onUpdated` fires only on a real content change.
-`modelRefreshIntervalMs: 0` disables periodic refresh while keeping the startup prefetch
-and on-demand caching.
+**Safety & privacy**: no credentials read beyond the configured `apiKey`; proxy URLs redacted in all
+logs/UI; image data never logged at any level (test-asserted); no new `exec`/`spawn`.
 
 ## 7. Configuration
 
 | Key | Default | Purpose |
 |---|---|---|
-| `baseUrl` | `https://opencode.ai/inference/v1` | Relay base. |
-| `apiKey` | `public` | Signed-out sentinel. |
-| `userAgent` | `opencode/latest/2.2.0/cli` | Identity UA; sent verbatim. |
-| `userAgentAttribution` | `false` | Append the DSH attribution token. |
-| `client` | `cli` | `x-opencode-client`. |
-| `requestIdHeader` | `false` | Send `x-opencode-request` (1.x relays only). |
-| `tracing` | `true` | Send `b3`/`traceparent`. |
-| `bunTransport` | `true` | Use the Bun-shaped TLS transport when available. |
-| `toolStrict` | `true` | Add `strict: false` to tool declarations. |
-| `minOutputTokens` | `32000` | Lower bound for `max_completion_tokens`. |
-| `project` | `global` | Explicit `x-opencode-project`; overrides derivation. |
-| `projectDirectory` | `''` | Directory used for derivation; empty uses cwd. |
-| `providers` | `['opencode-bridge']` | Provider routes served. |
-| `includeDeprecated` | `false` | Offer deprecated-but-live models. |
-| `extraModels` | `[]` | Force-add model ids. |
-| `requestTimeoutMs` | `600000` | Per-request deadline. |
-| `modelRefreshIntervalMs` | `300000` | Catalog refresh; `0` disables polling. |
-| `trimCompletedReasoning` | `false` (live) | Settings → Context trimming. |
-| `toolResultImages` | `true` | Forward tool-output images on vision routes. |
-| `requestImagePixelBudget` | `4194304` | Request image pixels. |
-| `requestImageMaxBytes` | `1048576` | Per-image encoded byte target. |
-| `maxRequestImageBytes` | `20971520` | Aggregate base64 budget. |
-| `maxRequestImages` | `20` | Retained image occurrences. |
-| `proxies` | `[]` | Egress pool, in order. |
-| `proxyCooldownMs` | `60000` | Local fallback for the optional egress pool; a free-usage rejection does not start it. |
-| `proxyStorePath` | `''` | Settings-owned pool store. |
-| `logLevel` | `warn` | `debug`\|`info`\|`warn`\|`error`\|`off`. |
-| `logDir` | `''` | Defaults to the profile log directory. |
-| `logMaxBytes` / `logMaxFiles` | `524288` / `5` | Rotation. |
+| `baseUrl` | `https://opencode.ai/inference/v1` | relay base |
+| `apiKey` | `public` | signed-out sentinel |
+| `userAgent` | `opencode/latest/2.2.0/cli` | identity UA |
+| `userAgentAttribution` | `false` | append DSH attribution |
+| `client` | `cli` | `x-opencode-client` |
+| `requestIdHeader` | `false` | send `x-opencode-request` (1.x) |
+| `tracing` | `true` | send `b3`/`traceparent` |
+| `bunTransport` | `true` | use Bun-shaped TLS when available |
+| `toolStrict` | `true` | add `strict:false` to tools |
+| `minOutputTokens` | `32000` | output-limit floor |
+| `project` / `projectDirectory` | `global` / `''` | explicit project / derivation dir |
+| `providers` | `['opencode-bridge']` | served provider routes |
+| `includeDeprecated` / `extraModels` | `false` / `[]` | catalog filter/append |
+| `requestTimeoutMs` | `600000` | per-request deadline |
+| `modelRefreshIntervalMs` | `300000` | catalog refresh; 0 disables polling |
+| `trimCompletedReasoning` | `false` | context trimming |
+| `toolResultImages` | `true` | forward tool images on vision routes |
+| `requestImagePixelBudget` / `requestImageMaxBytes` / `maxRequestImageBytes` / `maxRequestImages` | `4194304`/`1048576`/`20971520`/`20` | image budgets |
+| `proxies` / `proxyCooldownMs` / `proxyStorePath` | `[]`/`60000`/`''` | egress pool |
+| `logLevel` / `logDir` / `logMaxBytes` / `logMaxFiles` | `warn`/`''`/`524288`/`5` | logging |
 
-## 8. When upstream changes
-
-Symptoms and first actions:
-
-| Symptom | Likely cause | Action |
-|---|---|---|
-| `403 FreeTierError` | Identity shape refused | Check the UA, the session headers, that at least one tool is declared, and that the `<env>` block is present (§3). |
-| `429 FreeUsageLimitError` | Free lane refusal or real quota | Read request summaries and compare the same model/egress at nearby times; the error name does not identify an IP quota cause. |
-| `400 MissingSessionID` | Session header absent | Session minting broke. |
-| Endpoint `404`/`426` | Route migrated | Re-read the catalog's `provider.api`. |
-| Empty catalog | Catalog request failing | Check logs; the previous snapshot is retained. |
-
-Re-deriving a constant:
-
-1. Capture what the **installed official client** sends, using a loopback
-   endpoint (never by guessing): run it with `--standalone`, an isolated config
-   and a local fake model, then record headers, body and TLS `ClientHello`.
-2. Compare against `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION`.
-3. Change only what the capture contradicts, and only in the direction it shows.
-4. Add or update the assertion in `tests/` that pins the new value.
-5. Record the change in the changelog (CHANGELOG).
-
-### 8.1 Request structure summaries
-
-Failed requests add `request shape` and `tool schema shape` records sharing the error's `request` identifier.
-Successful-request summaries are written only at `debug`; `off` disables logging. The panel's minimum-level selector filters existing records and does not enable Debug recording.
-Use `logLevel` or the `opencode_bridge_log` tool's `level` action to change recording verbosity; `stat` reports the diagnostics format version.
-
-- **Request facts**: recognized public path, selected transport, byte size, output cap, temperature, message roles and lengths, environment-block and image counts, and tool-call pairing counts.
-- **Tool facts**: declaration and name-format counts, plus schema object, reference and combinator statistics. Tool names, property names, descriptions, enum literals and defaults are omitted.
-- **Privacy**: no message text, tool arguments, results, image data or keys. Custom URLs, query values and nonstandard UAs are not copied verbatim.
-- **Bounds**: at most 8 MiB of request JSON, 512 messages, 128 tools and 8192 schema nodes, with a depth limit of 32. Budget hits are marked `capped`; diagnostic failure never interrupts model traffic.
-
-`transport: configured` means a dedicated transport function was set; `node-fetch` means ordinary fetch. This field alone does not prove byte-identical TLS.
-
-## 9. Testing
+## 8. Testing
 
 ```bash
 node node_modules/typescript/bin/tsc -p tsconfig.json   # build
 node --test tests/*.test.mjs                            # full offline suite
 ```
 
-All tests are offline. Live probes under `tests/*-live.mjs` are opt-in, require
-an explicit `--run`, and refuse to overwrite an earlier report.
+All offline; `tests/*-live.mjs` probes need explicit `--run` and refuse to overwrite existing reports.
 
-| Suite | Covers |
+| Suite | Coverage |
 |---|---|
-| `current-protocol`, `alignment`, `gateway-requirements` | Wire shape, headers, tool declarations, `<env>` block, placeholder handling. |
-| `bun-transport` | Captured cipher/extension configuration. |
-| `bridge-integration`, `bridge-stream` | Batch atomicity, incomplete batches, streaming assembly. |
-| `reasoning-*` | Replay rules, trimming eligibility, stream probes. |
-| `image-*`, `vision-*` | Attachment projection, budgets, tool-image hoisting. |
-| `retry-integration`, `proxy-rotation` | Server waits, pool cooldown, no-replay guarantees. |
-| `project-identity`, `request-waits`, `official-cooldown-policy` | Identity derivation, legacy cleanup, fresh manual requests and immediate egress-wait clearing. |
-| `catalog-*`, `log-*`, `client-boot` | Catalog lifecycle, redaction, settings page. |
+| `current-protocol`/`alignment`/`gateway-requirements`/`official-fidelity` | wire shape, headers, tool declarations, `<env>`, placeholder, preventive fidelity |
+| `bun-transport` | captured cipher/extension config |
+| `bridge-integration`/`bridge-stream` | batch atomicity, stream assembly |
+| `reasoning-*` | replay, trimming eligibility |
+| `image-*`/`vision-*` | attachment projection, budgets, tool-image hoisting |
+| `retry-integration`/`proxy-rotation` | server waits, pool cooling, no-replay |
+| `project-identity`/`request-waits`/`official-cooldown-policy` | identity derivation, legacy cleanup, instant clearing |
+| `catalog-*`/`log-*`/`client-boot`/`references`/`evidence-links` | catalog, redaction, settings, credits & evidence consistency |
 
-### 9.1 Live probes
+Live probes (consume real quota): `smoke`, `tool-loop-live` (one three-round session, 10 checks,
+`docs/evidence/tool-loop-live-2026-11-14.json`), `proxy-live`, `vision-compat-live`, `reasoning-*`,
+`wire-dump`, `official-client-ab-live` (same-host same-model comparison vs the official CLI,
+`docs/evidence/official-client-comparison-2026-11-17.json`: 7/52 synthetic tools, 52 tools + 60 KB prompt,
+max ~72 KB). A fully green offline suite can still be wholly refused by the gate (before 1.0.4, 418
+offline tests passed while every real request was refused), so shape problems must be found live.
 
-All require `--run`, spend real quota, and refuse to overwrite an existing report. No
-offline suite catches a request shape the gateway refuses — before 1.0.4, 418 offline
-tests passed while every real request was refused.
+## 9. Document maintenance rules
 
-| Probe | What it verifies |
-|---|---|
-| `smoke.mjs --run` | Session and request id shape, separator-free tool names and their round trip, catalog reachability, one live completion with a full tool set, and that a returned call carries the caller name. |
-| `tool-loop-live.mjs --run` | A multi-turn tool loop: three sequential calls where each result feeds the next, and later requests must replay the assistant history and `reasoning_content`. Ran live on 2026-11-14 with deepseek-v4.1-flash-free: **one three-round session**, all 10 checks passed (not ten independent runs) (`docs/evidence/tool-loop-live-2026-11-14.json`). |
-| `proxy-live.mjs` | A proxy tunnel carrying real traffic. |
-| `vision-compat-live.mjs` | Image input and tool-result images. |
-| `reasoning-compat-live.mjs`, `reasoning-roundtrip-live.mjs` | Reasoning replay and round trips. |
-| `wire-dump.mjs` | Print the wire fingerprint actually emitted. |
-| `official-client-ab-live.mjs --run --official <exe> --out <new.json>` | Isolated official CLI configuration versus the real adapter and TLS transport on the same host/model, with bounded synthetic tool-count and system-size controls. |
+- This file and the [Chinese version](TECHNICAL.md) change together; user-visible features, protocol
+  principles, recorded constants, build/release flow or version changes update both. Version changes also
+  sync the README install commands in both languages to match `package.json`'s `version`
+  (`tests/readme-version.test.mjs` enforces).
+- Every change is recorded in the standalone changelog
+  ([CHANGELOG.us.md](CHANGELOG.us.md)/[CHANGELOG.md](CHANGELOG.md)).
+- Consulting a new project updates [README credits](README.us.md#references-and-credits) and §10 here.
+- Two evidence rules (`tests/evidence-links.test.mjs` enforces): every referenced file ships with the repo
+  (captures go in [`docs/evidence/`](docs/evidence/README.md)); never mention unpublished content.
 
-In the [2026-11-17 same-host comparison](docs/evidence/official-client-comparison-2026-11-17.json), both official v2.3.0 and the plugin succeeded.
-The plugin declared 7 tools, 52 tools, and 52 tools with 60 KB of synthetic system padding; the largest body was about 72 KB.
-These are controlled synthetic requests. A real UI history is a separate reproduction, and these results do not explain a refusal at another time or on another request.
+To re-derive a constant: capture with the installed official client (local loopback, isolated config,
+local fake model), record headers/body/`ClientHello`; compare against
+`buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION`; change only what the capture contradicts, in the
+capture's direction; pin the value in `tests/`; record in the CHANGELOG.
 
-Compare actual results on the same egress and model at nearby times. If both are refused, investigate upstream state and egress conditions first;
-if only the plugin is refused, vary tools, messages and request parameters one at a time. A `FreeUsageLimitError` alone does not identify an exhausted IP quota.
+## 10. Community projects consulted
 
-## 10. Security, privacy, attribution
-
-- No credential is read beyond the configured `apiKey`; proxy URLs are redacted
-  in every log and UI surface.
-- Logs are metadata-only: no prompts, tool arguments, results or image bytes.
-- Image data never appears in logs at any level (asserted by tests).
-- The plugin adds no `exec`/`spawn` call. Attribution to DSH is available via
-  `userAgentAttribution` and is off by default for protocol reasons (§3.1).
-
-## 11. Glossary
-
-| Term | Meaning |
-|---|---|
-| **free tier** | The keyless model set offered to the official client. |
-| **gate** | The upstream check that decides whether a request from a non-official client is served. This project treats it as a dated observation. |
-| **identity header** | A header the official client always sends and a user cannot change (§3). |
-| **placeholder** | A tool declaration sent only when the caller declares none, to satisfy the gateway's "at least one tool" rule. |
-| **wire name** | The declared tool name with separators removed; mapped back to the caller's real tool when a call returns. |
-| **server wait** | A retry hint for an eligible error in the current run, capped at 15 minutes. A quota rejection keeps the raw hint only as diagnostics and creates no model lock. |
-| **egress** | One configured route to upstream (`direct` or a proxy). |
-| **Bun-shaped transport** | The wreq-js handshake reproducing the official client's `ClientHello`. |
-
-## 12. Community projects consulted
-
-Every protocol behaviour comes from measuring the official client, not from any community
-project. The projects below were compared during design, to judge whether an approach was
-worth following. **No code was copied from any of them.**
+Every protocol behaviour comes from measuring the official client, not from any community project. The
+projects below were compared during design only. **No code was copied from any of them.**
 
 | Project | Relationship | Licence |
 |---|---|---|
-| [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh) | Peer adapter; compared how it fills in missing tools and configures | MIT |
+| [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh) | Peer adapter; compared tool-filling and config | MIT |
 | [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free) | Peer adapter; compared aliasing and call blocking | MIT |
-| [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free) | Peer adapter; compared how placeholder calls are suppressed | MIT |
-| [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter) | Peer adapter; an earlier tool-filling implementation | MIT |
-| [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen) | Peer adapter; compared catalogue refresh and caching | MIT |
-| [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter) | Peer adapter; compared catalogue discovery | MIT |
-| [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) | Read only for its issue discussion of the free allowance decaying with egress IP | GPL-3.0 |
+| [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free) | Peer adapter; compared placeholder suppression | MIT |
+| [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter) | Peer adapter; earlier tool-filling | MIT |
+| [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen) | Peer adapter; compared catalog refresh and caching | MIT |
+| [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter) | Peer adapter; compared catalog discovery | MIT |
+| [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) | Read only its issues on free quota decaying per egress IP | GPL-3.0 |
 
-opencode2api is GPL-3.0. This project read its issue discussion only and uses none of its
-code, so that licence does not apply here. Reusing any of its code later would require a
-fresh licence review.
-
-This section and the README section are the same list; both must be updated together.
+opencode2api is GPL-3.0; only its issues were read and no code was used, so its licence does not bind
+this project; re-evaluate compatibility before ever using its code. This section and the README's
+matching section are one list; update both together.

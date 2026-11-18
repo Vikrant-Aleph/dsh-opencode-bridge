@@ -4,7 +4,7 @@
 
 What the bridge imitates, and why. This is the authority for the code: any imitation
 not listed here should be removed. The measurements, controls and evidence live in
-[TECHNICAL §3](TECHNICAL.us.md); this file lists only the conclusions and the trade-offs,
+[TECHNICAL §2](TECHNICAL.us.md); this file lists only the conclusions and the trade-offs,
 without repeating that data.
 
 ---
@@ -31,14 +31,14 @@ exception but the same principle extended.
 
 | Requirement | How the bridge satisfies it | Detail |
 |---|---|---|
-| `User-Agent` | Sends the captured `opencode/latest/2.2.0/cli` byte-identically | §3.1 |
-| Session and request identity | One session id in four headers; `x-opencode-project` derived from the real directory | §3.2 |
-| Tool declarations | At least one tool (a placeholder only when the caller has none); separator-free names with a map back; free models use Code Mode | §3.3, §5.3 |
-| An `<env>` block in the system prompt | Environment instructions appended after the DSH prompt | §3.4 |
+| `User-Agent` | Sends the captured `opencode/latest/2.2.0/cli` byte-identically | §2.1 |
+| Session and request identity | One session id in four headers; `x-opencode-project` derived from the real directory | §2.1 |
+| Tool declarations | At least one tool (a placeholder only when the caller has none); separator-free names with a map back; free models use Code Mode | §2.2, §5 |
+| An `<env>` block in the system prompt | Environment instructions appended after the DSH prompt | §2.2 |
 
 The official client always sends these shapes, so a user cannot remove them. The three
 tool-declaration gates — at least one tool, name shape, and not many rich tools at once —
-are together in §3.3.
+are together in §2.2.
 
 ---
 
@@ -49,14 +49,14 @@ are replicated only so a future gate comparing them item by item cannot distingu
 
 | Surface | Note | Detail |
 |---|---|---|
-| Transport TLS / header order / connection reuse | `ClientHello` byte-aligned, http/1.1, keep-alive; necessity unproven | §3.5 |
-| Date line / `<env>` intro / 5th line | Official built-in instructions, replicated | §3.7 |
-| env derivations | worktree root, upward git discovery | §3.7 |
-| Multi-turn `<system-update>` | frozen baseline; changes go in user messages | §3.7 |
-| Always-on `max_completion_tokens` | catalog default 32000 | §3.7 |
-| Catalog reasoning-field replay | empty string on every assistant message for e.g. big-pickle | §3.7 |
-| Body key order | tools before stream | §3.7 |
-| `b3`/`traceparent` | official sends them only with OTEL on, not by default; bridge can disable `tracing` | §3.7 |
+| Transport TLS / header order / connection reuse | `ClientHello` byte-aligned, http/1.1, keep-alive; necessity unproven | §2.3 |
+| Date line / `<env>` intro / 5th line | Official built-in instructions, replicated | §2.2 |
+| env derivations | worktree root, upward git discovery | §2.2 |
+| Multi-turn `<system-update>` | frozen baseline; changes go in user messages | §2.2 |
+| Always-on `max_completion_tokens` | catalog default 32000 | §2.2 |
+| Catalog reasoning-field replay | empty string on every assistant message for e.g. big-pickle | §2.2 |
+| Body key order | tools before stream | §2.2 |
+| `b3`/`traceparent` | official sends them only with OTEL on, not by default; bridge can disable `tracing` | §2.2 |
 
 ---
 

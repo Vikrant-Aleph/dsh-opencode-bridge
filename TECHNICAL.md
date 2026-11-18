@@ -2,517 +2,320 @@
 
 中文 | [English](TECHNICAL.us.md) · [伪装原则](CAMOUFLAGE.md)
 
-记录 OpenCode 免费档门禁如何被逆向、线上协议如何复刻、适配器如何映射到 DSH
-LLM 契约，以及上游变化时如何应对。也涵盖可选的上下文精简及其安全约束。
+面向本插件维护者，以及想参考一个 provider 线上协议 `LlmAdapter` 实现的 DSH 插件作者。
+也涵盖可选的上下文精简及其安全约束。
 
-读者：本插件维护者，以及想参考一个 provider 线上协议 `LlmAdapter` 实现的 DSH 插件作者。
+> **带日期的快照。** 上游事实于 2026-10/11 实测建立：对 `https://opencode.ai/inference/*` 的探针、
+> 已安装官方 CLI（2.2.0）的抓包，以及阅读 `anomalyco/opencode` 源码（v2.2.0 交叉验证）。
+> 「目前是否被检测」的口径为 **2026-11-17**（最后一次活体探针）。门禁会演进，常量都是有日期的观测，
+> 不是规范；更新方法见 §9。
 
-> **带日期的快照。** 本文所有上游事实均于 2026-10/11 通过实测建立：`https://opencode.ai/inference/*`、
-> 已安装的官方 CLI（2.2.0）实测，以及阅读 `anomalyco/opencode` 源码。门禁会演进，
-> 所有常量都是有日期的观测，不是规范。§8 是更新手册。
+总原则：**保留与官方客户端一致、且用户设置改不了的细节。** 其中被网关检查的必须匹配；不被检查的
+保留作预防；本来就交给用户自由决定的内容不模仿。取舍清单见[伪装原则](CAMOUFLAGE.md)。
 
-## 0. 文档维护
-
-本文件与其[英文版](TECHNICAL.us.md)必须同步修改。凡属以下变化，须在同一次改动中更新两份：
-用户可见功能（配置键、UI、工具、日志）、协议原则、已记录常量（UA、请求头、工具声明、端点、默认值）、
-构建/打包/发布流程，或版本号。版本号变更还须同步 `README.us.md` 与 `README.md` 中的安装命令，
-使其与 `package.json` 的 `version` 一致；`tests/readme-version.test.mjs` 会强制校验。
-
-README 面向访客（概览、安装、限制、故障排查），本文件面向维护者（协议、内部实现、配置、测试）。
-每次变更记录在独立的更新日志（[CHANGELOG.md](CHANGELOG.md)，英文 [CHANGELOG.us.md](CHANGELOG.us.md)）。代码已改而文档滞后不可接受。
-
-**参考新项目时同步更新清单。** 阅读或对照了别的项目后，在同一改动里补进
-[README 的「参考与致谢」](README.md#参考与致谢)与本文 §12。只读过源码做对照、没有复制代码的，
-如实写成对照关系；用到代码或结论时写清出处与许可。
-
-**两条引用证据的规则。** 由 `tests/evidence-links.test.mjs` 强制：
-
-1. **文档引用的每个文件都必须随本仓库发布。** 证据不可得的结论无法被核查，引用也就失去意义。
-   把抓包放到 [`docs/evidence/`](docs/evidence/README.md) 并链接过去。
-2. **绝不在文档中提及任何未发布的内容。** 不要描述哪些内容被保留、存放在哪里、以及为什么。
-   读者无法访问的东西只会带来困惑。
-
----
-
-## 1. 插件定位
-
-一个 `LlmAdapter`，复刻官方 OpenCode 客户端的线上协议，让 DSH 无需账号即可使用
-`opencode.ai` 的 `-free` 模型。
-
-它**不**修改 agent loop、不自行执行工具、不 patch 全局 HTTP 入口。工具执行、权限与
-schema 校验都留在 DSH。
-
-两条贯穿全项目的原则：
-
-1. **保留与官方客户端一致、且用户设置改不了的细节。** 其中被检查的必须匹配，不被检查的保留作预防；见[伪装原则](CAMOUFLAGE.md)。
-2. **以带日期的证据取代假设。** 常量只在有抓包支持时保留；§8 说明如何重新推导每一条。
-
-## 2. 架构
+## 1. 架构
 
 ```
 DSH agent loop
    │  GenerateOptions / messages / tools
    ▼
-OpenCodeFreeAdapter            src/adapter.ts
-   ├── planTools               src/opencode-protocol.ts   声明调用方工具（必要时加占位）
-   ├── buildChatMessages       src/opencode-protocol.ts   DSH 消息 → OpenAI 对话
-   ├── buildHeaders            src/opencode-protocol.ts   身份头 + 追踪头
-   ├── prepareImageProjection  src/image-input.ts         官方附件接口
-   └── fetchWithPool           src/proxy-pool.ts          出口池、冷却、故障切换
-          │
-          ├── bunFetch        src/bun-transport.ts        Bun 形态 TLS（wreq-js）
-          └── plain fetch                                 不可用时的回退
+OpenCodeFreeAdapter              src/adapter.ts
+   ├── planTools                 声明调用方工具（一个都没有时补占位）
+   ├── code-mode（免费路由）      线上只留锚点 + execute，真实目录进系统提示
+   ├── buildChatMessages         DSH 消息 → OpenAI 对话，追加环境指令
+   ├── buildHeaders              身份头 + 可选追踪头
+   ├── prepareImageProjection    官方附件接口
+   └── fetchWithPool             出口池、冷却、故障切换
+         ├── bunFetch            Bun 形态 TLS（wreq-js，可选）
+         └── plain fetch         传输不可用时的回退
    ▼
 https://opencode.ai/inference/...
 ```
+
+工具声明有两条路径，模型看到什么在 §2.2 讲，调用之后谁执行在 §5 讲：
+
+- **直接声明**：把调用方工具净化后直接放上线路。用于非免费路由，或宿主没有 PTC 运行时的回退。
+- **Code Mode**：免费路由且该步准入 `execute` 时，线上只声明几个锚点工具加 `execute`，完整目录进
+  系统提示；`execute` 的执行体委托 DSH 原生 PTC（§5）。宿主无 PTC 时自动退回直接声明。
 
 其余模块：
 
 | 模块 | 职责 |
 |---|---|
-| `src/catalog.ts` | 免费模型发现：读官方模型目录，含 TTL 与重试。 |
-| `src/project-identity.ts` | 按真实目录推导官方 `x-opencode-project`。 |
-| `src/request-waits.ts` | 兼容并清理旧版冷却文件；当前请求不读取或写入按模型等待。 |
-| `src/http-errors.ts` | 上游错误分类；安全、有界的诊断信息。 |
-| `src/retry-after.ts` | 严格解析 `Retry-After`（毫秒、秒、HTTP-date）。 |
-| `src/reasoning-policy.ts` | 仅 Host 侧的已完成轮次思考投影，供可选精简使用。 |
-| `src/context-service.ts` | 上下文精简偏好（RPC 与 agent 工具共用同一操作）。 |
-| `src/logger.ts`, `log-service.ts` | 分级、脱敏的诊断日志。 |
-| [request-diagnostics.ts](src/request-diagnostics.ts) | 有界、无内容的真实请求结构摘要。 |
-| `src/proxy-service.ts` | 设置页使用的出口池编辑与探测。 |
+| [catalog.ts](src/catalog.ts) | 免费模型发现：读官方目录，含 TTL 与重试（§3）。 |
+| [opencode-protocol.ts](src/opencode-protocol.ts) | 头、消息、工具声明、环境指令的线上形态（§2）。 |
+| [code-mode.ts](src/code-mode.ts) | Code Mode 的目录渲染与 `execute` 注册（§2.2、§5）。 |
+| [project-identity.ts](src/project-identity.ts) | 按真实目录推导 `x-opencode-project`（§2.1）。 |
+| [image-input.ts](src/image-input.ts) | 附件图片投影与预算（§4）。 |
+| [reasoning-policy.ts](src/reasoning-policy.ts) | 已完成轮次思考投影，供可选精简（§4）。 |
+| [http-errors.ts](src/http-errors.ts)、[retry-after.ts](src/retry-after.ts) | 上游错误分类、`Retry-After` 解析（§6）。 |
+| [request-waits.ts](src/request-waits.ts) | 清理旧版冷却文件；当前请求不读写按模型等待（§6）。 |
+| [proxy-pool.ts](src/proxy-pool.ts)、[proxy-service.ts](src/proxy-service.ts) | 出口池与设置页编辑（§6、§7）。 |
+| [request-diagnostics.ts](src/request-diagnostics.ts)、[logger.ts](src/logger.ts) | 有界、无内容的请求摘要与脱敏日志（§6）。 |
+| [context-service.ts](src/context-service.ts) | 上下文精简偏好（RPC 与 agent 工具共用）。 |
 | `client.js` | 设置页（浏览器模块，非 tsc 产物）。 |
 
-## 3. 实测到的门禁
+术语：**免费档**＝向官方客户端提供的无 key 模型集合；**门禁**＝上游判断是否服务非官方客户端的检查；
+**占位声明**＝调用方没有任何工具时才发的一个工具；**净化名**＝去掉分隔符的线上工具名，返回时映射回真实名；
+**出口**＝一条通往上游的路线（`direct` 或代理）。
 
-**「目前」的口径：2026-11-17** —— 最后一次对免费通道做活体探针的日期（本文更新于 2026-11-18）。
-下文的「检测 / 不检测」均以该日为准，是带日期的观测，不是规范（§8 说明如何重新推导）。
+## 2. 客户端伪装
 
-伪装手段分成两大块：
+按请求的组成分三节：头与会话信息、请求体与工具声明、传输层。每节先写插件具体怎么做，再交代为什么。
+每处标明三类之一：**【检测】**目前网关会检查，不匹配即被拒；**【预防】**目前不检查，复刻只为将来若逐项
+比对时不被识别；**【用户自由】**内容交给用户决定，网关不看，故不模仿。
 
-**A. 目前被检测的形态（不匹配即被拒，必须复刻）**
-User-Agent（§3.1）、会话与请求身份（§3.2）、工具声明形态（§3.3）、系统提示含 `<env>` 块（§3.4）。
+### 2.1 请求头与会话信息
 
-**B. 目前不被检测、仅为预防未来特征检测（复刻但非必需）**
-传输层 TLS 指纹 / 头名称大小写与顺序 / 连接复用（§3.5），以及一批官方恒发的保真细节（§3.7）：
-日期行、`<env>` 引导句与第 5 行、env 取值推导、多轮 `<system-update>`、恒发
-`max_completion_tokens`、目录 reasoning 字段回放、body 键序等。这些在 2026-11-17 的探针里
-都**不是**过闸条件；复刻它们只为将来网关若开始逐项比对时不被识别。
+桥接负责生成这些信息：
 
-### 3.1 User-Agent
-
-`opencode/<channel>/<version>/<name>`，例如 `opencode/latest/2.2.0/cli`。按抓包值
-逐字节发送。带版本号的外部产品标记（如 `deepseek-harness/<n>`）会被拒绝，因此
-DSH 署名是可选项（`userAgentAttribution`），默认关闭。
-
-### 3.2 会话与请求身份
-
-`ses_` id 编码 48 位时间字段：CLI 的降序编码 `~(ms * 0x1000 + counter)`，配小计数器，
-后接 14 位 base62 字符。同一 id 同时作为 `x-opencode-session`、`x-opencode-session-id`、
-`x-session-affinity`、`x-session-id` 发送。
-
-`x-opencode-project` 由调用方目录推导，与抓包验证过的官方规则一致：
-
-- Git 检出 → `sha1("git-remote:" + 规范化远端)`
-- 其它目录 → `sha1("directory:" + 真实路径)`
-
-### 3.3 工具声明
-
-工具清单的**内容**不标识客户端：用户可以借助官方客户端本身发出任意工具清单与系统提示
-（`agents.<name>.system`、`agents/<name>.md` 可完全替换系统提示；不带工具的自定义 agent 可把
-工具清单从 12 个降到 1 个；插件可注册任意名称与 schema 的工具。见
-`docs/evidence/user-customization-round2-2026-11-13.json`、`docs/evidence/user-add-tools-2026-11-13.json`）。
-早期版本曾注入 OpenCode 内置工具清单、并把冲突的调用方工具改名为 `*_client`，该前提已被上述实验推翻；
-现在桥接只声明调用方自己的工具。这也是原则按「是否被检查」而非「是否可配置」表述的原因。
-
-但「内容任意」不等于「形态任意」。工具声明有三条门禁要求：
-
-**至少声明一个工具。** 空清单被拒（`FreeUsageLimitError`）。名称任意——社区流传的「必须有名为
-`read` 的工具」未能复现：同一运行时下只改工具数组，一个名为 `dsh_probe_tool` 的工具同样通过
-（`docs/evidence/bun-tool-minimum.json`、`docs/evidence/any-tool-vs-read.json`）。调用方自己的
-工具即可满足；`planTools` 仅在调用方一个工具都没有时才补占位声明，其描述明确劝阻调用，万一仍被调用
-则**丢弃**（记 `warn`），该轮正常结束。正常流量里因此不会出现 DSH 无法执行的工具。
-
-**名称形状。** 未识别的名称含下划线、连字符、点号或大写会被拒；网关认识的名称可带分隔符
-（`web_search` 按 `websearch` 通过）。声明中至少要有一个网关认识的名称：纯自造名称即使无分隔符也被拒。
-这项要求 2026-11-14 才定位，是 1.0.4 之前所有请求被拒的原因——网关返回的 `FreeUsageLimitError`
-与配额耗尽外观一致，长期被当成限流。实测对照：
-
-| 请求体 | 工具名 | 结果 |
+| 头 | 值 | 类别 |
 |---|---|---|
-| 完整 UI 请求（46 工具、69 KB） | 原名（含下划线） | 429 |
-| 同一请求体 | 去掉分隔符（`askuserquestion`） | **200** |
-| 6 个极小工具 | `job_list`、`web_search`… | 429 |
-| 同样 6 个对象 | `pwsh`、`read`、`glob`… | 200 |
+| `user-agent` | `opencode/latest/2.2.0/cli`，逐字发送 | 【检测】 |
+| `x-opencode-session` / `-session-id` / `x-session-affinity` / `x-session-id` | 同一会话 id | 【检测】 |
+| `x-opencode-client` | `cli` | 【检测】形态 |
+| `authorization` | `Bearer public`（未登录哨兵） | 【检测】形态 |
+| `x-opencode-project` | 按真实目录推导（见下） | 【预防】值不被校验 |
+| `b3` / `traceparent` | 每次请求生成；`tracing:false` 可关 | 【预防】官方默认不发 |
+| `content-type` / `accept` / `accept-encoding` | `application/json` / `*/*` / `gzip, deflate, br, zstd` | 【预防】 |
+| `x-opencode-request` | 不发送（2.x 不含；1.x 中继设 `requestIdHeader:true`） | — |
 
-官方客户端的 12 个工具全部无分隔符（`edit`、`glob`、`grep`、`question`、`read`、`shell`、
-`skill`、`subagent`、`webfetch`、`websearch`、`write`、`execute`）。`planTools` 因此把每个名称
-净化为 `[a-z0-9]`（冲突时追加序号），保留「净化名 → 真实名」映射，模型返回调用时还原，DSH 派发不受影响。
+`host`、`content-length`、`connection` 由传输层写入（§2.3）。
 
-**不能一次声明大量富工具。** 真实描述文本与复杂 schema 各自都会触发 `FreeUsageLimitError`；
-同尺寸的中性工具块可过，真实工具块被拒（`docs/evidence/tool-gate-codemode-2026-11-17.json`）。
-官方客户端用 Code Mode 规避，桥接对免费模型路由同样采用（§5.3）。
+会话 id 复刻 CLI 编码：`ses_` + 48 位时间字段（降序 `~(ms*0x1000+counter)`，小计数器）+ 14 位 base62。
+`x-opencode-project` 与抓包验证的官方规则一致：Git 检出→`sha1("git-remote:"+规范化远端)`；其它→
+`sha1("directory:"+真实路径)`（[project-identity.ts](src/project-identity.ts)）。
 
-### 3.4 系统提示
+为什么：网关把 UA 与会话头当作客户端身份来比对，缺或错即拒。带版本号的外部产品标记（如
+`deepseek-harness/<n>`）会被拒，所以 DSH 署名默认关闭（`userAgentAttribution` 可开）。project 的具体值
+不被校验，推导只为与官方一致；追踪头官方仅在 OTEL 开启时发，桥接早期按抓包默认 mint 一对，属「多加」，
+可关 `tracing` 贴近默认。
 
-系统提示必须含 `<env>` 块：仅含该块的 177 字节提示即可通过，去掉该块被拒
-（`docs/evidence/bun-env-hypothesis.json`）。`<env>` 的值不被校验：改写路径或翻转 git 标志仍能通过
-（`docs/evidence/bun-env-strictness.json`）。插件仍按真实工作目录生成，使块内信息对模型有用。
-官方 harness 原文与 Code Mode 目录**不**需要——用 DSH 自己工具合成的目录同样通过
-（`docs/evidence/bun-synthetic-catalog.json`）。
+### 2.2 请求体、系统提示与工具声明
 
-注意：被检测的只是「`<env>` 块存在」这一形态。官方的日期行、引导句、第 5 行、worktree/git 推导与
-多轮 `<system-update>` 都**不被检测**，属预防性保真，见 §3.7。
-
-### 3.5 传输层（目前不检测，仅预防）
-
-**截至 2026-11-17，门禁不检测这一层。** 复刻官方 `ClientHello` 是为了应对将来可能出现的指纹检查，
-让流量在 TLS 层面无法区分于官方客户端；现状是已逐字节对齐，但未被证明必需。
-
-官方客户端运行在 Bun 上。Node 的 TLS 表达不出同样的 `ClientHello`：OpenSSL 自行排列
-扩展顺序，也不提供后量子 key share。实测 Node 的 `tls`/`tls-impersonate` 路径扩展顺序不同，
-Hello 约 274 字节，官方是 1482。
-
-`src/bun-transport.ts` 把握手交给 `wreq-js`（Rust + BoringSSL），参数取自抓包。
-该库是**可选**依赖；缺少对应原生绑定时适配器回退到普通 `fetch`。
-
-复刻抓包需要四处修正，每一处都由深度扩展对比发现：
-
-| 修正 | 细节 |
-|---|---|
-| `curvesList` | 去掉多出的 `MLKEM768` 组；客户端只提供 `X25519MLKEM768`、`X25519`、`P-256`、`P-384`。 |
-| `sigalgsList` | `0x0807` 是 **ed25519**，不是 `rsa_pss_pss_sha256`（后者是 `0x0809`）；`0x0603` 在 BoringSSL 中写作 `ECDSA+SHA512`。两者齐备才能凑出抓包中的 11 项。 |
-| 头名称大小写 | `Authorization`、`Content-Type`、`User-Agent`、`Connection`、`Accept`、`Host`、`Accept-Encoding`、`Content-Length`——传输层的默认值是小写。 |
-| 头位置 | `Host`、`Accept-Encoding`、`Content-Length` 显式提供，使其落在第 14–16 位；否则传输层会把它们追加到末尾。 |
-
-完成上述修正后，`ClientHello` **扩展零差异**、记录长度与抓包同为 1482 字节。请求**头**文本
-（动态值归一化后）除 `x-opencode-project`（由调用方目录推导）外与抓包一致。注意这是头形态比对，
-不是整请求逐字节比对：两条记录全文尺寸不同（23,073 与 951 字节，正文提示不同），「仅一处差异」
-只针对归一化后的头文本
-（`docs/evidence/clienthello-deep-2026-11-13.json`、`docs/evidence/byte-exact-2026-11-13.json`）。
-
-持久化的 `wreq` Transport 跨轮次复用一条连接，与官方客户端一致；只有响应体被完整读取后，
-连接才会归还连接池。
-
-客户端**只提供 `http/1.1`**，没有 `h2`，因此 HTTP/2 SETTINGS 指纹不属于本客户端的流量特征。
-运行时本身也不是门禁差异来源：零工具请求体在 Bun（2026-11-13）与 Node（2026-11-18 补充记录）
-下都被拒为 `FreeUsageLimitError`。证据含两条记录；Bun 当时用的 glm-5.3-flash-free 现已弃用，
-Node 补充用 big-pickle，二者同为「零工具被拒」，变量是运行时而非模型
-（`docs/evidence/bun-runtime-test.json`）。
-
-### 3.6 与官方编码器的字段级差异
-
-逐行读过官方 OpenAI Chat 编码器（`openai-chat.ts`）后，与官方的差异分成两类。
-
-**门禁相关（必须保留）**：
-
-| 差异 | 官方做法 | 桥接做法 | 实测 |
-|---|---|---|---|
-| `tools` 为空时 | 省略整个字段 | 补一个 `read` 占位声明 | **省略会被拒（429）**，占位是必需的 |
-
-官方客户端的 `Generate.text`（标题生成）确实发不含 `tools` 的请求体，而这类请求会被网关拒绝——
-只是标题失败是静默的，所以从未被发现。
-
-**保真相关（目前不检测，已按官方复刻，见 §3.7）**：`max_completion_tokens` 恒发、system 拼接、
-日期/引导句/第 5 行、reasoning 回放、键序等。这些在 2026-11-14 的对照里都**不是**过闸条件
-（`docs/evidence/tools-field-and-token-budget-2026-11-14.json`），对齐只为预防未来检测。
-
-其余字段均已对齐：`store` 与 `prompt_cache_key` 都不发（官方仅在 provider 声明支持时发送），
-`temperature`、`stop`、`reasoning_effort` 有则转发，助手消息的 `content: null`、`tool_calls` 形状与官方一致。
-
-适配器把环境指令追加在 DSH 提示**之后**，与官方客户端的位置一致，使 agent 自身的指令仍然主导。
-两者到位后，适配器自身路径可稳定返回 200（`docs/evidence/verify-env-fix.json`、`docs/evidence/placeholder-verify.json`）。
-
-### 3.7 预防性保真清单（目前不检测，仅防未来）
-
-以下都是官方客户端恒发、但截至 2026-11-17 **不被门禁检测**的特征。桥接已按源码复刻
-（`anomalyco/opencode`，v2.2.0 交叉验证），目的仅是将来网关若开始逐项比对时不被识别：
-
-| 特征 | 官方做法 | 源码位置 |
-|---|---|---|
-| 日期行 | 系统提示恒含 `Today's date: <会话启动日期>`，会话内冻结 | `instructions/builtins.ts` |
-| `<env>` 引导句 | 块前有 `Here is some useful information about the environment you are running in:` | 同上 |
-| `<env>` 第 5 行 | `Prefer <tmp>/opencode over …/tmp…` | 同上 |
-| env 取值推导 | `Workspace root folder`=git worktree 根；git 标志=向上查找 `.git` | `location.ts`/`project.ts` |
-| 多轮变化 | 日期/环境变化以 `<system-update>` user 消息插入，基线不重拼 | `instruction-state.ts`/`openai-chat.ts` |
-| 输出上限 | primary 请求恒发 `max_completion_tokens`（目录默认 32000） | `model-request.ts` |
-| reasoning 回放 | 目录声明 reasoning 字段（如 big-pickle）时每条 assistant 消息回放空串 | `openai-chat.ts` |
-| body 键序 | `model, messages, tools, stream, stream_options, max_completion_tokens` | `openai-chat.ts` |
-| 传输层 | TLS ClientHello、头大小写/顺序、连接复用、http/1.1 | §3.5 |
-| 追踪头 | `b3`/`traceparent` 仅 OTEL 开启时发，默认**不发** | effect/http |
-
-注意 `b3`/`traceparent` 不是官方默认行为：它们由 `OTEL_EXPORTER_OTLP_ENDPOINT` 开关，默认客户端
-两个都不发。桥接早期按抓包默认 mint 一对，属于「多加」；如要贴近默认官方行为可关闭 `tracing`。
-
-## 4. 线上协议
-
-### 4.1 请求头
-
-| 头 | 值 |
-|---|---|
-| `authorization` | `Bearer public`（未登录哨兵值） |
-| `content-type` | `application/json` |
-| `accept` | `*/*` |
-| `accept-encoding` | `gzip, deflate, br, zstd` |
-| `user-agent` | `opencode/latest/2.2.0/cli` |
-| `x-opencode-client` | `cli` |
-| `x-opencode-project` | 推导值（§3.2） |
-| `x-opencode-session`、`x-opencode-session-id`、`x-session-affinity`、`x-session-id` | 会话 id |
-| `b3`、`traceparent` | 每次请求按抓包形态生成（`tracing: false` 可关闭） |
-| `x-opencode-request` | **不发送**（2.x 不含；兼容 1.x 时设 `requestIdHeader: true`） |
-
-`host`、`content-length`、`connection` 由传输层写入。
-
-### 4.2 请求体
+发出去的请求体由这些部分组成（键序与官方一致）：
 
 ```jsonc
 {
-  "model": "deepseek-v4.1-flash-free",
+  "model": "...",
   "messages": [...],
+  "tools": [...],                 // 调用方工具；一个都没有时放一个占位
   "stream": true,
   "stream_options": { "include_usage": true },
-  "tools": [...],            // 调用方工具；若一个都没有则放一个占位
-  "max_completion_tokens": 32000
+  "max_completion_tokens": 32000  // 恒发，目录默认；调用方可覆盖
 }
 ```
 
-**不发送** `tool_choice` 与 `prompt_cache_key`：抓包中的客户端两者皆无。
-`max_completion_tokens` 提升到 `minOutputTokens`（默认 32000），与客户端按目录推导的预算一致。
+不发 `tool_choice` 与 `prompt_cache_key`（抓包客户端两者皆无）；`temperature`/`stop`/`reasoning_effort`
+有则转发。【预防】恒发输出上限、键序等目前不被检查，对齐只为预防（对照见
+`docs/evidence/tools-field-and-token-budget-2026-11-14.json`）。
 
-### 4.3 消息映射
+**系统提示**：单条 `system` 消息＝DSH 提示 + 环境指令，用 `\n` 连接。【检测】必须含 `<env>` 块：仅含该块
+的 177 字节提示可过，去掉被拒（`docs/evidence/bun-env-hypothesis.json`）。【用户自由】块里的值不被校验，
+改写路径、翻转 git 标志仍过（`docs/evidence/bun-env-strictness.json`）；插件仍按真实目录生成使信息有用。
+【预防】官方的日期行（会话内冻结）、引导句、第 5 行（tmp 偏好）、worktree 根/向上 git 推导、多轮
+`<system-update>` 都不被检查，桥接照抄当保险。官方 harness 原文与 Code Mode 目录不需要——合成目录同样过
+（`docs/evidence/bun-synthetic-catalog.json`）。
+
+**工具声明**：【用户自由】清单内容不标识客户端（用户可经官方客户端发任意清单与提示，见
+`docs/evidence/user-customization-round2-2026-11-13.json`、`user-add-tools-2026-11-13.json`），故只声明
+调用方自己的工具。但形态有三条【检测】要求：
+
+1. **至少一个工具。** 空清单被拒；名称任意（`dsh_probe_tool` 也过，`docs/evidence/bun-tool-minimum.json`、
+   `any-tool-vs-read.json`）。调用方工具即可满足；一个都没有时 `planTools` 补占位，描述劝阻调用，误调则丢弃。
+2. **名称形状。** 未识别名含下划线/连字符/点/大写被拒；网关认识的名可带分隔符；至少一个认识的名。
+   `planTools` 净化为 `[a-z0-9]`（冲突加序号）并保留回映射。这是 1.0.4 前全被拒的原因（报错似配额耗尽）。
+3. **不能一次声明大量富工具。** 真实描述与复杂 schema 各自触发拒绝（`docs/evidence/tool-gate-codemode-2026-11-17.json`）。
+
+第 3 条由 **Code Mode** 满足（模型看到什么）：线上只声明几个简单锚点（`read`/`write`/`edit` 等认识的名、
+平凡 schema）加 `execute`；锚点只为过形状检查，模型被告知不要直接调，误调被丢弃。真实目录用 DSH
+`renderToolsSdk` 渲染进系统提示，带每个工具真实返回 schema（`read`→`{lines,totalLines}` 等），附「只能直接调
+`execute`」指令。调用之后谁执行、权限与返回，见 §5。
+
+### 2.3 TLS 与 HTTP 传输
+
+传输层负责把握手与头形态做成官方的样子。【预防】截至 2026-11-17 门禁不检测这一层；复刻只为将来若出现
+指纹检查时无法区分。
+
+官方客户端跑在 Bun 上，Node 的 TLS 表达不出同样的 `ClientHello`（OpenSSL 自排扩展、无后量子 key share，
+hello 约 274 字节 vs 官方 1482）。[bun-transport.ts](src/bun-transport.ts) 把握手交给 `wreq-js`
+（Rust+BoringSSL，与官方同库），参数取自抓包，需四处修正：
+
+| 修正 | 细节 |
+|---|---|
+| `curvesList` | 去掉多余 `MLKEM768` 组；只留 `X25519MLKEM768:X25519:P-256:P-384`。 |
+| `sigalgsList` | `0x0807` 是 ed25519、`0x0603` 写作 `ECDSA+SHA512`，凑齐抓包 11 项。 |
+| 头大小写 | `Authorization`/`Content-Type`/`User-Agent`/`Connection`/`Accept`/`Host`/`Accept-Encoding`/`Content-Length` 按抓包大写。 |
+| 头位置 | `Host`/`Accept-Encoding`/`Content-Length` 显式提供，落在第 14–16 位。 |
+
+修正后 `ClientHello` 扩展零差异、1482 字节。请求**头**文本（动态值归一化后）除 `x-opencode-project` 外与
+抓包一致；这是头形态比对，不是整请求逐字节比对（两条记录全文 23,073 与 951 字节，正文不同）
+（`docs/evidence/clienthello-deep-2026-11-13.json`、`byte-exact-2026-11-13.json`）。持久 Transport 跨轮次
+复用连接；只 offer `http/1.1`，无 `h2`。
+
+**回退**：`wreq-js` 是可选依赖；缺原生绑定或 `bunTransport:false` 时回退普通 `fetch`，失去 TLS 对齐但仍
+工作（某些代理下普通 fetch 根本连不上，故传输价值不止指纹）。运行时不是门禁差异来源：零工具请求体在
+Bun 与 Node 下都被拒为 `FreeUsageLimitError`（`docs/evidence/bun-runtime-test.json`，两条记录）。
+
+## 3. 模型目录
+
+[catalog.ts](src/catalog.ts) 读官方稳定版 v1 目录 `https://models.opencode.ai/api.json`，取 `opencode`
+提供者下成本为 0、非 `deprecated` 的模型。官方 v2.3.0 读同服务的 v2 目录并带缓存/内置快照；两者同源，
+插件尚未迁移 v2。
+
+| 项 | 值 |
+|---|---|
+| 刷新 | 5 分钟（官方 TTL）；`modelRefreshIntervalMs:0` 关轮询，保留启动预取与按需缓存 |
+| 失败 | 保留上一份快照，60s 重试；快照原子提交，`onUpdated` 仅内容变化时触发 |
+
+不再探测 `/models`：2026-11-15 实测目录与实时可用集完全一致，探测无增量信息，且是官方从不发的请求形态。
+目录还携带 `interleaved.field`（reasoning 回放字段，§2.2/§4）与 `limit.output`（输出上限）。
+
+## 4. 消息与附件
+
+消息映射（DSH → 线上）：
 
 | DSH | 线上 |
 |---|---|
-| `options.system` | 首条 `{role:'system'}` |
-| `role:'system'` | `{role:'system'}` |
-| `role:'developer'` | 丢弃——工具变更已体现在 `options.tools` |
-| `role:'tool'` | `{role:'tool', tool_call_id, content}`；空结果发 `''` |
-| `role:'assistant'` | `{role:'assistant', content, reasoning_content?, tool_calls?}`；文本用 `''` 拼接，仅“有工具调用且无文本”时 `content` 为 `null`，`reasoning_content` 仅在存在思考或模型需要时发送 |
-| 用户内容 | 视觉路由上按顺序保留 text/`image_url` |
+| `options.system` / `role:system` | 并入首条 `system`（§2.2） |
+| `role:developer` | 丢弃——工具变更已体现在 `options.tools` |
+| `role:tool` | `{role:tool, tool_call_id, content}`；空结果发 `''` |
+| `role:assistant` | `content` 文本用 `''` 拼接；仅「有工具调用且无文本」时为 `null`；`reasoning_content` 在存在思考或模型需要时发送 |
+| 用户内容 | 视觉路由按序保留 text/`image_url` |
 
-返回的调用保留 id、名称与原始参数字节：查找与校验由 DSH 负责。整批缓冲至
-`finish_reason: tool_calls`；被截断的批次返回 `TOOL_BRIDGE_INCOMPLETE` 且不派发任何调用。
+**思考回放**：目录声明 reasoning 字段（如 big-pickle）时每条 assistant 行回放该字段（无思考发空串）。
+可选精简（`trimCompletedReasoning`）只移除已完成轮次的思考，经消息 id + SHA-256 校验；进行中/失败/中断
+一律保留；仅影响新请求，不删本地历史。
 
-## 5. 适配器行为
+**图片**：[image-input.ts](src/image-input.ts) 只用公开附件接口，不猜存储路径；仅声明 `image` 输入的路由
+读字节。预算默认 4 MP、单图 1 MiB、总 20 MiB、20 次出现；超预算返回 `IMAGE_OFFLOAD_REQUIRED`，不静默丢。
+工具结果图片在连续 tool-result 组之后作为一条关联 user 消息上提。
 
-- **流式**：增量解析 SSE，文本、思考与工具调用增量映射为 DSH chunk。输出开始后的
-  流失败不会重放（`PARTIAL_STREAM_ERROR`）。
-- **免费额度拒绝**：HTTP 429 且类型为 `FreeUsageLimitError` 时返回 `FREE_USAGE_LIMIT`。本轮结束，不自动重试，不向宿主传递重试等待。原始 `Retry-After` 仅保留在诊断中。
-- **等待范围**：新请求不继承上一轮的按模型等待。适配器不再维护内存模型锁，也不写入模型冷却文件；升级时清空旧文件，且不从日志恢复冷却。
-- **临时限流**：重试由 DSH 调度（最多 2 次、初始 2s、抖动 0.2）。可重试响应的等待上限为 15 分钟，原始值保留在诊断中。等待不跨手动请求保存。
-- **清除冷却**：同一个 RPC 同步清空当前出口池的等待、失败退避计数及旧版模型冷却文件，不替换出口条目，不需要重启。
+## 5. 工具执行
 
-依据官方 v2.3.0 的 [错误分类](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/ai/src/provider-error.ts)与
-[ModelRetry](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/model-retry.ts)：额度拒绝默认不自动重试，
-只有临时限流和提供方内部错误会使用重试等待，且最多接受 15 分钟。
-官方 CLI 的通用重试预算是 10 次；本插件保留通过 DSH 执行的 2 次预算。本次对齐的是额度错误处理、等待范围和等待上限，不是替换宿主的整个重试循环。
+模型发起调用后，执行与权限都在 DSH，桥接不另设一套流程。
 
-2026-11-17 已用旧版适配器复现清空失效：存储已返回 0，适配器仍从另一份内存 Map 返回 `REQUEST_COOLING`，没有发送下一次请求。
-移除这份跨请求状态后，回归测试覆盖同一实例清除、旧文件迁移和再次发送。
-- **取消**：POST 前、缓冲后、每个工具块前均检查。
+- 返回的调用保留 id、名称与原始参数字节；查找与 schema 校验由 DSH 负责。整批缓冲至
+  `finish_reason:tool_calls`；被截断的批次返回 `TOOL_BRIDGE_INCOMPLETE`，不派发任何调用。
+- 占位工具与 Code Mode 锚点若被误调，适配器丢弃（记 `warn`），该轮正常结束——正常流量不会出现 DSH
+  无法执行的工具。
+- **Code Mode 的执行侧**：`execute` 是注册的普通工具，执行体委托一个 `PtcExecutor` 实例跑 `run_code`，
+  复用 DSH 原生 PTC 的沙箱运行时与受防护的嵌套分发；嵌套工具调用仍走 DSH 的权限与派发。DSH 的 `run_code`
+  是执行器私有、不可注册，故用 `execute` 承载。仅免费路由且准入 `execute` 时启用；宿主无 PTC 退回直接声明。
+  行为更接近 DSH 的 PTC 模式。已端到端验证简单应答、四步读写、六步含并行与 `edit` 的复杂任务
+  （`docs/evidence/codemode-complex-test-2026-11-17.json`）。已知边界：SDK 以 TypeScript 类型渲染参数，
+  表达不了 `read` 的 `limit<=2000` 数值上限，模型可能先猜大值被拒后改对（与原生 PTC 渲染一致）。
 
-### 5.1 图片
+## 6. 错误处理与诊断
 
-`src/image-input.ts` 只使用公开附件接口（`readImageRequest`），从不猜测存储路径。
-是否读取由模型声明决定：只有声明 `image` 输入的路由才读取字节。默认预算为 4 MP、
-单图 1 MiB、总计 20 MiB、20 次出现；超预算返回 `IMAGE_OFFLOAD_REQUIRED`，不会静默丢弃。
-工具结果中的图片在整个连续的 tool-result 组**之后**作为一条关联 user 消息上提。
+- **流式**：增量解析 SSE；输出开始后的流失败不重放（`PARTIAL_STREAM_ERROR`）。
+- **免费额度拒绝**：429 且 `FreeUsageLimitError` → `FREE_USAGE_LIMIT`，本轮结束，不自动重试、不传重试等待；
+  原始 `Retry-After` 仅留诊断。
+- **等待范围**：新请求不继承上一轮按模型等待；不维护内存模型锁、不写冷却文件；升级清空旧文件。
+- **临时限流**：重试由 DSH 调度（最多 2 次、初始 2s、抖动 0.2）；可重试等待上限 15 分钟，原始值留诊断。
+- **清除冷却**：同一 RPC 同步清空出口池等待、退避计数与旧冷却文件，不需重启。
+- **取消**：POST 前、缓冲后、每个工具块前检查。
 
-### 5.2 思考回放
+依据官方 v2.3.0 错误分类与 ModelRetry：额度拒绝默认不重试，仅临时限流/内部错误用重试等待且上限 15 分钟。
+官方通用重试预算 10 次，本插件保留 DSH 的 2 次；对齐的是额度处理与等待范围，不是替换宿主重试循环。
 
-每条 assistant 历史行在模型需要或确实存在思考时携带 `reasoning_content`。可选精简
-（`trimCompletedReasoning`）只移除 Canonical **已完成**轮次的思考，通过消息 id 与
-SHA-256 指纹校验；进行中、失败或中断的链条一律保留。仅影响新请求，不删除本地历史。
-
-### 5.3 Code Mode（免费模型的工具声明）
-
-为满足 §3.3 的「不能一次声明大量富工具」门禁，免费模型路由采用 Code Mode，与官方客户端一致：
-线上只保留少量工具，完整目录进系统提示词，经一个代码执行入口间接调用。
-
-[code-mode.ts](src/code-mode.ts) 的具体形状：
-
-- 线上只声明几个简单锚点工具（`read`/`write`/`edit` 等认识的名字、平凡 schema）加 `execute`。
-  锚点只为满足网关的形状检查，模型被明确告知不要直接调用；误调会被适配器丢弃。
-- 真实工具目录用 DSH 的 `renderToolsSdk` 渲染进系统提示词，并附"只能直接调 `execute`"的指令。
-  目录带每个工具真实的返回 schema（如 `read` 返回 `{lines,totalLines}`、`glob` 返回 `{root,paths}`），
-  模型按类型解析返回，不用猜结构。
-- `execute` 是注册的普通工具，其执行体委托一个 `PtcExecutor` 实例跑 `run_code`，复用 DSH 原生
-  PTC 的沙箱运行时与受防护的嵌套分发。DSH 的 `run_code` 是执行器私有、不可注册，故用 `execute` 承载。
-- 仅当该步准入 `execute`（免费模型路由）时启用；其他 agent 的执行器与工具声明不变。
-
-行为更接近 DSH 的 PTC 模式。宿主无 PTC 运行时时自动退回直接声明。
-
-已在真实免费模型会话端到端验证：简单应答、四步读写任务、以及含并行读取与 `edit` 追加的六步复杂任务
-都正确完成（见 [复杂任务记录](docs/evidence/codemode-complex-test-2026-11-17.json)）。一个已知边界：
-SDK 用 TypeScript 类型渲染参数，表达不了 `read` 的 `limit<=2000` 这类数值上限，模型可能先猜大值、
-被工具拒绝后再改对；这与 DSH 原生 PTC 的渲染一致。
-
-## 6. 模型目录
-
-[catalog.ts](src/catalog.ts) 只读稳定版 v1 目录 `https://models.opencode.ai/api.json`，取其中 `opencode` 提供者下成本为 0 的模型，排除 `status: deprecated`。
-官方 v2.3.0 的 [ModelsDev](https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/models-dev.ts) 默认读取同一服务的
-`/experimental/v2.0/api.json?type=chat,decision,image`，并使用缓存与内置快照。
-两者同源，但读取路径和缓存层并非完全一致；插件目前尚未迁移到 v2 目录。
-
-| 项 | 值 | 依据 |
-|---|---|---|
-| 数据源 | 单一，官方稳定版 v1 目录 | 与官方客户端同源，API 版本不同 |
-| 刷新间隔 | 5 分钟，与官方 TTL 一致 | `Duration.minutes(5)` |
-| 失败处理 | 保留上一份快照，60s 后重试 | 与官方退回缓存同效 |
-
-**为什么不再探测 `/models`。** 早期版本把目录与一次实时 `/models` 请求取交集，用来判断
-「哪些模型现在真的可用」。2026-11-15 实测显示这一步没有增加任何信息：目录中成本为 0 且未弃用的
-12 个模型，与 `/models` 返回的可用集完全一致（「目录有、线上没有」为 0），而 `/models` 另外
-返回的 74 个都是付费模型。可用性信号本来就在目录的 `status` 字段里，因此这次探测被删除——
-它也是官方客户端从不发出的请求形态。
-
-快照原子提交，`onUpdated` 只在内容真正变化时触发。`modelRefreshIntervalMs: 0` 关闭周期刷新，
-但保留启动预取与按需缓存。
-
-## 7. 配置
-
-| 键 | 默认值 | 用途 |
-|---|---|---|
-| `baseUrl` | `https://opencode.ai/inference/v1` | relay 基址。 |
-| `apiKey` | `public` | 未登录哨兵值。 |
-| `userAgent` | `opencode/latest/2.2.0/cli` | 身份 UA，逐字发送。 |
-| `userAgentAttribution` | `false` | 追加 DSH 署名标记。 |
-| `client` | `cli` | `x-opencode-client`。 |
-| `requestIdHeader` | `false` | 发送 `x-opencode-request`（仅 1.x 中继）。 |
-| `tracing` | `true` | 发送 `b3`/`traceparent`。 |
-| `bunTransport` | `true` | 可用时使用 Bun 形态 TLS 传输。 |
-| `toolStrict` | `true` | 工具声明加 `strict: false`。 |
-| `minOutputTokens` | `32000` | `max_completion_tokens` 下限。 |
-| `project` | `global` | 显式 `x-opencode-project`，覆盖推导。 |
-| `projectDirectory` | `''` | 推导用目录；空表示 cwd。 |
-| `providers` | `['opencode-bridge']` | 服务的 provider 路由。 |
-| `includeDeprecated` | `false` | 提供已弃用但在线的模型。 |
-| `extraModels` | `[]` | 强制追加模型 id。 |
-| `requestTimeoutMs` | `600000` | 单请求截止时间。 |
-| `modelRefreshIntervalMs` | `300000` | 目录刷新；`0` 关闭轮询。 |
-| `trimCompletedReasoning` | `false`（live） | 设置 → 上下文精简。 |
-| `toolResultImages` | `true` | 视觉路由转发工具输出图片。 |
-| `requestImagePixelBudget` | `4194304` | 请求图片像素。 |
-| `requestImageMaxBytes` | `1048576` | 单图编码字节目标。 |
-| `maxRequestImageBytes` | `20971520` | base64 总预算。 |
-| `maxRequestImages` | `20` | 保留的图片出现次数。 |
-| `proxies` | `[]` | 出口池，按顺序。 |
-| `proxyCooldownMs` | `60000` | 可选出口池的本地兜底冷却；免费额度拒绝不启动它。 |
-| `proxyStorePath` | `''` | 设置页拥有的池存储。 |
-| `logLevel` | `warn` | `debug`\|`info`\|`warn`\|`error`\|`off`。 |
-| `logDir` | `''` | 默认使用 profile 日志目录。 |
-| `logMaxBytes` / `logMaxFiles` | `524288` / `5` | 轮转。 |
-
-## 8. 上游变化时
+上游变化时的对照表：
 
 | 现象 | 可能原因 | 处理 |
 |---|---|---|
-| `403 FreeTierError` | 身份形态被拒 | 检查 UA、会话头、是否至少声明了一个工具、以及 `<env>` 块是否存在（§3）。 |
-| `429 FreeUsageLimitError` | 免费通道拒绝或真实配额 | 读取请求摘要，在同出口、同模型、相近时间对照实际结果；错误名不能确认 IP 配额原因。 |
-| `400 MissingSessionID` | 缺少会话头 | 会话生成失效。 |
-| 端点 `404`/`426` | 路由迁移 | 重读目录的 `provider.api`。 |
-| 目录为空 | 目录请求失败 | 查日志；上一份快照仍被保留。 |
+| `403 FreeTierError` | 身份形态被拒 | 查 UA、会话头、至少一个工具、`<env>` 块（§2）。 |
+| `429 FreeUsageLimitError` | 免费通道拒绝或真实配额 | 同出口/同模型/相近时间对照；错误名不能确认 IP 配额。 |
+| `400 MissingSessionID` | 缺会话头 | 会话生成失效。 |
+| 端点 `404`/`426` | 路由迁移 | 重读目录 `provider.api`。 |
+| 目录为空 | 目录请求失败 | 查日志；上一份快照仍保留。 |
 
-重新推导某个常量：
+**诊断**：失败请求默认追加 `request shape` 与 `tool schema shape` 摘要，共享 `request` 标识；成功摘要仅
+`debug` 级记录。摘要只含元数据（路径、传输、字节数、角色/长度、环境块数、图片数、工具配对计数、schema
+结构统计），不写正文、参数、结果、图片、密钥；上限 8 MiB/512 消息/128 工具/8192 节点/深度 32，超限标
+`capped`。`transport:configured` 仅表示设置了专用传输，不单独证明 TLS 字节一致。
 
-1. 用**已安装的官方客户端**抓包，走本机回环端点（不要靠猜）：`--standalone`、
-   隔离配置、本地假模型，然后记录头、请求体与 TLS `ClientHello`。
-2. 与 `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION` 对比。
-3. 只改抓包与之矛盾之处，且只按抓包所指方向改。
-4. 在 `tests/` 中新增或更新固定该值的断言。
-5. 在更新日志（CHANGELOG）记录本次变更。
+**安全与隐私**：除配置 `apiKey` 外不读凭据；代理 URL 全日志/UI 脱敏；图片数据任何级别不入日志（测试保证）；
+不新增 `exec`/`spawn`。
 
-### 8.1 请求结构摘要
+## 7. 配置
 
-失败请求默认追加 `request shape` 和 `tool schema shape` 两条摘要，与错误行共享 `request` 标识。
-成功请求的摘要仅在写入级别为 `debug` 时记录；`off` 关闭日志。面板的“显示最低级别”只筛选现有记录，不会开启 Debug 写入。
-可通过配置 `logLevel` 或 `opencode_bridge_log` 的 `level` 操作调整写入级别；`stat` 会报告诊断格式版本。
+| 键 | 默认 | 用途 |
+|---|---|---|
+| `baseUrl` | `https://opencode.ai/inference/v1` | relay 基址 |
+| `apiKey` | `public` | 未登录哨兵 |
+| `userAgent` | `opencode/latest/2.2.0/cli` | 身份 UA |
+| `userAgentAttribution` | `false` | 追加 DSH 署名 |
+| `client` | `cli` | `x-opencode-client` |
+| `requestIdHeader` | `false` | 发 `x-opencode-request`（1.x） |
+| `tracing` | `true` | 发 `b3`/`traceparent` |
+| `bunTransport` | `true` | 可用时用 Bun 形态 TLS |
+| `toolStrict` | `true` | 工具加 `strict:false` |
+| `minOutputTokens` | `32000` | 输出上限下限 |
+| `project` / `projectDirectory` | `global` / `''` | 显式 project / 推导目录 |
+| `providers` | `['opencode-bridge']` | 服务的 provider 路由 |
+| `includeDeprecated` / `extraModels` | `false` / `[]` | 目录过滤/追加 |
+| `requestTimeoutMs` | `600000` | 单请求截止 |
+| `modelRefreshIntervalMs` | `300000` | 目录刷新；0 关轮询 |
+| `trimCompletedReasoning` | `false` | 上下文精简 |
+| `toolResultImages` | `true` | 视觉路由转发工具图片 |
+| `requestImagePixelBudget` / `requestImageMaxBytes` / `maxRequestImageBytes` / `maxRequestImages` | `4194304`/`1048576`/`20971520`/`20` | 图片预算 |
+| `proxies` / `proxyCooldownMs` / `proxyStorePath` | `[]`/`60000`/`''` | 出口池 |
+| `logLevel` / `logDir` / `logMaxBytes` / `logMaxFiles` | `warn`/`''`/`524288`/`5` | 日志 |
 
-- **请求摘要**：已识别的公共路径、传输选择、请求字节数、输出上限、温度、消息角色与长度、环境块数量、图片数量、工具调用配对计数。
-- **工具摘要**：声明数量、名字格式计数、schema 对象、引用和组合结构的统计。不写工具名字、属性名、描述、枚举值或默认值。
-- **隐私**：不写消息正文、工具调用参数、结果、图片数据或密钥。自定义 URL、查询参数和非标准 UA 不原样记录。
-- **上限**：最多解析 8 MiB 请求、检查 512 条消息、128 个工具及 8192 个 schema 节点，深度上限 32；达到上限会标记 `capped`。摘要失败不影响模型请求。
-
-`transport: configured` 表示已设置专用传输函数，`node-fetch` 表示普通 fetch；该字段不单独证明 TLS 字节一致。
-
-## 9. 测试
+## 8. 测试
 
 ```bash
 node node_modules/typescript/bin/tsc -p tsconfig.json   # 构建
-node --test tests/*.test.mjs                            # 全量离线测试
+node --test tests/*.test.mjs                            # 全量离线
 ```
 
-全部测试均为离线。`tests/*-live.mjs` 下的实测探针需显式加 `--run`，且拒绝覆盖既有报告。
+全部离线；`tests/*-live.mjs` 实测探针需显式 `--run`，且拒绝覆盖既有报告。
 
 | 套件 | 覆盖 |
 |---|---|
-| `current-protocol`、`alignment`、`gateway-requirements` | 线上形态、头、工具声明、`<env>` 块、占位工具处理。 |
-| `bun-transport` | 抓包得到的加密套件/扩展配置。 |
-| `bridge-integration`、`bridge-stream` | 批次原子性、不完整批次、流式组装。 |
-| `reasoning-*` | 回放规则、精简资格、流探针。 |
-| `image-*`、`vision-*` | 附件投影、预算、工具图片上提。 |
-| `retry-integration`、`proxy-rotation` | 服务端等待、池冷却、不重放保证。 |
-| `project-identity`、`request-waits`、`official-cooldown-policy` | 身份推导、旧版状态清理、无跨请求模型锁与即时清除出口等待。 |
-| `catalog-*`、`log-*`、`client-boot` | 目录生命周期、脱敏、设置页。 |
+| `current-protocol`/`alignment`/`gateway-requirements`/`official-fidelity` | 线上形态、头、工具声明、`<env>`、占位、预防保真 |
+| `bun-transport` | 抓包加密套件/扩展配置 |
+| `bridge-integration`/`bridge-stream` | 批次原子性、流式组装 |
+| `reasoning-*` | 回放、精简资格 |
+| `image-*`/`vision-*` | 附件投影、预算、工具图片上提 |
+| `retry-integration`/`proxy-rotation` | 服务端等待、池冷却、不重放 |
+| `project-identity`/`request-waits`/`official-cooldown-policy` | 身份推导、旧状态清理、即时清除 |
+| `catalog-*`/`log-*`/`client-boot`/`references`/`evidence-links` | 目录、脱敏、设置页、致谢与证据一致 |
 
-### 9.1 实时探针
+实时探针（消耗真实配额）：`smoke`、`tool-loop-live`（一次三轮会话 10 项检查，
+`docs/evidence/tool-loop-live-2026-11-14.json`）、`proxy-live`、`vision-compat-live`、`reasoning-*`、
+`wire-dump`、`official-client-ab-live`（同机同模型对照官方 CLI，
+`docs/evidence/official-client-comparison-2026-11-17.json`：7/52 合成工具、52 工具+60 KB 提示、最大约 72 KB）。
+离线全绿也可能全被网关拒（1.0.4 前 418 项离线绿但真实请求全拒），故形态问题必须靠实测发现。
 
-全部需要显式 `--run`，会消耗真实配额，且拒绝覆盖既有报告。离线套件跑得再全也无法发现「请求形态被网关
-拒绝」这类问题——1.0.4 之前 418 项离线测试全绿，而每个真实请求都被拒。
+## 9. 文档维护规则
 
-| 探针 | 验证 |
-|---|---|
-| `smoke.mjs --run` | 会话/请求 id 形态、工具名无分隔符且能回映射、目录可达、带完整工具集的一次真实完成、返回调用名正确还原。 |
-| `tool-loop-live.mjs --run` | 多轮工具循环：三轮串行调用，每轮结果喂回下一轮，后续请求必须回放 assistant 历史与 `reasoning_content`。2026-11-14 以 deepseek-v4.1-flash-free 实跑：**一次三轮会话**，10 项检查全部通过（不是十次独立运行）（`docs/evidence/tool-loop-live-2026-11-14.json`）。 |
-| `proxy-live.mjs` | 代理隧道承载真实流量。 |
-| `vision-compat-live.mjs` | 图片输入与工具结果图片。 |
-| `reasoning-compat-live.mjs`、`reasoning-roundtrip-live.mjs` | 思考字段的回放与往返。 |
-| `wire-dump.mjs` | 打印当前实际发出的线上指纹。 |
-| `official-client-ab-live.mjs --run --official <exe> --out <new.json>` | 隔离官方 CLI 配置，与真实适配器及 TLS 传输在同机、同模型上对照；支持合成工具数量与系统提示大小控制。 |
+- 本文件与[英文版](TECHNICAL.us.md)同步修改；用户可见功能、协议原则、已记录常量、构建/发布流程或版本号
+  变化须同改两份。版本号还须同步 README 中英安装命令，使其与 `package.json` 的 `version` 一致
+  （`tests/readme-version.test.mjs` 校验）。
+- 每次变更记录在独立更新日志（[CHANGELOG.md](CHANGELOG.md)/[CHANGELOG.us.md](CHANGELOG.us.md)）。
+- 参考新项目时同步更新 [README 致谢](README.md#参考与致谢)与本文 §10。
+- 证据两条规则（`tests/evidence-links.test.mjs` 强制）：引用的每个文件必须随仓库发布（抓包放
+  [`docs/evidence/`](docs/evidence/README.md)）；绝不提及未发布内容。
 
-2026-11-17 的[同机对照记录](docs/evidence/official-client-comparison-2026-11-17.json)中，官方 v2.3.0 与插件均成功。
-插件分别声明 7 个、52 个合成工具，以及 52 个工具加 60 KB 系统提示填充；最大请求体约 72 KB。
-范围是受控合成请求，真实 UI 历史需另行复现。这些结果不能解释其他时刻或请求中的 429。
+重新推导某个常量：用已安装官方客户端抓包（本机回环、隔离配置、本地假模型），记录头/体/`ClientHello`；
+与 `buildHeaders`/`buildChatMessages`/`BUN_TLS_EMULATION` 对比；只改抓包矛盾处且按抓包方向改；在 `tests/`
+固定该值；记入 CHANGELOG。
 
-判定要点：先在同出口、同模型、相近时间对照实际结果。两边都被拒时，先排查上游状态与出口条件；
-只有插件被拒时，再单变量比较工具、消息与请求参数。`FreeUsageLimitError` 本身不能确认 IP 额度已耗尽。
+## 10. 参考的社区项目
 
-## 10. 安全、隐私与署名
-
-- 除配置的 `apiKey` 外不读取任何凭据；代理 URL 在所有日志与 UI 中脱敏。
-- 日志仅含元数据：不含提示、工具入参、结果或图片字节。
-- 图片数据在任何级别都不会进入日志（由测试保证）。
-- 插件不新增 `exec`/`spawn` 调用。对 DSH 的署名可通过 `userAgentAttribution` 开启，
-  因协议原因默认关闭（§3.1）。
-
-## 11. 术语
-
-| 术语 | 含义 |
-|---|---|
-| **免费档** | 向官方客户端提供的无 key 模型集合。 |
-| **门禁** | 上游判断是否服务非官方客户端请求的检查。本项目把它当作带日期的观测。 |
-| **身份头** | 官方客户端恒发、用户无法更改的请求头（§3）。 |
-| **占位声明** | 仅在调用方没有任何工具时发送，用于满足网关“至少一个工具”的要求。 |
-| **净化名** | 声明到线上的工具名，已去掉分隔符；返回调用时映射回调用方的真实工具名。 |
-| **服务端等待** | 当前运行中可重试错误的 `Retry-After` 提示，上限 15 分钟；免费额度拒绝仅记录原始值，不据此锁定模型。 |
-| **出口** | 一条通往上游的配置路线（`direct` 或代理）。 |
-| **Bun 形态传输** | 复刻官方客户端 `ClientHello` 的 wreq-js 握手。 |
-
-## 12. 参考的社区项目
-
-协议行为全部来自对官方客户端的实测，不依赖任何社区项目的结论。下列项目只用于设计阶段的对照，
-判断某个做法是否值得沿用。**没有复制它们的代码。**
+协议行为全部来自对官方客户端的实测，不依赖任何社区项目的结论。下列项目只用于设计阶段对照，
+**没有复制它们的代码。**
 
 | 项目 | 关系 | 许可 |
 |---|---|---|
-| [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh) | 同类适配器，对照工具补缺与配置方式 | MIT |
+| [FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh) | 同类适配器，对照工具补缺与配置 | MIT |
 | [x5427876/dsh-opencode-free](https://github.com/x5427876/dsh-opencode-free) | 同类适配器，对照别名与调用阻断 | MIT |
-| [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free) | 同类适配器，对照占位工具的抑制方式 | MIT |
-| [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter) | 同类适配器，较早的工具补缺实现 | MIT |
+| [DragonHorizon-xtihc/dsh-connect-opencode-free](https://github.com/DragonHorizon-xtihc/dsh-connect-opencode-free) | 同类适配器，对照占位抑制 | MIT |
+| [1624318455/dsh-plugin-adapter](https://github.com/1624318455/dsh-plugin-adapter) | 同类适配器，较早工具补缺 | MIT |
 | [randomix777/dsh-opencode-zen](https://github.com/randomix777/dsh-opencode-zen) | 同类适配器，对照目录刷新与缓存 | MIT |
 | [seonzzy/dsh-zen-adapter](https://github.com/seonzzy/dsh-zen-adapter) | 同类适配器，对照目录发现 | MIT |
-| [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) | 只读其 issue 中关于免费额度随出口 IP 累积衰减的记录 | GPL-3.0 |
+| [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) | 只读其 issue 中免费额度随出口 IP 衰减的记录 | GPL-3.0 |
 
-opencode2api 是 GPL-3.0。本项目只读过它的 issue 讨论，没有使用其代码，因此不受该许可约束。
-以后若引用其代码，必须重新评估许可兼容性。
-
-本节与 README 的同名章节是同一份清单，两处必须同时更新。
+opencode2api 是 GPL-3.0；只读过 issue，没有使用其代码，不受该许可约束；以后若引用代码须重新评估兼容性。
+本节与 README 同名章节是同一份清单，两处必须同时更新。

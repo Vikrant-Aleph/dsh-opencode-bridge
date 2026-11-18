@@ -3,7 +3,7 @@
 中文 | [English](CAMOUFLAGE.us.md) · [技术设计](TECHNICAL.md)
 
 记录**桥接模仿什么、为什么**，是代码的依据：不在此列出的模仿都应删除。
-实测细节、对照与证据见[技术设计 §3](TECHNICAL.md)；本文只列结论与取舍，不重复其数据。
+实测细节、对照与证据见[技术设计 §2](TECHNICAL.md)；本文只列结论与取舍，不重复其数据。
 
 ---
 
@@ -27,13 +27,13 @@
 
 | 要求 | 桥接如何满足 | 细节 |
 |---|---|---|
-| `User-Agent` | 逐字发送抓包值 `opencode/latest/2.2.0/cli` | §3.1 |
-| 会话与请求身份 | 会话 id 四头同发；`x-opencode-project` 按真实目录推导 | §3.2 |
-| 工具声明 | 至少一个工具（调用方没有时才补占位）；名称无分隔符并保留回映射；免费模型走 Code Mode | §3.3、§5.3 |
-| 系统提示含 `<env>` 块 | 环境指令追加在 DSH 提示之后 | §3.4 |
+| `User-Agent` | 逐字发送抓包值 `opencode/latest/2.2.0/cli` | §2.1 |
+| 会话与请求身份 | 会话 id 四头同发；`x-opencode-project` 按真实目录推导 | §2.1 |
+| 工具声明 | 至少一个工具（调用方没有时才补占位）；名称无分隔符并保留回映射；免费模型走 Code Mode | §2.2、§5 |
+| 系统提示含 `<env>` 块 | 环境指令追加在 DSH 提示之后 | §2.2 |
 
 这些形态由官方客户端恒发，用户改不掉。工具声明的三条门禁——至少一个工具、名称形状、不能一次声明
-大量富工具——集中在 §3.3。
+大量富工具——集中在 §2.2。
 
 ---
 
@@ -43,14 +43,14 @@
 
 | 面 | 说明 | 细节 |
 |---|---|---|
-| 传输层 TLS / 头序 / 连接复用 | `ClientHello` 逐字节对齐、http/1.1、keep-alive；未被证明必需 | §3.5 |
-| 日期行 / `<env>` 引导句 / 第 5 行 | 官方内置指令，桥接已复刻 | §3.7 |
-| env 取值推导 | worktree 根、向上 git 查找 | §3.7 |
-| 多轮 `<system-update>` | 基线冻结，变化走 user 消息 | §3.7 |
-| 恒发 `max_completion_tokens` | 目录默认 32000 | §3.7 |
-| 目录 reasoning 字段回放 | big-pickle 等每条 assistant 回放空串 | §3.7 |
-| body 键序 | tools 在 stream 前 | §3.7 |
-| `b3`/`traceparent` | 官方仅 OTEL 开启时发、默认不发；桥接可关 `tracing` | §3.7 |
+| 传输层 TLS / 头序 / 连接复用 | `ClientHello` 逐字节对齐、http/1.1、keep-alive；未被证明必需 | §2.3 |
+| 日期行 / `<env>` 引导句 / 第 5 行 | 官方内置指令，桥接已复刻 | §2.2 |
+| env 取值推导 | worktree 根、向上 git 查找 | §2.2 |
+| 多轮 `<system-update>` | 基线冻结，变化走 user 消息 | §2.2 |
+| 恒发 `max_completion_tokens` | 目录默认 32000 | §2.2 |
+| 目录 reasoning 字段回放 | big-pickle 等每条 assistant 回放空串 | §2.2 |
+| body 键序 | tools 在 stream 前 | §2.2 |
+| `b3`/`traceparent` | 官方仅 OTEL 开启时发、默认不发；桥接可关 `tracing` | §2.2 |
 
 ---
 

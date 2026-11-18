@@ -177,7 +177,7 @@ plain `fetch` cannot connect at all, so the transport has value beyond fingerpri
 
 Beyond the transport, the official client always sends a set of details in the body and
 system prompt. The gateway does not currently compare them; the plugin copies them only so a
-future item-by-item gate cannot distinguish it. Item by item (source locations in TECHNICAL §3.7):
+future item-by-item gate cannot distinguish it. Item by item (source locations in TECHNICAL §2.2):
 
 | Element | Official behavior | Note |
 |---|---|---|

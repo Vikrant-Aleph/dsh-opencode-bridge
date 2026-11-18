@@ -9,6 +9,12 @@ the matching section of this file.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-18
+
+### Fixed
+
+- **Loosened the DSH version floor for the optional PTC components.** 1.1.0 pinned the five optional peers `dsh-tools`, `dsh-scope`, `dsh-system-prompt`, `dsh-ptc-runtime`, `dsh-tool-executor-ptc` to `>=0.2.2-rc.3`, so the install gate rejected older DSH such as 0.2.2-rc.1. These components only serve the guarded Code Mode (enabled only when the host provides `ptcRuntime`, otherwise it falls back to plain declaration) and must not raise the whole-plugin floor. They are now `>=0.2.1-rc.2`, matching the other optional peers.
+
 ## [1.1.0] - 2026-11-18
 
 ### Added

@@ -11,12 +11,17 @@ without repeating that data.
 
 ## The rule
 
-> **Imitate only what the gateway actually checks.**
+> **Keep official-consistent details that user settings cannot change.**
 
-The original wording was "imitate only what the official client cannot let a user
-change". Measurement on 2026-11-13 corrected it: a configurable field is ruled out as a
-*fingerprint*; the gateway can still require its *default shape* as a
-protocol precondition. The test is therefore "is it checked", not "is it configurable".
+The plugin emulates the official client by reproducing its always-sent details. The retention
+boundary is "user configuration cannot change it": official, user-invariant shapes and details
+may be kept; content left to the user by design (the system-prompt body, tool-list content, etc.)
+is not imitated.
+
+Within that boundary, attitude splits by whether the gateway currently checks it: checked
+details must match; unchecked ones may still be kept as insurance against a future item-by-item
+gate. Both are "official details the user cannot change", so keeping the latter is not an
+exception but the same principle extended.
 
 ---
 
@@ -66,11 +71,10 @@ are replicated only so a future gate comparing them item by item cannot distingu
 
 ---
 
-## Deliberately not done
+## Explicitly not done
 
-- No rotating of IPs, sessions or identities to evade service limits.
-- No executing tools inside another runtime: returned calls are dispatched by DSH.
-- No imitation of what the gateway does not check.
+- No swapping IPs, sessions or identities to bypass service limits.
+- Tools are dispatched by DSH and permissions are managed by DSH. The bridge adds no separate tool-execution or authorization flow.
 
 ---
 

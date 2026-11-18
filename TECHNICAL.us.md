@@ -55,7 +55,7 @@ HTTP entry points. Tool execution, permissions and schema validation stay in DSH
 
 Two rules govern the design:
 
-1. **Imitate only what the gateway actually checks.** See [CAMOUFLAGE.us.md](CAMOUFLAGE.us.md).
+1. **Keep official-consistent details that user settings cannot change.** Checked ones must match; unchecked ones are kept as prevention. See [CAMOUFLAGE.us.md](CAMOUFLAGE.us.md).
 2. **Dated evidence over assumption.** A constant stays only while a capture supports it;
    §8 explains how to re-derive each one.
 

@@ -105,17 +105,21 @@ Unchecked things come in two kinds, and the plugin treats them differently.
 
 **One kind is always-sent official detail the gateway does not currently compare.** The
 plugin still replicates it as insurance: if a future gate starts comparing item by item,
-this traffic remains indistinguishable from the official client. That includes the TLS/HTTP
-fingerprints (below), the system-prompt date line and the `<env>` intro/5th line,
-worktree/git derivations, multi-turn `<system-update>`, always-on `max_completion_tokens`,
-catalog reasoning-field replay, and body key order (TECHNICAL §3.7). None was a gate
-condition in the 2026-11-17 probes; removing them still passes.
+this traffic remains indistinguishable from the official client. At the transport layer
+that is the TLS/HTTP fingerprints (next chapter); at the body and system-prompt layer it is a
+set of fidelity details (see "Preventive body & system-prompt fidelity" below). None was a
+gate condition in the 2026-11-17 probes; removing them still passes.
 
 **The other kind is content left to the user by design.** The gateway ignores it, so the
-plugin does not imitate it: the system-prompt body, the tool-list content, the values inside
-`<env>`, and the specific tools in a Code Mode catalogue. Rewriting the prompt, pruning to a
-single tool, or writing anything into `<env>` all still pass — what is checked is the
-*shape* ("is there an `<env>` block", "is a tool declared"), not the content.
+plugin does not imitate it: the system-prompt body, the tool-list content, and the specific
+tools in a Code Mode catalogue.
+
+The two do not conflict — take `<env>`: the gateway only checks that an `<env>` block exists.
+The official default wording around it (the date line, the intro sentence, the 5th line) we
+copy as insurance (first kind); but the actual values written inside (paths, git flag,
+platform) are not validated — anything passes (second kind). "Copy the official wording" and
+"the values don't matter" are two sides of the same fact: only the block's presence is
+checked; neither the wording nor the content is.
 
 ### Scope and evidence
 
@@ -164,6 +168,27 @@ which is derived from the working directory.
 `wreq-js` is an **optional** dependency. Without its native binding the plugin falls back
 to plain `fetch`, losing the TLS alignment but still working — and in some proxy setups
 plain `fetch` cannot connect at all, so the transport has value beyond fingerprinting.
+
+## Preventive body & system-prompt fidelity (not currently checked)
+
+**Status: aligned to the official source, but as of 2026-11-17 none is a gate condition.**
+
+Beyond the transport, the official client always sends a set of details in the body and
+system prompt. The gateway does not currently compare them; the plugin copies them only so a
+future item-by-item gate cannot distinguish it. Item by item (source locations in TECHNICAL §3.7):
+
+| Element | Official behavior | Note |
+|---|---|---|
+| Date line | System prompt always carries `Today's date: <date>` | Frozen at session start, not recomputed per request |
+| `<env>` intro & 5th line | An intro sentence before the block; a tmp-preference line inside | Official default wording, copied as insurance |
+| env field derivations | `Workspace root folder` = worktree root; git flag via upward discovery | Reports the repo root even from a subdirectory |
+| Multi-turn changes | Date/env changes go in `<system-update>` user messages | The system baseline is not re-appended |
+| Output limit | Primary requests always send `max_completion_tokens` | Catalog default 32000 |
+| Reasoning replay | A catalog reasoning field replays an empty string on every assistant message | e.g. big-pickle |
+| Body key order | `model, messages, tools, stream, stream_options, …` | `tools` before `stream` |
+
+This does not conflict with "the `<env>` values don't matter" above: only the block's
+presence is checked; neither the official wording nor the concrete values are.
 
 ## Optional context trimming
 

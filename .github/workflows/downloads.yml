@@ -1,67 +1,41 @@
 name: Update npm download charts
 
+# Temporary, user-approved scheduling test on the actual workflow, not a new probe.
+# Restore the original daily workflow after the one-hour observation window.
 on:
   schedule:
-    # UTC 02:27 = Asia/Shanghai 10:27. npm publishes daily statistics after UTC midnight.
-    - cron: '27 2 * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 
-permissions:
-  contents: read
+# No checkout, API calls, secrets, generation or repository writes during this test.
+permissions: {}
 
-# All workflows publishing to this branch must use the same concurrency group.
 concurrency:
   group: generated-data
   cancel-in-progress: false
 
 jobs:
-  update:
+  schedule-diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
+    timeout-minutes: 2
+    env:
+      PROBE_ID: downloads-schedule-20261118T0517Z
+      PROBE_EVENT: ${{ github.event_name }}
+      PROBE_SCHEDULE: ${{ github.event.schedule }}
+      PROBE_ACTOR: ${{ github.actor }}
+      PROBE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      PROBE_REF: ${{ github.ref }}
+      PROBE_SHA: ${{ github.sha }}
+      PROBE_WORKFLOW_REF: ${{ github.workflow_ref }}
+      PROBE_RUN_ID: ${{ github.run_id }}
+      PROBE_RUN_ATTEMPT: ${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main
-          # Keep the job-scoped token only for the generated-artifact commit below.
-          persist-credentials: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-      - name: Fetch complete history and generate both charts
-        run: node scripts/update-downloads.mjs
-      - name: Publish changed statistics to generated-data
+      - name: Record actual trigger without updating download data
         shell: bash
         run: |
-          set -euo pipefail
-          publish_dir="$(mktemp -d "$RUNNER_TEMP/generated-data.XXXXXX")"
-          remote_ref=refs/heads/generated-data
-          if git ls-remote --exit-code --heads origin "$remote_ref" > /dev/null; then
-            git fetch --no-tags origin "$remote_ref"
-            git worktree add --detach "$publish_dir" FETCH_HEAD
-          else
-            status=$?
-            # Exit code 2 means the branch is absent; network/auth errors must fail.
-            if [ "$status" -ne 2 ]; then
-              exit "$status"
-            fi
-            git worktree add --detach "$publish_dir" HEAD
-            # Start with an empty tree and no source history, without switching main.
-            git -C "$publish_dir" switch --orphan generated-data
-          fi
-          # Update only this task's files, preserving data published by other tasks.
-          mkdir -p "$publish_dir/npm-downloads"
-          cp assets/npm-downloads.json "$publish_dir/npm-downloads/history.json"
-          cp assets/npm-downloads.svg "$publish_dir/npm-downloads/downloads.svg"
-          cp assets/npm-downloads.us.svg "$publish_dir/npm-downloads/downloads.us.svg"
-          git -C "$publish_dir" add -- npm-downloads/history.json npm-downloads/downloads.svg npm-downloads/downloads.us.svg
-          if git -C "$publish_dir" diff --cached --quiet; then
-            echo 'Statistics unchanged.'
-            exit 0
-          fi
-          git -C "$publish_dir" -c user.name='github-actions[bot]' \
-            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            -c commit.gpgsign=false commit -m 'data: update npm download charts'
-          # Never force-push: an unexpected competing writer must not lose its data.
-          git -C "$publish_dir" push origin "HEAD:$remote_ref"
+          printf 'diagnostic_id=%s\n' "$PROBE_ID"
+          printf 'utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          printf 'event=%s\nschedule=%s\nactor=%s\ntriggering_actor=%s\n' \
+            "$PROBE_EVENT" "$PROBE_SCHEDULE" "$PROBE_ACTOR" "$PROBE_TRIGGERING_ACTOR"
+          printf 'ref=%s\nsha=%s\nworkflow_ref=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$PROBE_REF" "$PROBE_SHA" "$PROBE_WORKFLOW_REF" "$PROBE_RUN_ID" "$PROBE_RUN_ATTEMPT"

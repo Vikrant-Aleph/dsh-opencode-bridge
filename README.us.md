@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/v/dsh-opencode-bridge?logo=npm" alt="npm version"></a>
+  <a href="https://dshfind.com/en/plugins/Vikrant-Aleph/dsh-opencode-bridge?ref=badge"><img src="https://dshfind.com/api/badge/Vikrant-Aleph/dsh-opencode-bridge?lang=en" alt="dshfind"></a>
   <a href="https://www.npmjs.com/package/dsh-opencode-bridge"><img src="https://img.shields.io/npm/dt/dsh-opencode-bridge?logo=npm&label=Downloads" alt="Total npm downloads"></a>
   <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/stargazers"><img src="https://img.shields.io/github/stars/Vikrant-Aleph/dsh-opencode-bridge?logo=github" alt="GitHub stars"></a>
   <a href="https://github.com/Vikrant-Aleph/dsh-opencode-bridge/commits/main"><img src="https://img.shields.io/github/last-commit/Vikrant-Aleph/dsh-opencode-bridge" alt="Last commit"></a>

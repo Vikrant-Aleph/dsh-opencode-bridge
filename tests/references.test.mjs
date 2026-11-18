@@ -3,15 +3,16 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 /**
- * The consulted-projects list lives in two places: the README section and the §13 table
- * of the technical document. Both languages. Four copies of one list drift apart unless
- * something checks them, and a missing credit is the kind of error nobody notices.
+ * The consulted-projects list lives in two places: the README section and the technical
+ * document's community-projects table. Both languages. Four copies of one list drift apart
+ * unless something checks them, and a missing credit is the kind of error nobody notices.
+ * The technical section number is matched loosely so renumbering does not break the test.
  */
 const SOURCES = {
   'README.md': /## 参考与致谢([\s\S]*?)\n## /,
   'README.us.md': /## References and credits([\s\S]*?)\n## /,
-  'TECHNICAL.md': /## 13\. 参考的社区项目([\s\S]*?)$/,
-  'TECHNICAL.us.md': /## 13\. Community projects consulted([\s\S]*?)$/,
+  'TECHNICAL.md': /## \d+\. 参考的社区项目([\s\S]*?)$/,
+  'TECHNICAL.us.md': /## \d+\. Community projects consulted([\s\S]*?)$/,
 }
 
 /** GitHub repositories mentioned in a fragment, lowercased and sorted. */

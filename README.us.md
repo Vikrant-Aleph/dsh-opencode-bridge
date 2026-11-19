@@ -21,7 +21,8 @@ Also included:
 - **Automatic model refresh** — reads the OpenCode model catalog, the same source the official client uses, every five minutes, adding and removing models as it changes and keeping the last good list when a refresh fails.
 - **Optional context trimming** — clears reasoning only from confirmed completed turns, off by default.
 - **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, trying the next available entry when a connection fails.
-- **Code Mode tool calling** — free models call tools through a program passed to `execute`, reusing DSH's native PTC components; the behavior is closer to DSH's PTC mode and only affects the free-model routes.
+- **Code Mode tool calling** — on free-model routes, `subagent` stays directly callable when the current step admits it. Other SDK tools go through `execute` using DSH's native PTC, so the behavior is closer to DSH's PTC mode.
+- **Subagent sessions** — each child keeps its own wire session ID, while siblings share their parent's affinity ID. This groups requests without changing the free quota.
 
 > [!IMPORTANT]
 > **OpenCode applies usage limits to free models by public IP.** Heavy use from the same IP can cause later requests to be refused, including requests from other users sharing that IP.
@@ -34,7 +35,7 @@ Also included:
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.2.0
+   dsh-opencode-bridge@1.2.1
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -43,13 +44,13 @@ Also included:
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.2.0
+dsh plugin --profile desktop add dsh-opencode-bridge@1.2.1
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.0
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.1
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears, restart that DSH profile.
@@ -191,7 +192,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.0.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.1.tgz
 ```
 
 </details>

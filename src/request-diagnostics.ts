@@ -64,6 +64,11 @@ export function summarizeWireRequest(input: WireDiagnosticInput): WireDiagnostic
     const aliases = ['x-opencode-session', 'x-opencode-session-id', 'x-session-affinity', 'x-session-id'].map(key => headers.get(key))
     request.sessionValid = typeof aliases[0] === 'string' && /^ses_[a-f0-9]{12}[A-Za-z0-9]{14}$/.test(aliases[0])
     request.sessionAliasesEqual = Boolean(aliases[0]) && aliases.every(value => value === aliases[0])
+    const parent = headers.get('x-opencode-parent-session-id')
+    const parentAlias = headers.get('x-parent-session-id')
+    request.hasParentSession = parent !== undefined || parentAlias !== undefined
+    request.parentAffinityMatches = Boolean(parent) && parent === parentAlias
+      && aliases[0] === parent && aliases[2] === parent && aliases[3] === parent && aliases[1] !== parent
     request.traceHeaders = /^[a-f0-9]{32}-[a-f0-9]{16}-1-[a-f0-9]{16}$/.test(headers.get('b3') ?? '') && /^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/.test(headers.get('traceparent') ?? '')
     if (Number(request.bodyBytes) > MAX_BODY_BYTES) { request.bodyCapped = true; tools.capped = true; return { request, tools } }
     const body = record(JSON.parse(input.serializedBody))

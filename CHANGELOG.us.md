@@ -6,8 +6,12 @@ Releases are published from `v*` tags, and the notes on the release page are tak
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-20
+
 ### Changed
 
+- Each subagent keeps its own wire session ID. Siblings share their parent's request affinity, based on lineage recorded by DSH. Local DSH session IDs are not sent upstream.
+- In Code Mode, the model calls `subagent` directly when the step admits it. DSH still owns execution, permissions, and result delivery. Verified offline; upstream quotas and retry policies are unchanged.
 - Added a prominent note at the end of the README's Features section about OpenCode's per-IP limits for free models.
 
 ## [1.2.0] - 2026-11-19

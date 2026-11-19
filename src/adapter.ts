@@ -30,7 +30,7 @@ import { noopLogger, type LoggerLike } from './logger.js'
 import { fetchWithPool, EgressCoolingError, retryAfterMs, type ProxyPool } from './proxy-pool.js'
 import { httpError, UpstreamHttpError, MAX_PROVIDER_RETRY_AFTER_MS } from './http-errors.js'
 import { summarizeWireRequest, type WireDiagnosticInput } from './request-diagnostics.js'
-import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, type CodeModeHandle } from './code-mode.js'
+import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, DIRECT_SUBAGENT_TOOL_NAME, type CodeModeHandle } from './code-mode.js'
 import {
   buildChatMessages,
   buildHeaders,
@@ -90,6 +90,9 @@ export interface AdapterOptions {
   lifetimeSignal?: AbortSignal
   /** Canonical completed-turn evidence captured once when a request starts; absent means full. */
   getCompletedReasoning?: (options: GenerateOptions) => readonly ReasoningRecord[] | undefined
+  /** Resolve trusted DSH lineage. Local session identifiers never go on the wire. */
+  getSessionLineage?: (sessionId: NonNullable<GenerateOptions['sessionId']>) =>
+    { parent?: string; forkSource?: string } | undefined
   /** @deprecated Compatibility hook only; requests no longer read or write model cooldowns. */
   requestWaitState?: {
     /** `activeEgresses` lets a wait recorded on a removed egress stop applying. */
@@ -260,20 +263,23 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       // Like the official client, a new user request starts without a model lockout.
       // Retry-After applies only to eligible retries inside the current host run.
       const meta = snapshot === undefined ? (await this.catalog.list(options.signal)).find(model => model.id === options.model) : snapshot ?? undefined
-      const sessionId = this.sessionIdFor(options)
+      const sessionId = this.sessionIdFor(options.sessionId)
+      const lineage = options.sessionId ? this.options.getSessionLineage?.(options.sessionId) : undefined
+      const ownKey = String(options.sessionId ?? '')
+      const parentSessionId = lineage?.parent && lineage.parent !== ownKey ? this.sessionIdFor(lineage.parent) : undefined
+      const forkSessionId = !parentSessionId && lineage?.forkSource && lineage.forkSource !== ownKey
+        ? this.sessionIdFor(lineage.forkSource) : undefined
       requestId = mintRequestId()
-      const plan = planTools(options.purpose ? [] : options.tools ?? [], {
-        // OpenCode sends `strict: false` on OpenAI Chat tools for providers that accept it.
+      const admittedTools = options.purpose ? [] : options.tools ?? []
+      const codeMode = this.options.codeMode?.()
+      const codeModeActive = codeMode !== undefined && admittedTools.some(tool => tool.name === CODE_MODE_TOOL_NAME)
+      // Reserve the native names before projecting the SDK inventory. An SDK tool
+      // such as `sub_agent` must not take the real `subagent` wire name.
+      const belongsOnWire = (name: string) => name === CODE_MODE_TOOL_NAME || name === DIRECT_SUBAGENT_TOOL_NAME
+      const plan = planTools(codeModeActive ? admittedTools.filter(tool => belongsOnWire(tool.name)) : admittedTools, {
         strict: this.options.toolStrict ?? true,
       })
-      // Code Mode: the free lane refuses a request that declares many rich tools. When the
-      // step admits the `execute` transport, declare only simple anchor tools plus the
-      // transport on the wire and move the real tool catalog into the system prompt.
-      const codeMode = this.options.codeMode?.()
-      const codeModeActive = codeMode !== undefined && !options.purpose
-        && (options.tools ?? []).some(tool => tool.name === CODE_MODE_TOOL_NAME)
       let wireTools = plan.tools
-      let codeModeAnchorNames = new Set<string>()
       // The official client freezes the date+env baseline at session start and re-sends
       // it unchanged; later changes arrive as <system-update> user messages, not a
       // re-appended env block. Preventive fidelity (not a current gate requirement).
@@ -295,7 +301,6 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         environment = baseline.instructions
       }
       if (codeModeActive) {
-        const transport = plan.tools.find(tool => tool.function.name === CODE_MODE_TOOL_NAME)
         const anchors = CODE_MODE_ANCHOR_NAMES.map(name => ({
           type: 'function' as const,
           function: {
@@ -305,9 +310,8 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
             strict: false,
           },
         }))
-        wireTools = transport ? [...anchors, transport] : anchors
-        codeModeAnchorNames = new Set<string>(CODE_MODE_ANCHOR_NAMES)
-        environment += '\n\n' + codeMode.instruction + '\n\n' + codeMode.renderCatalog(options.tools ?? [])
+        wireTools = [...anchors, ...plan.tools]
+        environment += '\n\n' + codeMode.instruction + '\n\n' + codeMode.renderCatalog(admittedTools.filter(tool => !belongsOnWire(tool.name)))
       }
       const signals = [AbortSignal.timeout(this.options.requestTimeoutMs), options.signal, this.options.lifetimeSignal].filter((value): value is AbortSignal => value !== undefined)
       const signal = AbortSignal.any(signals)
@@ -359,7 +363,7 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         session: sessionId,
         request: requestId,
         messages: messages.length,
-        tools: plan.tools.length,
+        tools: wireTools.length,
         purpose: options.purpose ?? 'chat',
       })
 
@@ -373,6 +377,8 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
         requestIdHeader: this.options.requestIdHeader,
         attribution: this.options.userAgentAttribution,
         tracing: this.options.tracing ?? true,
+        ...(parentSessionId === undefined ? {} : { parentSessionId }),
+        ...(forkSessionId === undefined ? {} : { forkSessionId }),
       })
       const serializedBody = serializeBody(body, this.options.dumpRequestsTo, requestId)
       diagnosticInput = { endpoint, headers, serializedBody, configuredTransport: Boolean(this.options.bunFetch) }
@@ -492,20 +498,19 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       // rather than failing the turn, so a stray call costs one tool call instead
       // of the whole response.
       // A declared name is a sanitized alias; dispatch needs the caller's own name.
-      const normalized = wireCalls.map((call) => {
-        const translated = normalizeToolCall(call)
-        const callerName = plan.wireToCaller.get(translated.name)
-        return callerName && callerName !== translated.name ? { ...translated, name: callerName } : translated
-      })
-      const dispatchable = normalized.filter((call) => {
-        if (plan.readAnchor && call.name === READ_ANCHOR.function.name) return false
-        if (codeModeAnchorNames.has(call.name)) return false
-        return true
-      })
-      if (dispatchable.length !== normalized.length) {
-        this.logger.warn('adapter', 'dropped a call to a protocol placeholder tool', {
+      const dispatchable = wireCalls
+        .filter(call => codeModeActive
+          ? plan.wireToCaller.has(call.name)
+          : !(plan.readAnchor && call.name === READ_ANCHOR.function.name))
+        .map(call => {
+          const translated = normalizeToolCall(call)
+          const callerName = plan.wireToCaller.get(translated.name)
+          return callerName && callerName !== translated.name ? { ...translated, name: callerName } : translated
+        })
+      if (dispatchable.length !== wireCalls.length) {
+        this.logger.warn('adapter', 'dropped non-callable wire tools', {
           model: safeModelId(options.model),
-          dropped: normalized.length - dispatchable.length,
+          dropped: wireCalls.length - dispatchable.length,
         })
       }
       for (const call of dispatchable) {
@@ -584,10 +589,14 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
     }
   }
 
-  private sessionIdFor(options: GenerateOptions): string {
-    const key = options.sessionId ? String(options.sessionId) : ''
+  private sessionIdFor(key?: string): string {
     const cached = key ? this.sessions.get(key) : undefined
-    if (cached) return cached
+    if (key && cached) {
+      // Keep a parent id hot while any of its children uses it for affinity.
+      this.sessions.delete(key)
+      this.sessions.set(key, cached)
+      return cached
+    }
     const minted = mintSessionId()
     if (key) {
       if (this.sessions.size >= 64) this.sessions.delete(this.sessions.keys().next().value!)

@@ -147,11 +147,15 @@ export interface HeaderOptions {
   attribution?: boolean
   /** Attach the official `b3`/`traceparent` tracing pair (minted per request). */
   tracing?: boolean
+  /** Encoded id of the direct parent, or of a known source for a non-subagent fork. */
+  parentSessionId?: string
+  forkSessionId?: string
 }
 
 export function buildHeaders(
   recipe: HeaderRecipe, sessionId: string, requestId: string, options: HeaderOptions = {},
 ): Record<string, string> {
+  const affinity = options.parentSessionId ?? options.forkSessionId ?? sessionId
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     authorization: `Bearer ${recipe.apiKey}`,
@@ -162,10 +166,14 @@ export function buildHeaders(
     'accept-encoding': OFFICIAL_ACCEPT_ENCODING,
     'x-opencode-client': recipe.client,
     'x-opencode-project': recipe.project,
-    'x-opencode-session': sessionId,
+    'x-opencode-session': affinity,
     'x-opencode-session-id': sessionId,
-    'x-session-affinity': sessionId,
-    'x-session-id': sessionId,
+    'x-session-affinity': affinity,
+    'x-session-id': affinity,
+    ...(options.parentSessionId === undefined ? {} : {
+      'x-opencode-parent-session-id': options.parentSessionId,
+      'x-parent-session-id': options.parentSessionId,
+    }),
   }
   if (options.tracing) Object.assign(headers, mintTraceIds())
   if (options.requestIdHeader) headers['x-opencode-request'] = requestId

@@ -23,7 +23,7 @@ Within that boundary, attitude splits by whether the gateway currently checks it
 | Requirement | How the bridge satisfies it | Detail |
 |---|---|---|
 | `User-Agent` | Sends the captured `opencode/latest/2.2.0/cli` byte-identically | §2.1 |
-| Session and request identity | One session id in four headers; `x-opencode-project` derived from the real directory | §2.1 |
+| Session and request identity | Root sessions use one ID in four headers; see §2.1 for child-session lineage | §2.1 |
 | Tool declarations | At least one tool (a placeholder only when the caller has none); separator-free names with a map back; free models use Code Mode | §2.2, §5 |
 | An `<env>` block in the system prompt | Environment instructions appended after the DSH prompt | §2.2 |
 

@@ -20,7 +20,7 @@ DSH agent loop
    ▼
 OpenCodeFreeAdapter              src/adapter.ts
    ├── planTools                 declare caller tools (placeholder only if none)
-   ├── code-mode (free routes)   wire keeps anchors + execute; real catalog in system prompt
+   ├── code-mode (free routes)   anchors + execute + admitted subagent; other tools in the SDK
    ├── buildChatMessages         DSH messages → OpenAI chat, append environment instructions
    ├── buildHeaders              identity headers + optional tracing
    ├── prepareImageProjection    official attachment API
@@ -34,7 +34,7 @@ https://opencode.ai/inference/...
 There are two declaration paths. What the model sees is in §2.2; who executes a call is in §5:
 
 - **Direct declaration**: sanitized caller tools go on the wire. Used for non-free routes, or as the fallback when the host has no PTC runtime.
-- **Code Mode**: on free routes where the step admits `execute`, the wire declares only a few anchor tools plus `execute`; the full catalog goes into the system prompt; `execute`'s body delegates to DSH's native PTC (§5). Without a host PTC runtime it falls back to direct declaration.
+- **Code Mode**: when a free-model step admits `execute`, the wire declares the anchors, `execute`, and `subagent` if the step admits it. The remaining tools go in the SDK in the system prompt. If PTC or `execute` is unavailable, the adapter falls back to direct declaration.
 
 Other modules:
 
@@ -66,13 +66,17 @@ The bridge generates:
 | Header | Value | Class |
 |---|---|---|
 | `user-agent` | `opencode/latest/2.2.0/cli`, byte-identical | [checked] |
-| `x-opencode-session` / `-session-id` / `x-session-affinity` / `x-session-id` | one session id | [checked] |
+| `x-opencode-session-id` | The current session's wire ID | [checked] session header shape |
+| `x-opencode-session` / `x-session-affinity` / `x-session-id` | Direct parent's wire ID for subagents; known source's wire ID for ordinary forks; otherwise the session's own ID | Root-session shape tested; child behavior observed locally |
+| `x-opencode-parent-session-id` / `x-parent-session-id` | The same direct-parent ID in both headers, sent only for subagents with a parent recorded in DSH | Verified locally; upstream checks are unconfirmed |
 | `x-opencode-client` | `cli` | [checked] shape |
 | `authorization` | `Bearer public` (signed-out sentinel) | [checked] shape |
 | `x-opencode-project` | derived from the real directory (below) | [preventive] value not checked |
 | `b3` / `traceparent` | minted per request; `tracing:false` disables | [preventive] official default omits |
 | `content-type` / `accept` / `accept-encoding` | `application/json` / `*/*` / `gzip, deflate, br, zstd` | [preventive] |
 | `x-opencode-request` | not sent (2.x); `requestIdHeader:true` for 1.x relays | — |
+
+The bridge reads the direct parent and subagent marker from DSH's session header, then maps parent and child to separate wire IDs. It never sends local DSH session IDs or adds parent headers without a recorded parent. A loopback test with OpenCode v2.3.0 confirmed this grouping. The official free model rejected the single-request baseline with a 429, so the test did not establish whether these headers affect upstream limits.
 
 `host`, `content-length`, `connection` are written by the transport (§2.3).
 
@@ -105,7 +109,7 @@ The outgoing body consists of (key order matches the official):
 2. **Name shape.** Unrecognized names with underscores/dashes/dots/capitals are refused; recognized names may carry separators; at least one recognized name. `planTools` reduces to `[a-z0-9]` (counter on collision) and keeps a map back. This caused every refusal before 1.0.4 (error looked like quota exhaustion).
 3. **Not many rich tools at once.** Real descriptions and complex schemas each trigger refusal (`docs/evidence/tool-gate-codemode-2026-11-17.json`).
 
-Requirement 3 is met by **Code Mode** (what the model sees): the wire declares only a few simple anchors (`read`/`write`/`edit`, recognized names, trivial schemas) plus `execute`; anchors exist only for the shape check, the model is told not to call them, stray calls are dropped. The real catalog is rendered into the system prompt with DSH `renderToolsSdk`, carrying each tool's real return schema (`read`→`{lines,totalLines}` etc.) and an "only `execute` is directly callable" instruction. Who executes a call, permissions and results are in §5.
+**Code Mode** keeps the wire list small. The anchors are not callable; `execute` and an admitted `subagent` are. As in OpenCode v2.3.0, `subagent` stays out of the SDK. DSH's SDK renderer lists the remaining admitted tools in the system prompt with their real return types (`read`, for example, returns `{lines,totalLines}`). `subagent` keeps DSH's own argument schema. See §5 for execution and permissions.
 
 ### 2.3 TLS and HTTP transport
 
@@ -156,7 +160,8 @@ Message mapping (DSH → wire):
 After the model issues a call, execution and permissions stay in DSH; the bridge adds no separate flow.
 
 - Returned calls keep id, name and raw argument bytes; lookup and schema validation are DSH's. The batch is buffered until `finish_reason:tool_calls`; a truncated batch returns `TOOL_BRIDGE_INCOMPLETE` and dispatches nothing.
-- A stray call to the placeholder or a Code Mode anchor is dropped (logged `warn`) and the turn ends normally — normal traffic never carries a tool DSH cannot execute.
+- DSH's existing tool handles direct `subagent` calls, including model selection, permissions, and result delivery. `execute` borrows the current step's tool set and excludes `subagent` and `execute` from nested dispatch without changing the outer tool set or registry.
+- The adapter drops placeholder calls. In Code Mode, it also drops calls to anchors and other tools not admitted for direct calls, and logs a warning.
 - **Code Mode execution side**: `execute` is an ordinary registered tool whose body delegates to a `PtcExecutor` running `run_code`, reusing DSH's native PTC sandboxed runtime and guarded nested dispatch; nested tool calls still go through DSH permissions and dispatch. DSH's `run_code` is executor-private and unregistrable, so `execute` carries it. Enabled only on free routes admitting `execute`; without a host PTC it falls back to direct declaration. Behavior is closer to DSH's PTC mode. Verified end to end: simple answer, four-step read/write, six-step task with parallel reads and `edit` (`docs/evidence/codemode-complex-test-2026-11-17.json`). Known boundary: the SDK renders parameters as TypeScript types and cannot express numeric caps like `read`'s `limit<=2000`, so the model may guess large, get refused, then correct (same as native PTC rendering).
 
 ## 6. Error handling and diagnostics

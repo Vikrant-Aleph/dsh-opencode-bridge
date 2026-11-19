@@ -269,6 +269,13 @@ export function apply(ctx: Context, config: Config): void {
     tracing: config.tracing,
     codeMode: () => codeModeHolder.current,
     getAttachments: () => typeof ctx.get === 'function' ? ctx.get('attachments') : undefined,
+    getSessionLineage: id => {
+      const header = typeof ctx.get === 'function' ? ctx.get('sessions')?.get(id)?.header : undefined
+      if (!header?.parentSession) return undefined
+      if (header.origin === 'subagent') return { parent: header.parentSession }
+      // Only historical ordinary forks may retain a source in the header.
+      return header.isSeeded ? { forkSource: header.parentSession } : undefined
+    },
     toolImages: config.toolResultImages,
     getCompletedReasoning: options => preferences.currentTrim() ? completedReasoningForRequest(ctx, options) : undefined,
     imagePolicy: {

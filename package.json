@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "Use OpenCode's free models in DSH (no OpenCode installation required) without an account or API key. Reproduces the official client's request shape plus its TLS and HTTP fingerprints, with automatic model refresh, optional context trimming of completed-turn reasoning and egress-proxy rotation.",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

@@ -10,8 +10,8 @@
  * executor-owned and cannot be registered as an ordinary tool. This module therefore
  * registers a normal tool named `execute` whose body delegates to a `PtcExecutor`
  * instance, reusing DSH's sandboxed program runtime and guarded nested dispatch. The
- * adapter declares only a few simple anchor tools plus `execute` on the wire and puts
- * the real tool SDK in the system prompt, so the request matches the accepted shape.
+ * adapter declares simple anchors and `execute` on the wire. An admitted `subagent`
+ * remains direct; the other callable tools are described in the SDK.
  *
  * Only the free-model provider routes are affected; other agents keep their executor.
  */
@@ -26,6 +26,7 @@ import { noopLogger, type LoggerLike } from './logger.js'
 
 /** Wire/registration name of the code-execution transport. A gateway-recognized name. */
 export const CODE_MODE_TOOL_NAME = 'execute'
+export const DIRECT_SUBAGENT_TOOL_NAME = 'subagent'
 
 /**
  * Simple anchor declarations kept on the wire alongside the transport. The free lane
@@ -51,9 +52,9 @@ export interface CodeModeOptions {
 }
 
 const INSTRUCTION
-  = `\`${CODE_MODE_TOOL_NAME}\` is the only tool you can call directly — a tool call naming any other tool fails. `
-    + 'Reach every tool the SDK declares below from inside the program you pass to '
-    + `\`${CODE_MODE_TOOL_NAME}\`, as \`await tools.name(args)\`. The catalog is complete; do not guess tool names.`
+  = `Call tools from the SDK below as \`await tools.name(args)\` inside \`${CODE_MODE_TOOL_NAME}\`. `
+    + `If \`${DIRECT_SUBAGENT_TOOL_NAME}\` is declared for this step, call it directly, not through the SDK. `
+    + 'Do not call protocol anchors or guess tool names.'
 
 /**
  * Register the Code Mode transport for the given provider routes. Returns undefined when
@@ -107,10 +108,22 @@ export function createCodeMode(ctx: Context, options: CodeModeOptions): CodeMode
       // Delegate to DSH's PTC transport: it runs the program in the sandbox and dispatches
       // nested `tools.*` calls through the guarded pipeline against this agent's tool set.
       const call = { type: 'tool-call' as const, id: exec.callId, name: RUN_CODE_NAME, arguments: JSON.stringify(args) }
+      const admitted = exec.toolSet
       const batch = await ptc.execute({
         calls: [call], signal: exec.signal,
         ...(exec.agent !== undefined ? { agent: exec.agent } : {}),
-        ...(exec.toolSet !== undefined ? { toolSet: exec.toolSet } : {}),
+        ...(admitted === undefined ? {} : {
+          // Borrow the host's live admission view; never dispose the enclosing step's set.
+          toolSet: {
+            dispose() {},
+            view(scope) {
+              const visible = new Map(admitted.view(scope))
+              visible.delete(DIRECT_SUBAGENT_TOOL_NAME)
+              visible.delete(CODE_MODE_TOOL_NAME)
+              return visible
+            },
+          },
+        }),
       })
       for (const context of batch.additionalContexts) exec.deferContext(context)
       const result = batch.results[0]?.result
@@ -128,7 +141,7 @@ export function createCodeMode(ctx: Context, options: CodeModeOptions): CodeMode
 
   const renderCatalog = (tools: readonly ToolSchema[]): string => {
     const sdk: ToolSdkSchema[] = tools
-      .filter(tool => tool.name !== CODE_MODE_TOOL_NAME)
+      .filter(tool => tool.name !== CODE_MODE_TOOL_NAME && tool.name !== DIRECT_SUBAGENT_TOOL_NAME)
       // Use each tool's real output schema so the SDK shows precise return types
       // (e.g. read -> {lines}, glob -> {root, paths}); a generic type makes the model guess.
       .map(tool => ({ ...tool, output: ctx.tools.get(tool.name)?.output.schema ?? ({ type: 'json' } as never) }))

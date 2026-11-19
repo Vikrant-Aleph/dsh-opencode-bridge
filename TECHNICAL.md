@@ -19,7 +19,7 @@ DSH agent loop
    ▼
 OpenCodeFreeAdapter              src/adapter.ts
    ├── planTools                 声明调用方工具（一个都没有时补占位）
-   ├── code-mode（免费路由）      线上只留锚点 + execute，真实目录进系统提示
+   ├── code-mode（免费路由）      锚点 + execute + 已准入的 subagent；其余工具进 SDK
    ├── buildChatMessages         DSH 消息 → OpenAI 对话，追加环境指令
    ├── buildHeaders              身份头 + 可选追踪头
    ├── prepareImageProjection    官方附件接口
@@ -33,7 +33,7 @@ https://opencode.ai/inference/...
 工具声明有两条路径，模型看到什么在 §2.2 讲，调用之后谁执行在 §5 讲：
 
 - **直接声明**：把调用方工具净化后直接放上线路。用于非免费路由，或宿主没有 PTC 运行时的回退。
-- **Code Mode**：免费路由且该步准入 `execute` 时，线上只声明几个锚点工具加 `execute`，完整目录进系统提示；`execute` 的执行体委托 DSH 原生 PTC（§5）。宿主无 PTC 时自动退回直接声明。
+- **Code Mode**：免费路由当前步骤准入 `execute` 时，线上声明锚点、`execute`，以及本步允许的 `subagent`。其余工具列进系统提示的 SDK。宿主没有 PTC 或本步未准入 `execute` 时，仍走直接声明。
 
 其余模块：
 
@@ -65,13 +65,17 @@ https://opencode.ai/inference/...
 | 头 | 值 | 类别 |
 |---|---|---|
 | `user-agent` | `opencode/latest/2.2.0/cli`，逐字发送 | 【检测】 |
-| `x-opencode-session` / `-session-id` / `x-session-affinity` / `x-session-id` | 同一会话 id | 【检测】 |
+| `x-opencode-session-id` | 当前会话的线上 ID | 【检测】会话头形态 |
+| `x-opencode-session` / `x-session-affinity` / `x-session-id` | 子会话用直接父会话的线上 ID；有来源记录的普通分叉用来源会话的线上 ID；其余用自己的 ID | 普通会话形态已实测；父子差异来自本地对照 |
+| `x-opencode-parent-session-id` / `x-parent-session-id` | 仅在 DSH 确认直接父会话的子代理请求中发送，值相同 | 本地已验证，未确认网关是否检查 |
 | `x-opencode-client` | `cli` | 【检测】形态 |
 | `authorization` | `Bearer public`（未登录哨兵） | 【检测】形态 |
 | `x-opencode-project` | 按真实目录推导（见下） | 【预防】值不被校验 |
 | `b3` / `traceparent` | 每次请求生成；`tracing:false` 可关 | 【预防】官方默认不发 |
 | `content-type` / `accept` / `accept-encoding` | `application/json` / `*/*` / `gzip, deflate, br, zstd` | 【预防】 |
 | `x-opencode-request` | 不发送（2.x 不含；1.x 中继设 `requestIdHeader:true`） | — |
+
+桥接从 DSH 的会话头读取直接父会话与子代理标记，用同一份映射为父子各分配线上 ID，不发送 DSH 本地 ID。缺少可信的父子关系时，不补父会话头。本地用 OpenCode v2.3.0 验证了这套父子关系；当时官方免费模型的单请求已返回 429，因此没有验证这些头是否影响线上限额。
 
 `host`、`content-length`、`connection` 由传输层写入（§2.3）。
 
@@ -104,7 +108,7 @@ https://opencode.ai/inference/...
 2. **名称形状。** 未识别名含下划线/连字符/点/大写被拒；网关认识的名可带分隔符；至少一个认识的名。`planTools` 净化为 `[a-z0-9]`（冲突加序号）并保留回映射。这是 1.0.4 前全被拒的原因（报错似配额耗尽）。
 3. **不能一次声明大量富工具。** 真实描述与复杂 schema 各自触发拒绝（`docs/evidence/tool-gate-codemode-2026-11-17.json`）。
 
-第 3 条由 **Code Mode** 满足（模型看到什么）：线上只声明几个简单锚点（`read`/`write`/`edit` 等认识的名、平凡 schema）加 `execute`；锚点只为过形状检查，模型被告知不要直接调，误调被丢弃。真实目录用 DSH `renderToolsSdk` 渲染进系统提示，带每个工具真实返回 schema（`read`→`{lines,totalLines}` 等），附「只能直接调`execute`」指令。调用之后谁执行、权限与返回，见 §5。
+**Code Mode** 让线上工具列表保持精简：简单锚点不可调用；`execute` 和本步准入的 `subagent` 可直接调用。和 OpenCode v2.3.0 一样，子代理工具不放进 SDK。其他已准入的工具用 DSH 的 SDK 渲染器写进系统提示，保留真实返回类型（如 `read` 返回 `{lines,totalLines}`）。`subagent` 用 DSH 提供的参数，桥接不冒充官方工具执行器。执行与权限见 §5。
 
 ### 2.3 TLS 与 HTTP 传输
 
@@ -155,7 +159,8 @@ https://opencode.ai/inference/...
 模型发起调用后，执行与权限都在 DSH，桥接不另设一套流程。
 
 - 返回的调用保留 id、名称与原始参数字节；查找与 schema 校验由 DSH 负责。整批缓冲至`finish_reason:tool_calls`；被截断的批次返回 `TOOL_BRIDGE_INCOMPLETE`，不派发任何调用。
-- 占位工具与 Code Mode 锚点若被误调，适配器丢弃（记 `warn`），该轮正常结束——正常流量不会出现 DSH无法执行的工具。
+- `subagent` 的直接调用交给 DSH 原有工具处理，模型选择、权限和结果回传仍由 DSH 管理。`execute` 仅借用当前步骤的工具视图，并从嵌套调用中移除 `subagent` 与 `execute`；不修改 DSH 的注册或外层工具集。
+- 适配器丢弃占位工具调用。在 Code Mode 下，也会丢弃锚点和未准入的直接调用，并记录 `warn`。
 - **Code Mode 的执行侧**：`execute` 是注册的普通工具，执行体委托一个 `PtcExecutor` 实例跑 `run_code`，复用 DSH 原生 PTC 的沙箱运行时与受防护的嵌套分发；嵌套工具调用仍走 DSH 的权限与派发。DSH 的 `run_code`是执行器私有、不可注册，故用 `execute` 承载。仅免费路由且准入 `execute` 时启用；宿主无 PTC 退回直接声明。行为更接近 DSH 的 PTC 模式。已端到端验证简单应答、四步读写、六步含并行与 `edit` 的复杂任务（`docs/evidence/codemode-complex-test-2026-11-17.json`）。已知边界：SDK 以 TypeScript 类型渲染参数，表达不了 `read` 的 `limit<=2000` 数值上限，模型可能先猜大值被拒后改对（与原生 PTC 渲染一致）。
 
 ## 6. 错误处理与诊断

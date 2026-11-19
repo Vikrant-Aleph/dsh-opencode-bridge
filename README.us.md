@@ -23,6 +23,9 @@ Also included:
 - **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, trying the next available entry when a connection fails.
 - **Code Mode tool calling** — free models call tools through a program passed to `execute`, reusing DSH's native PTC components; the behavior is closer to DSH's PTC mode and only affects the free-model routes.
 
+> [!IMPORTANT]
+> **OpenCode applies usage limits to free models by public IP.** Heavy use from the same IP can cause later requests to be refused, including requests from other users sharing that IP.
+
 ## Install
 
 ### In DSH Desktop

@@ -6,6 +6,10 @@ Releases are published from `v*` tags, and the notes on the release page are tak
 
 ## [Unreleased]
 
+### Changed
+
+- Added a prominent note at the end of the README's Features section about OpenCode's per-IP limits for free models.
+
 ## [1.2.0] - 2026-11-19
 
 ### Added

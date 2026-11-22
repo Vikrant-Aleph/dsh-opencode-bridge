@@ -12,12 +12,14 @@
  * - **Bounded disk usage.** One active file plus `maxFiles - 1` rotated
  *   siblings, each at most `maxBytes`. When the active file would overflow, the
  *   oldest rotated file is deleted first — logs are cleaned oldest-first and
- *   total usage never exceeds `maxBytes * maxFiles`.
+ *   total log size is bounded by `maxBytes * maxFiles`. Age retention applies
+ *   per record, including when old and new records share the same file.
  * - **Never throws.** Logging must not break model traffic; every fs operation
  *   is wrapped and failures fall back to an in-memory ring that the read API
  *   still serves.
  */
 
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -64,6 +66,8 @@ export interface LoggerOptions {
   maxBytes: number
   /** Total files kept (active + rotated); the oldest is deleted on overflow. */
   maxFiles: number
+  /** Maximum age in days; 0 disables age-based cleanup only. */
+  maxAgeDays?: number
   /** Literal secret strings scrubbed from every logged string. */
   secrets?: string[]
   /**
@@ -87,6 +91,14 @@ export interface LogStat {
 
 const MAX_STRING = 2000
 const MEMORY_FALLBACK_LIMIT = 200
+const DAY_MS = 86_400_000
+export const DEFAULT_LOG_MAX_AGE_DAYS = 7
+export const LOG_CLEANUP_INTERVAL_MS = 3_600_000
+
+function isExpired(line: string, cutoff: number): boolean {
+  if (cutoff === -Infinity || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /.test(line)) return false
+  return Date.parse(line.slice(0, 24)) < cutoff
+}
 
 /** Default log directory: profile logs dir when known, else `~/.dsh/logs`. */
 export function defaultLogDir(): string {
@@ -99,6 +111,7 @@ export class PluginLogger {
   private readonly dir: string
   private readonly maxBytes: number
   private readonly maxFiles: number
+  private readonly maxAgeMs: number
   private readonly secrets: string[]
   private readonly base: string
   private readonly mirror: ((line: string) => void) | undefined
@@ -107,12 +120,14 @@ export class PluginLogger {
   constructor(options: LoggerOptions) {
     this.level = options.level
     this.dir = options.dir
-    this.maxBytes = Math.max(256, options.maxBytes)
-    this.maxFiles = Math.max(1, Math.min(50, options.maxFiles))
+    this.maxBytes = Number.isSafeInteger(options.maxBytes) ? Math.max(256, options.maxBytes) : 512 * 1024
+    this.maxFiles = Number.isSafeInteger(options.maxFiles) ? Math.max(1, Math.min(50, options.maxFiles)) : 5
+    const days = options.maxAgeDays ?? DEFAULT_LOG_MAX_AGE_DAYS
+    this.maxAgeMs = (Number.isFinite(days) && days >= 0 ? days : DEFAULT_LOG_MAX_AGE_DAYS) * DAY_MS
     this.base = path.join(this.dir, 'dsh-opencode-bridge.log')
     this.secrets = (options.secrets ?? []).filter((s) => typeof s === 'string' && s.length >= 4 && s !== 'public')
     this.mirror = options.mirror
-    this.pruneExcess()
+    this.prune()
   }
 
   /** Runtime level change (UI-driven); persisted only through config. */
@@ -143,7 +158,8 @@ export class PluginLogger {
   /** Formatted single line, used for both the file and the memory fallback. */
   format(record: LogRecord): string {
     const data = record.data && Object.keys(record.data).length ? ` ${this.redact(JSON.stringify(record.data))}` : ''
-    return `${record.ts} [${record.level.toUpperCase().padEnd(5)}] [${record.scope}] ${this.redact(record.msg)}${data}`
+    const line = `${record.ts} [${record.level.toUpperCase().padEnd(5)}] [${this.redact(record.scope)}] ${this.redact(record.msg)}${data}`
+    return line.replace(/[\r\n]/g, char => char === '\r' ? '\\r' : '\\n')
   }
 
   /**
@@ -161,17 +177,18 @@ export class PluginLogger {
   /** Newest-last records, filtered by minimum level, capped to `limit`. */
   read(options: { level?: LogLevel; limit?: number } = {}): { lines: string[]; truncated: boolean } {
     const min = RANK[options.level ?? 'debug']
+    const cutoff = this.cutoff()
     const limit = Math.max(1, Math.min(5000, options.limit ?? 500))
     const lines: string[] = []
     // Chronological order: oldest rotated file first, active file last.
     for (let i = this.maxFiles - 1; i >= 0; i--) {
       const file = i === 0 ? this.base : `${this.base}.${i}`
       for (const raw of this.readLines(file)) {
-        if (this.rankOf(raw) >= min) lines.push(raw)
+        if (!isExpired(raw, cutoff) && this.rankOf(raw) >= min) lines.push(raw)
       }
     }
     if (!lines.length && this.memory.length) {
-      for (const raw of this.memory) if (this.rankOf(raw) >= min) lines.push(raw)
+      for (const raw of this.memory) if (!isExpired(raw, cutoff) && this.rankOf(raw) >= min) lines.push(raw)
     }
     const truncated = lines.length > limit
     return { lines: truncated ? lines.slice(-limit) : lines, truncated }
@@ -227,15 +244,19 @@ export class PluginLogger {
       msg,
       ...(data && Object.keys(data).length ? { data: this.scrubData(data) } : {}),
     }
-    const line = this.format(record)
-    this.memory.push(line)
-    if (this.memory.length > MEMORY_FALLBACK_LIMIT) this.memory.shift()
+    const formatted = this.format(record)
+    const suffix = '…[truncated]'
+    const line = Buffer.byteLength(formatted) < this.maxBytes ? formatted
+      : new TextDecoder().decode(Buffer.from(formatted).subarray(0, this.maxBytes - Buffer.byteLength(suffix) - 1), { stream: true }) + suffix
+    if (!this.appendLine(line)) {
+      this.memory.push(line)
+      if (this.memory.length > MEMORY_FALLBACK_LIMIT) this.memory.shift()
+    }
     try {
       this.mirror?.(line)
     } catch {
       // Mirroring must never break logging.
     }
-    this.appendLine(line)
   }
 
   /** Redact every string inside a data record and cap nesting by serialization. */
@@ -251,59 +272,127 @@ export class PluginLogger {
     return out
   }
 
-  private appendLine(line: string): void {
+  private appendLine(line: string): boolean {
     try {
       fs.mkdirSync(this.dir, { recursive: true })
       const bytes = Buffer.byteLength(line) + 1
-      if (this.sizeOf(this.base) + bytes > this.maxBytes) this.rotate()
+      if ((this.fileSize(this.base) ?? 0) + bytes > this.maxBytes) this.rotate()
       fs.appendFileSync(this.base, `${line}\n`, 'utf8')
+      return true
     } catch {
-      // Disk output is best-effort; the memory ring still holds recent lines.
+      // Do not append to an oversized file if rotation failed.
+      return false
     }
   }
 
-  /**
-   * Shift the active file into `.1`, moving older siblings up and deleting the
-   * oldest one — "clean the earliest logs first" when the log gets too large.
-   */
   private rotate(): void {
-    try {
-      const oldest = `${this.base}.${this.maxFiles - 1}`
-      if (this.maxFiles > 1 && fs.existsSync(oldest)) fs.unlinkSync(oldest)
-      for (let i = this.maxFiles - 2; i >= 1; i--) {
-        const from = `${this.base}.${i}`
-        if (fs.existsSync(from)) fs.renameSync(from, `${this.base}.${i + 1}`)
+    if (this.maxFiles === 1) {
+      fs.unlinkSync(this.base)
+      return
+    }
+    const oldest = `${this.base}.${this.maxFiles - 1}`
+    if (this.fileSize(oldest) !== undefined) fs.unlinkSync(oldest)
+    for (let i = this.maxFiles - 2; i >= 1; i--) {
+      const from = `${this.base}.${i}`
+      if (this.fileSize(from) !== undefined) fs.renameSync(from, `${this.base}.${i + 1}`)
+    }
+    fs.renameSync(this.base, `${this.base}.1`)
+  }
+
+  /** Clean up files from a previous run, or sweep again while the plugin is idle. */
+  prune(): void {
+    const cutoff = this.cutoff()
+    this.memory = this.memory.filter(line => !isExpired(line, cutoff))
+    for (let i = 0; i <= 50; i++) {
+      const file = i === 0 ? this.base : `${this.base}.${i}`
+      try {
+        const stat = this.fileStat(file)
+        if (!stat) continue
+        const { size } = stat
+        if (i >= this.maxFiles) {
+          fs.unlinkSync(file)
+        } else if (size > this.maxBytes || (size > 0 && cutoff !== -Infinity)) {
+          const lines = this.readTail(file, size)
+          const kept = lines.filter(line => !isExpired(line, cutoff))
+          if (kept.length === 0) {
+            if (this.unchanged(file, stat)) fs.unlinkSync(file)
+          } else if (size > this.maxBytes || kept.length !== lines.length) {
+            this.replace(file, stat, kept.join('\n') + '\n')
+          }
+        }
+      } catch {
+        // One unavailable file should not stop cleanup of the others.
       }
-      if (fs.existsSync(this.base)) fs.renameSync(this.base, `${this.base}.1`)
-    } catch {
-      // If rotation fails, appendLine's caller keeps running on the old file.
     }
   }
 
-  /** Delete rotated siblings beyond the configured retention on startup. */
-  private pruneExcess(): void {
+  private cutoff(): number {
+    return this.maxAgeMs === 0 ? -Infinity : Date.now() - this.maxAgeMs
+  }
+
+  private readTail(file: string, size: number): string[] {
+    const start = Math.max(0, size - this.maxBytes)
+    // Keep one extra byte to tell whether the retained tail starts on a line boundary.
+    const offset = Math.max(0, start - 1)
+    const buffer = Buffer.alloc(size - offset)
+    const fd = fs.openSync(file, 'r')
     try {
-      for (let i = this.maxFiles; i <= 50; i++) {
-        const full = `${this.base}.${i}`
-        if (fs.existsSync(full)) fs.unlinkSync(full)
+      let read = 0
+      while (read < buffer.length) {
+        const count = fs.readSync(fd, buffer, read, buffer.length - read, offset + read)
+        if (count === 0) break
+        read += count
       }
-    } catch {
-      // Ignore; stale extra files are harmless.
+      if (read !== buffer.length) throw new Error('Log size changed during read')
+    } finally {
+      fs.closeSync(fd)
     }
+    const first = start === 0 ? 0 : buffer.indexOf(10) + 1
+    if (start > 0 && first === 0) return []
+    const end = buffer.lastIndexOf(10) + 1
+    return buffer.toString('utf8', first, end).split('\n').filter(Boolean)
   }
 
   private readLines(file: string): string[] {
     try {
-      if (!fs.existsSync(file)) return []
-      return fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.length > 0)
+      const size = this.fileSize(file)
+      return size ? this.readTail(file, size) : []
     } catch {
       return []
     }
   }
 
+  private fileStat(file: string): fs.Stats | undefined {
+    const stat = fs.lstatSync(file, { throwIfNoEntry: false })
+    if (stat && !stat.isFile()) throw new Error('Not a regular log file')
+    return stat
+  }
+
+  private fileSize(file: string): number | undefined {
+    return this.fileStat(file)?.size
+  }
+
+  private unchanged(file: string, before: fs.Stats): boolean {
+    const after = this.fileStat(file)
+    return !!after && after.ino === before.ino && after.dev === before.dev
+      && after.size === before.size && after.mtimeMs === before.mtimeMs
+  }
+
+  private replace(file: string, before: fs.Stats, text: string): void {
+    const temp = `${file}.${randomUUID()}.tmp`
+    // Avoid truncating the live file if the replacement write or rename fails.
+    const fd = fs.openSync(temp, 'wx', before.mode & 0o777)
+    try {
+      try { fs.writeFileSync(fd, text, 'utf8') } finally { fs.closeSync(fd) }
+      if (this.unchanged(file, before)) fs.renameSync(temp, file)
+    } finally {
+      try { fs.unlinkSync(temp) } catch { /* already renamed or unavailable */ }
+    }
+  }
+
   private sizeOf(file: string): number {
     try {
-      return fs.existsSync(file) ? fs.statSync(file).size : 0
+      return this.fileSize(file) ?? 0
     } catch {
       return 0
     }

@@ -6,6 +6,16 @@ Releases are published from `v*` tags, and the notes on the release page are tak
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-23
+
+### Added
+
+- Diagnostic logs keep seven days of records by default, with cleanup at startup and hourly. Oversized files keep the newest complete records, and single-file logging no longer leaves a rotated backup.
+
+### Changed
+
+- The npm package now has a short Chinese description. DSH's localized descriptions are unchanged.
+
 ## [1.2.1] - 2026-11-20
 
 ### Changed

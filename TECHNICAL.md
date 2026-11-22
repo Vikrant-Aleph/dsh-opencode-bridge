@@ -186,6 +186,8 @@ https://opencode.ai/inference/...
 
 **诊断**：失败请求默认追加 `request shape` 与 `tool schema shape` 摘要，共享 `request` 标识；成功摘要仅`debug` 级记录。摘要只含元数据（路径、传输、字节数、角色/长度、环境块数、图片数、工具配对计数、schema结构统计），不写正文、参数、结果、图片、密钥；上限 8 MiB/512 消息/128 工具/8192 节点/深度 32，超限标`capped`。`transport:configured` 仅表示设置了专用传输，不单独证明 TLS 字节一致。
 
+**日志轮转**：写入前检查文件大小；默认每份最多 512 KiB，最多保留 5 份（含正在写入的文件），满了先丢最旧的一份。启动时和运行期间每小时清理一次，按记录时间删除超过 7 天的日志；若一个文件里新旧混存，只删过期记录。已超大小上限的文件只保留末尾能放下的完整记录。磁盘写入或轮转失败时，不继续撑大原文件，失败的记录暂存于内存。
+
 **安全与隐私**：除配置 `apiKey` 外不读凭据；代理 URL 全日志/UI 脱敏；图片数据任何级别不入日志（测试保证）；不新增 `exec`/`spawn`。
 
 ## 7. 配置
@@ -211,7 +213,9 @@ https://opencode.ai/inference/...
 | `toolResultImages` | `true` | 视觉路由转发工具图片 |
 | `requestImagePixelBudget` / `requestImageMaxBytes` / `maxRequestImageBytes` / `maxRequestImages` | `4194304`/`1048576`/`20971520`/`20` | 图片预算 |
 | `proxies` / `proxyCooldownMs` / `proxyStorePath` | `[]`/`60000`/`''` | 出口池 |
-| `logLevel` / `logDir` / `logMaxBytes` / `logMaxFiles` | `warn`/`''`/`524288`/`5` | 日志 |
+| `logLevel` / `logDir` | `warn`/`''` | 最低日志级别 / 日志目录（空值用默认目录） |
+| `logMaxBytes` / `logMaxFiles` | `524288`/`5` | 每份日志的字节上限 / 保留份数（含当前文件） |
+| `logMaxAgeDays` | `7` | 保留天数；`0` 仅关闭按时间清理，大小轮转照常 |
 
 ## 8. 测试
 

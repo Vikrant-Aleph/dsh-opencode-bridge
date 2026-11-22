@@ -35,7 +35,7 @@ Also included:
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.2.1
+   dsh-opencode-bridge@1.2.2
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -44,13 +44,13 @@ Also included:
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.2.1
+dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.1
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears, restart that DSH profile.
@@ -165,6 +165,8 @@ A `FreeUsageLimitError` ends the current run without automatic retries, egress r
 
 ## Troubleshooting
 
+Diagnostic logs keep up to seven days of records, in at most five files of 512 KiB each by default. When the active file fills up, it rotates. If all file slots are in use, the oldest file is dropped. You can change the retention period, file size, and file count in the [plugin configuration](TECHNICAL.us.md#7-configuration).
+
 | Problem | What to try |
 |---|---|
 | No models after installation | Check the target profile, confirm the plugin is enabled, restart DSH, verify network access. |
@@ -192,7 +194,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.1.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.2.tgz
 ```
 
 </details>

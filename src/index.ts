@@ -24,7 +24,7 @@ import { completedReasoningForRequest, registerReasoningProjection } from './rea
 import { createCodeMode, type CodeModeHandle } from './code-mode.js'
 import type { HeaderRecipe } from './opencode-protocol.js'
 import { DEFAULT_PROTOCOL_USER_AGENT } from './protocol-defaults.js'
-import { PluginLogger, defaultLogDir, type LogLevel } from './logger.js'
+import { PluginLogger, defaultLogDir, DEFAULT_LOG_MAX_AGE_DAYS, LOG_CLEANUP_INTERVAL_MS, type LogLevel } from './logger.js'
 import { LogService, registerLogAccess } from './log-service.js'
 import { ProxyPool, defaultProxyStorePath, dispatcherFor, clearDispatchers, loadProxyStore } from './proxy-pool.js'
 import { ProxyService, registerProxyAccess } from './proxy-service.js'
@@ -94,6 +94,8 @@ export interface Config {
   logMaxBytes: number
   /** Total log files kept (active + rotated); oldest is deleted first on overflow. */
   logMaxFiles: number
+  /** Retain log records for this many days; 0 disables age-based cleanup. */
+  logMaxAgeDays: number
   /** Egress pool: `direct`, HTTP(S) or SOCKS proxy URLs, tried in order. */
   proxies: string[]
   /** Local fallback cooldown for egress quota; server waits are never shortened. */
@@ -133,6 +135,7 @@ export const Config = Schema.object({
   logDir: Schema.string().default(''),
   logMaxBytes: Schema.number().default(512 * 1024),
   logMaxFiles: Schema.number().default(5),
+  logMaxAgeDays: Schema.number().min(0).default(DEFAULT_LOG_MAX_AGE_DAYS),
   proxies: Schema.array(Schema.string()).default([]),
   proxyCooldownMs: Schema.number().default(60_000),
   proxyStorePath: Schema.string().default(''),
@@ -156,6 +159,7 @@ export function apply(ctx: Context, config: Config): void {
     dir: config.logDir || defaultLogDir(),
     maxBytes: config.logMaxBytes,
     maxFiles: config.logMaxFiles,
+    maxAgeDays: config.logMaxAgeDays,
     // Scrub the configured API key; proxy URLs/errors are redacted by the proxy layer.
     secrets: [config.apiKey],
     mirror: (line) => console.log(`[dsh-opencode-bridge] ${line}`),
@@ -171,6 +175,11 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => registerReasoningProjection(ctx))
   const logService = new LogService(logger)
   ctx.effect(() => registerLogAccess(ctx, logService))
+  ctx.effect(() => {
+    const timer = setInterval(() => logger.prune(), LOG_CLEANUP_INTERVAL_MS)
+    timer.unref()
+    return () => clearInterval(timer)
+  })
 
   // Egress pool: the Settings page owns a JSON store; plugin config seeds it.
   const proxyStorePath = config.proxyStorePath || defaultProxyStorePath()

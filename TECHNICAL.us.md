@@ -187,6 +187,8 @@ Upstream-change table:
 
 **Diagnostics**: failed requests append `request shape` and `tool schema shape` summaries sharing the `request` id; success summaries only at `debug`. Summaries carry metadata only (path, transport, bytes, roles/lengths, env-block count, image count, tool pairing, schema structure stats) — never bodies, arguments, results, images or secrets; caps 8 MiB/512 messages/128 tools/8192 nodes/depth 32, over-cap marked `capped`. `transport:configured` only means a dedicated transport was set, not TLS byte proof.
 
+**Log rotation**: the logger checks file size before writing. By default, it keeps up to five files including the active one, at up to 512 KiB each, dropping the oldest file first. A cleanup pass runs at startup and once an hour while the plugin is running. It removes records older than seven days by timestamp, preserving newer records in the same file. Oversized files keep only the newest complete lines that fit. If rotation or a disk write fails, the logger buffers failed records in memory rather than growing an oversized file.
+
 **Safety & privacy**: no credentials read beyond the configured `apiKey`; proxy URLs redacted in all logs/UI; image data never logged at any level (test-asserted); no new `exec`/`spawn`.
 
 ## 7. Configuration
@@ -212,7 +214,9 @@ Upstream-change table:
 | `toolResultImages` | `true` | forward tool images on vision routes |
 | `requestImagePixelBudget` / `requestImageMaxBytes` / `maxRequestImageBytes` / `maxRequestImages` | `4194304`/`1048576`/`20971520`/`20` | image budgets |
 | `proxies` / `proxyCooldownMs` / `proxyStorePath` | `[]`/`60000`/`''` | egress pool |
-| `logLevel` / `logDir` / `logMaxBytes` / `logMaxFiles` | `warn`/`''`/`524288`/`5` | logging |
+| `logLevel` / `logDir` | `warn`/`''` | Minimum log level / log directory (empty uses the default) |
+| `logMaxBytes` / `logMaxFiles` | `524288`/`5` | Bytes per log file / files retained (including the active file) |
+| `logMaxAgeDays` | `7` | Days to keep; `0` disables age cleanup, not size rotation |
 
 ## 8. Testing
 

@@ -35,7 +35,7 @@
 2. 输入：
 
    ```text
-   dsh-opencode-bridge@1.2.1
+   dsh-opencode-bridge@1.2.2
    ```
 
 3. **安装源**优先选官方 npm registry；镜像可能滞后。
@@ -44,13 +44,13 @@
 ### 命令行安装
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.2.1
+dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
 ```
 
 把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.1
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
 ```
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
@@ -165,6 +165,8 @@ Node 无法表达官方握手。OpenSSL 自行排列扩展顺序，也不提供�
 
 ## 排查
 
+诊断日志默认保留最近 7 天，最多 5 份、每份 512 KiB。当前文件写满就轮转；份数也达到上限时，删除最旧的一份。可在[插件配置](TECHNICAL.md#7-配置)里调整保留时间、文件大小和份数。
+
 | 现象 | 处理 |
 |---|---|
 | 安装后没有模型 | 确认目标 profile、确认插件已启用、重启 DSH、检查网络。 |
@@ -192,7 +194,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.1.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.2.tgz
 ```
 
 </details>

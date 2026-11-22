@@ -69,6 +69,88 @@ test('rotation: oldest file is deleted first when oversized', () => {
   assert.ok(!lines.some((l) => l.includes('line 0 ')), 'oldest line should be rotated away')
 })
 
+const LOG = 'dsh-opencode-bridge.log'
+const DAY = 86_400_000
+const fixtureLine = (ts, msg) => `${new Date(ts).toISOString()} [INFO ] [test] ${msg}\n`
+
+function isolatedDir(t) {
+  const dir = fs.realpathSync(tmpDir())
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  return dir
+}
+
+test('startup uses record age, not file mtime, and does not touch other files', t => {
+  const dir = isolatedDir(t)
+  const now = Date.UTC(2026, 10, 22)
+  t.mock.method(Date, 'now', () => now)
+  const old = fixtureLine(now - 7 * DAY - 1, 'expired')
+  const boundary = fixtureLine(now - 7 * DAY, 'exactly seven days')
+  const recent = fixtureLine(now - DAY, 'recent')
+  fs.writeFileSync(path.join(dir, LOG), old + boundary + recent)
+  fs.writeFileSync(path.join(dir, LOG + '.1'), old)
+  fs.writeFileSync(path.join(dir, LOG + '.3'), recent)
+  fs.writeFileSync(path.join(dir, LOG + '.notes'), old)
+  const logger = makeLogger(dir, { level: 'off' })
+  assert.equal(fs.readFileSync(path.join(dir, LOG), 'utf8'), boundary + recent)
+  assert.deepEqual(fs.readdirSync(dir).sort(), [LOG, LOG + '.notes'])
+  assert.deepEqual(logger.read().lines, [boundary.trimEnd(), recent.trimEnd()])
+})
+
+test('retention sweeps idle logs and read hides expired lines before the next sweep', t => {
+  const dir = isolatedDir(t)
+  let now = Date.UTC(2026, 10, 22)
+  t.mock.method(Date, 'now', () => now)
+  const file = path.join(dir, LOG)
+  fs.writeFileSync(file, fixtureLine(now, 'will expire'))
+  const logger = makeLogger(dir, { maxAgeDays: 1 })
+  assert.equal(logger.read().lines.length, 1)
+  now += DAY + 1
+  assert.equal(logger.read().lines.length, 0)
+  assert.ok(fs.existsSync(file))
+  logger.prune()
+  assert.ok(!fs.existsSync(file))
+  assert.equal(logger.stat().totalBytes, 0)
+})
+
+test('age opt-out still shrinks oversized existing files to recent complete lines', t => {
+  const dir = isolatedDir(t)
+  const date = Date.UTC(2020, 0, 1)
+  const older = fixtureLine(date, '早'.repeat(150))
+  const last = fixtureLine(date + 1, '最新记录')
+  for (const name of [LOG, LOG + '.1']) {
+    fs.writeFileSync(path.join(dir, name), older + last)
+  }
+  const logger = makeLogger(dir, { maxBytes: 256, maxFiles: 2, maxAgeDays: 0 })
+  assert.equal(fs.readFileSync(path.join(dir, LOG), 'utf8'), last)
+  assert.equal(fs.readFileSync(path.join(dir, LOG + '.1'), 'utf8'), last)
+  assert.deepEqual(logger.read().lines, [last.trimEnd(), last.trimEnd()])
+})
+
+test('one-file rotation never creates an archive or splits a UTF-8 record', t => {
+  const dir = isolatedDir(t)
+  const logger = makeLogger(dir, { maxBytes: 256, maxFiles: 1 })
+  logger.info('test', 'older line')
+  logger.info('test', `new line\n${'中文'.repeat(1200)}`)
+  assert.deepEqual(fs.readdirSync(dir), [LOG])
+  assert.ok(logger.stat().totalBytes <= 256)
+  const { lines } = logger.read()
+  assert.equal(lines.length, 1)
+  assert.match(lines[0], /new line\\n中文/)
+  assert.match(lines[0], /\[truncated\]$/)
+  assert.doesNotMatch(lines[0], /\uFFFD/)
+})
+
+test('rotation failure keeps the disk ceiling and falls back to memory', t => {
+  const dir = isolatedDir(t)
+  const logger = makeLogger(dir, { maxBytes: 256, maxFiles: 1 })
+  logger.info('test', 'a'.repeat(200))
+  const before = fs.readFileSync(path.join(dir, LOG), 'utf8')
+  t.mock.method(fs, 'unlinkSync', () => { throw new Error('locked') })
+  logger.error('test', `in memory ${'b'.repeat(200)}`)
+  assert.equal(fs.readFileSync(path.join(dir, LOG), 'utf8'), before)
+  assert.match(logger.read({ level: 'error' }).lines[0], /in memory/)
+})
+
 test('read: level filter and limit', () => {
   const dir = tmpDir()
   const logger = makeLogger(dir)

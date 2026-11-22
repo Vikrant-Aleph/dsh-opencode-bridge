@@ -7,7 +7,10 @@ const json = file => JSON.parse(fs.readFileSync(new URL(file, root), 'utf8'))
 
 test('all package display summaries include optional completed-turn context trimming', () => {
   const pkg = json('package.json'), en = json('locale/en.json').meta, zh = json('locale/zh.json').meta
-  assert.equal(pkg.description, en.description)
+  // npm uses the manifest description; DSH keeps its separate localized copy.
+  assert.match(pkg.description, /^在 DSH 中使用 OpenCode 免费模型/)
+  assert.match(pkg.description, /无需安装 OpenCode，也无需账号或 API Key/)
+  assert.match(pkg.description, /可选精简已完成轮次的思考内容/)
   assert.match(en.description, /optional context trimming of completed-turn reasoning/)
   assert.match(zh.description, /可选的上下文精简（精简已完成轮次思考）/)
   // The tool bridge and the offline audit were removed in 1.0.0 and must not be advertised.

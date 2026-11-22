@@ -119,6 +119,30 @@ function setup(t, overrides = {}, { replaceAvailable = true } = {}) {
   }
 }
 
+test('plugin owns the hourly log sweep and stops it on unload', async t => {
+  let sweep, prunes = 0
+  const handle = { unref() {} }
+  t.mock.method(globalThis, 'setInterval', (fn, ms) => {
+    assert.equal(ms, 3_600_000)
+    assert.equal(sweep, undefined)
+    sweep = fn
+    return handle
+  })
+  t.mock.method(globalThis, 'clearInterval', timer => {
+    assert.equal(timer, handle)
+    sweep = undefined
+  })
+  t.mock.method(PluginLogger.prototype, 'prune', () => { prunes++ })
+  const fixture = setup(t)
+  assert.equal(Config({}).logMaxAgeDays, 7)
+  assert.equal(Config({ logMaxAgeDays: 0 }).logMaxAgeDays, 0)
+  assert.equal(prunes, 1)
+  sweep()
+  assert.equal(prunes, 2)
+  await fixture.unload()
+  assert.equal(sweep, undefined)
+})
+
 test('plugin startup retires legacy model cooldown files before serving requests', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'legacy-cooldown-boot-'))
   t.after(() => { const actual = realpathSync(directory); assert.equal(actual, directory); rmSync(actual, { recursive: true, force: true }) })

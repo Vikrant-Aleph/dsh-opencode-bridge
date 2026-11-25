@@ -19,7 +19,7 @@ DSH agent loop
    ▼
 OpenCodeFreeAdapter              src/adapter.ts
    ├── planTools                 声明调用方工具（一个都没有时补占位）
-   ├── code-mode（免费路由）      锚点 + execute + 已准入的 subagent；其余工具进 SDK
+   ├── code-mode（免费路由）      锚点 + execute + 已准入的 subagent/skill；其余工具进 SDK
    ├── buildChatMessages         DSH 消息 → OpenAI 对话，追加环境指令
    ├── buildHeaders              身份头 + 可选追踪头
    ├── prepareImageProjection    官方附件接口
@@ -33,7 +33,7 @@ https://opencode.ai/inference/...
 工具声明有两条路径，模型看到什么在 §2.2 讲，调用之后谁执行在 §5 讲：
 
 - **直接声明**：把调用方工具净化后直接放上线路。用于非免费路由，或宿主没有 PTC 运行时的回退。
-- **Code Mode**：免费路由当前步骤准入 `execute` 时，线上声明锚点、`execute`，以及本步允许的 `subagent`。其余工具列进系统提示的 SDK。宿主没有 PTC 或本步未准入 `execute` 时，仍走直接声明。
+- **Code Mode**：免费路由当前步骤准入 `execute` 时，线上声明锚点、`execute`，以及本步允许的 `subagent`、`skill`。其余工具列进系统提示的 SDK。宿主没有 PTC 或本步未准入 `execute` 时，仍走直接声明。
 
 其余模块：
 
@@ -108,7 +108,9 @@ https://opencode.ai/inference/...
 2. **名称形状。** 未识别名含下划线/连字符/点/大写被拒；网关认识的名可带分隔符；至少一个认识的名。`planTools` 净化为 `[a-z0-9]`（冲突加序号）并保留回映射。这是 1.0.4 前全被拒的原因（报错似配额耗尽）。
 3. **不能一次声明大量富工具。** 真实描述与复杂 schema 各自触发拒绝（`docs/evidence/tool-gate-codemode-2026-11-17.json`）。
 
-**Code Mode** 让线上工具列表保持精简：简单锚点不可调用；`execute` 和本步准入的 `subagent` 可直接调用。和 OpenCode v2.3.0 一样，子代理工具不放进 SDK。其他已准入的工具用 DSH 的 SDK 渲染器写进系统提示，保留真实返回类型（如 `read` 返回 `{lines,totalLines}`）。`subagent` 用 DSH 提供的参数，桥接不冒充官方工具执行器。执行与权限见 §5。
+**skill 声明**：官方客户端把 `skill` 注册为 `codemode:false`——和 `subagent` 一样留在原生工具清单，由模型直接调用，不经 `execute`；桥接在本步准入时同样直连声明，不放进 SDK，也不进 `execute` 的嵌套工具集。【检测】网关对被识别的 `skill` 描述做指纹比对：DSH 自己的措辞被拒（`FreeUsageLimitError`），官方原文通过（`docs/evidence/skill-direct-gate-2026-11-25.json`），故线上 `skill` 恒发官方描述；输入参数仍用 DSH 的 `{name}`（网关同样接受），派发无需改写参数。执行与权限见 §5。
+
+**Code Mode** 让线上工具列表保持精简：简单锚点不可调用；`execute` 和本步准入的 `subagent`、`skill` 可直接调用。其他已准入的工具用 DSH 的 SDK 渲染器写进系统提示，保留真实返回类型（如 `read` 返回 `{lines,totalLines}`）。`subagent` 用 DSH 提供的参数，桥接不冒充官方工具执行器。执行与权限见 §5。
 
 ### 2.3 TLS 与 HTTP 传输
 
@@ -159,7 +161,7 @@ https://opencode.ai/inference/...
 模型发起调用后，执行与权限都在 DSH，桥接不另设一套流程。
 
 - 返回的调用保留 id、名称与原始参数字节；查找与 schema 校验由 DSH 负责。整批缓冲至`finish_reason:tool_calls`；被截断的批次返回 `TOOL_BRIDGE_INCOMPLETE`，不派发任何调用。
-- `subagent` 的直接调用交给 DSH 原有工具处理，模型选择、权限和结果回传仍由 DSH 管理。`execute` 仅借用当前步骤的工具视图，并从嵌套调用中移除 `subagent` 与 `execute`；不修改 DSH 的注册或外层工具集。
+- `subagent`、`skill` 的直接调用交给 DSH 原有工具处理，模型选择、权限和结果回传仍由 DSH 管理。`execute` 仅借用当前步骤的工具视图，并从嵌套调用中移除 `subagent`、`skill` 与 `execute`；不修改 DSH 的注册或外层工具集。
 - 适配器丢弃占位工具调用。在 Code Mode 下，也会丢弃锚点和未准入的直接调用，并记录 `warn`。
 - **Code Mode 的执行侧**：`execute` 是注册的普通工具，执行体委托一个 `PtcExecutor` 实例跑 `run_code`，复用 DSH 原生 PTC 的沙箱运行时与受防护的嵌套分发；嵌套工具调用仍走 DSH 的权限与派发。DSH 的 `run_code`是执行器私有、不可注册，故用 `execute` 承载。仅免费路由且准入 `execute` 时启用；宿主无 PTC 退回直接声明。行为更接近 DSH 的 PTC 模式。已端到端验证简单应答、四步读写、六步含并行与 `edit` 的复杂任务（`docs/evidence/codemode-complex-test-2026-11-17.json`）。已知边界：SDK 以 TypeScript 类型渲染参数，表达不了 `read` 的 `limit<=2000` 数值上限，模型可能先猜大值被拒后改对（与原生 PTC 渲染一致）。
 

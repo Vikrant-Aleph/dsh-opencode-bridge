@@ -6,6 +6,13 @@
 
 ## [未发布]
 
+## [1.2.3] - 2026-11-25
+
+### 修复
+
+- **`skill` 对齐官方客户端，改为原生直连工具。** 官方客户端把 `skill` 注册为 `codemode:false`（与 `subagent` 一样留在原生工具清单，模型直接调用，不经 `execute`）。此前桥接只把 `skill` 当作 Code Mode 锚点，模型直调会被丢弃，技能加载不了。现在 `skill` 从锚点移除、与 `execute`/`subagent` 一同直连声明，也不进 SDK 与 `execute` 嵌套工具集；直调正常派发给 DSH。
+- **`skill` 线上描述改用官方原文。** 活体 A/B 发现网关对被识别的 `skill` 描述做指纹比对：DSH 自己的措辞被拒（`FreeUsageLimitError`），官方原文通过（`docs/evidence/skill-direct-gate-2026-11-25.json`）。故线上 `skill` 恒发官方描述；输入参数仍用 DSH 的 `{name}`（网关同样接受），派发无需改写。离线套件与真实适配器均已验证直调 `skill` 正常往返。
+
 ## [1.2.2] - 2026-11-23
 
 ### 新增

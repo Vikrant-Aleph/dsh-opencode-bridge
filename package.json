@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-bridge",
   "description": "在 DSH 中使用 OpenCode 免费模型，无需安装 OpenCode，也无需账号或 API Key。模型列表自动刷新，可选精简已完成轮次的思考内容。",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

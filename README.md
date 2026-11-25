@@ -21,8 +21,6 @@
 - **模型自动刷新** —— 读取 OpenCode 的模型目录（与官方客户端同源），每 5 分钟刷新；目录变化时自动增删模型，刷新失败则保留上一份可用列表。
 - **可选上下文精简** —— 只清除已确认成功完成轮次中的思考，默认关闭。
 - **可选出口轮换** —— 按顺序配置多个 HTTP(S) 或 SOCKS 代理，连接失败时自动尝试下一个可用出口。
-- **Code Mode 工具调用** —— 免费模型走 Code Mode 时，可直接调用当前步骤允许的 `subagent`。其他 SDK 工具经 `execute` 进入 DSH 原生 PTC，行为更接近 DSH 的 PTC 模式。
-- **子代理会话** —— 每个子代理有独立的线上会话 ID，同一父代理的子会话共享父会话亲和标识。这个标识用于会话分组，不改变免费额度。
 
 > [!IMPORTANT]
 > **OpenCode 免费模型有出口 IP 限额。** 同一个公网 IP 使用过多时，后续请求可能被拒绝。共用一个公网 IP 的用户也可能相互影响。
@@ -35,7 +33,7 @@
 2. 输入：
 
    ```text
-   dsh-opencode-bridge@1.2.2
+   dsh-opencode-bridge@1.2.3
    ```
 
 3. **安装源**优先选官方 npm registry；镜像可能滞后。
@@ -44,13 +42,13 @@
 ### 命令行安装
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
+dsh plugin --profile desktop add dsh-opencode-bridge@1.2.3
 ```
 
 把 `desktop` 换成你的 profile。若终端里没有 `dsh`：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.3
 ```
 
 然后在模型选择器里选 **OpenCode Bridge** 下的模型。若没有出现，重启该 DSH profile。
@@ -70,6 +68,7 @@ npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
 | **系统提示含 `<env>` 块** | 仅含该块的 177 字节提示即可通过；同样的提示去掉该块就会被拒。 |
 | **工具名形状** | 未识别的名称含下划线、连字符、点号或大写会被拒；网关认识的名称可带分隔符。插件会自动转换名称。 |
 | **工具声明内容** | 一次声明大量富工具（真实描述 + 复杂 schema）会被拒；同尺寸的中性工具块可通过。 |
+| **`skill` 描述** | 被识别的 `skill` 描述受指纹比对：DSH 自己的措辞被拒、官方原文通过；插件对直连的 `skill` 恒发官方描述。 |
 
 这些检查由官方客户端的形态满足，因此能当作客户端检查。用户可以改写系统提示、裁剪工具清单，但客户端仍会追加 `<env>` 块、声明工具。工具声明内容这条，官方客户端靠 Code Mode 满足——线上只留少量工具，完整目录进系统提示词；插件对免费模型也改用 Code Mode 规避。
 
@@ -194,7 +193,7 @@ pnpm test
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.2.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.3.tgz
 ```
 
 </details>

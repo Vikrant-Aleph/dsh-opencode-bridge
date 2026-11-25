@@ -10,8 +10,9 @@
  * executor-owned and cannot be registered as an ordinary tool. This module therefore
  * registers a normal tool named `execute` whose body delegates to a `PtcExecutor`
  * instance, reusing DSH's sandboxed program runtime and guarded nested dispatch. The
- * adapter declares simple anchors and `execute` on the wire. An admitted `subagent`
- * remains direct; the other callable tools are described in the SDK.
+ * adapter declares simple anchors and `execute` on the wire. An admitted `subagent` or
+ * `skill` remains direct (the official client marks both codemode:false); the other
+ * callable tools are described in the SDK.
  *
  * Only the free-model provider routes are affected; other agents keep their executor.
  */
@@ -27,6 +28,20 @@ import { noopLogger, type LoggerLike } from './logger.js'
 /** Wire/registration name of the code-execution transport. A gateway-recognized name. */
 export const CODE_MODE_TOOL_NAME = 'execute'
 export const DIRECT_SUBAGENT_TOOL_NAME = 'subagent'
+/** Official `skill` is codemode:false (a native direct tool), so the bridge keeps it direct too. */
+export const DIRECT_SKILL_TOOL_NAME = 'skill'
+/**
+ * The official client's `skill` description, verbatim (opencode tool/plugin/skill.ts).
+ * The free lane fingerprints the recognized `skill` tool's description: DSH's own
+ * wording is refused with FreeUsageLimitError while this official text passes (live
+ * A/B, 2026-11-25). The wire therefore carries the official description; the input
+ * schema stays DSH's `{name}` (also accepted) so dispatch needs no argument rewrite.
+ */
+export const OFFICIAL_SKILL_DESCRIPTION = [
+  "Load a specialized skill's instructions and resources into the current conversation when the task at hand matches its description.",
+  '',
+  'The skill ID must match an available skill or a skill explicitly referenced by the user.',
+].join('\n')
 
 /**
  * Simple anchor declarations kept on the wire alongside the transport. The free lane
@@ -34,7 +49,7 @@ export const DIRECT_SUBAGENT_TOOL_NAME = 'subagent'
  * few recognized names with trivial schemas satisfy its shape checks. They are not meant
  * to be called directly; the adapter drops a stray call to one.
  */
-export const CODE_MODE_ANCHOR_NAMES = ['read', 'write', 'edit', 'glob', 'grep', 'websearch', 'skill'] as const
+export const CODE_MODE_ANCHOR_NAMES = ['read', 'write', 'edit', 'glob', 'grep', 'websearch'] as const
 
 export interface CodeModeHandle {
   /** Unregister the transport tool. */
@@ -53,7 +68,7 @@ export interface CodeModeOptions {
 
 const INSTRUCTION
   = `Call tools from the SDK below as \`await tools.name(args)\` inside \`${CODE_MODE_TOOL_NAME}\`. `
-    + `If \`${DIRECT_SUBAGENT_TOOL_NAME}\` is declared for this step, call it directly, not through the SDK. `
+    + `If \`${DIRECT_SUBAGENT_TOOL_NAME}\` or \`${DIRECT_SKILL_TOOL_NAME}\` is declared for this step, call it directly, not through the SDK. `
     + 'Do not call protocol anchors or guess tool names.'
 
 /**
@@ -119,6 +134,7 @@ export function createCodeMode(ctx: Context, options: CodeModeOptions): CodeMode
             view(scope) {
               const visible = new Map(admitted.view(scope))
               visible.delete(DIRECT_SUBAGENT_TOOL_NAME)
+              visible.delete(DIRECT_SKILL_TOOL_NAME)
               visible.delete(CODE_MODE_TOOL_NAME)
               return visible
             },
@@ -141,7 +157,7 @@ export function createCodeMode(ctx: Context, options: CodeModeOptions): CodeMode
 
   const renderCatalog = (tools: readonly ToolSchema[]): string => {
     const sdk: ToolSdkSchema[] = tools
-      .filter(tool => tool.name !== CODE_MODE_TOOL_NAME && tool.name !== DIRECT_SUBAGENT_TOOL_NAME)
+      .filter(tool => tool.name !== CODE_MODE_TOOL_NAME && tool.name !== DIRECT_SUBAGENT_TOOL_NAME && tool.name !== DIRECT_SKILL_TOOL_NAME)
       // Use each tool's real output schema so the SDK shows precise return types
       // (e.g. read -> {lines}, glob -> {root, paths}); a generic type makes the model guess.
       .map(tool => ({ ...tool, output: ctx.tools.get(tool.name)?.output.schema ?? ({ type: 'json' } as never) }))

@@ -30,7 +30,7 @@ import { noopLogger, type LoggerLike } from './logger.js'
 import { fetchWithPool, EgressCoolingError, retryAfterMs, type ProxyPool } from './proxy-pool.js'
 import { httpError, UpstreamHttpError, MAX_PROVIDER_RETRY_AFTER_MS } from './http-errors.js'
 import { summarizeWireRequest, type WireDiagnosticInput } from './request-diagnostics.js'
-import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, DIRECT_SUBAGENT_TOOL_NAME, type CodeModeHandle } from './code-mode.js'
+import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, DIRECT_SUBAGENT_TOOL_NAME, DIRECT_SKILL_TOOL_NAME, OFFICIAL_SKILL_DESCRIPTION, type CodeModeHandle } from './code-mode.js'
 import {
   buildChatMessages,
   buildHeaders,
@@ -275,8 +275,12 @@ export class OpenCodeFreeAdapter extends LlmAdapter {
       const codeModeActive = codeMode !== undefined && admittedTools.some(tool => tool.name === CODE_MODE_TOOL_NAME)
       // Reserve the native names before projecting the SDK inventory. An SDK tool
       // such as `sub_agent` must not take the real `subagent` wire name.
-      const belongsOnWire = (name: string) => name === CODE_MODE_TOOL_NAME || name === DIRECT_SUBAGENT_TOOL_NAME
-      const plan = planTools(codeModeActive ? admittedTools.filter(tool => belongsOnWire(tool.name)) : admittedTools, {
+      const belongsOnWire = (name: string) => name === CODE_MODE_TOOL_NAME || name === DIRECT_SUBAGENT_TOOL_NAME || name === DIRECT_SKILL_TOOL_NAME
+      // The free lane fingerprints the recognized `skill` description; carry the official
+      // text so a direct `skill` declaration passes (DSH's own wording is refused).
+      const declaredTools = (codeModeActive ? admittedTools.filter(tool => belongsOnWire(tool.name)) : admittedTools)
+        .map(tool => tool.name === DIRECT_SKILL_TOOL_NAME ? { ...tool, description: OFFICIAL_SKILL_DESCRIPTION } : tool)
+      const plan = planTools(declaredTools, {
         strict: this.options.toolStrict ?? true,
       })
       let wireTools = plan.tools

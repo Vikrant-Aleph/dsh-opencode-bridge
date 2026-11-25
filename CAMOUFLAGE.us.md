@@ -18,13 +18,14 @@ Within that boundary, attitude splits by whether the gateway currently checks it
 
 ## What the gateway checks (must replicate)
 
-"Currently" = **2026-11-17** (last live probe; this file updated 2026-11-18). Mismatch is refused.
+"Currently" = **2026-11-25** (latest live probe; the tool-shape body was measured 2026-11-17). Mismatch is refused.
 
 | Requirement | How the bridge satisfies it | Detail |
 |---|---|---|
 | `User-Agent` | Sends the captured `opencode/latest/2.2.0/cli` byte-identically | §2.1 |
 | Session and request identity | Root sessions use one ID in four headers; see §2.1 for child-session lineage | §2.1 |
 | Tool declarations | At least one tool (a placeholder only when the caller has none); separator-free names with a map back; free models use Code Mode | §2.2, §5 |
+| `skill` description | The recognized `skill` description is fingerprinted: the wire always carries the official text (DSH wording is refused); `skill` is a direct tool like `subagent` | §2.2, `docs/evidence/skill-direct-gate-2026-11-25.json` |
 | An `<env>` block in the system prompt | Environment instructions appended after the DSH prompt | §2.2 |
 
 The official client always sends these shapes, so a user cannot remove them. The three tool-declaration gates — at least one tool, name shape, and not many rich tools at once —are together in §2.2.

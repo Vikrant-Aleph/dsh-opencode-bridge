@@ -21,8 +21,6 @@ Also included:
 - **Automatic model refresh** — reads the OpenCode model catalog, the same source the official client uses, every five minutes, adding and removing models as it changes and keeping the last good list when a refresh fails.
 - **Optional context trimming** — clears reasoning only from confirmed completed turns, off by default.
 - **Optional egress rotation** — several HTTP(S) or SOCKS proxies in order, trying the next available entry when a connection fails.
-- **Code Mode tool calling** — on free-model routes, `subagent` stays directly callable when the current step admits it. Other SDK tools go through `execute` using DSH's native PTC, so the behavior is closer to DSH's PTC mode.
-- **Subagent sessions** — each child keeps its own wire session ID, while siblings share their parent's affinity ID. This groups requests without changing the free quota.
 
 > [!IMPORTANT]
 > **OpenCode applies usage limits to free models by public IP.** Heavy use from the same IP can cause later requests to be refused, including requests from other users sharing that IP.
@@ -35,7 +33,7 @@ Also included:
 2. Enter:
 
    ```text
-   dsh-opencode-bridge@1.2.2
+   dsh-opencode-bridge@1.2.3
    ```
 
 3. Prefer the official npm registry under **Installation source**; mirrors may lag.
@@ -44,13 +42,13 @@ Also included:
 ### From the command line
 
 ```sh
-dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
+dsh plugin --profile desktop add dsh-opencode-bridge@1.2.3
 ```
 
 Replace `desktop` with your profile. If `dsh` is not on your `PATH`:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.2
+npx @deepseek-ai/dsh plugin --profile desktop add dsh-opencode-bridge@1.2.3
 ```
 
 Then pick a model under **OpenCode Bridge** in the model picker. If none appears, restart that DSH profile.
@@ -70,6 +68,7 @@ Everything below was measured — one variable at a time, from a single runtime,
 | **An `<env>` block in the system prompt** | A 177-byte prompt containing nothing but that block passes. The same prompt without it is refused. |
 | **Tool name shape** | An unrecognized name with underscores, dashes, dots or capitals is refused; a name the gateway recognises may carry separators. The plugin converts names. |
 | **Tool declaration content** | Declaring many rich tools at once (real descriptions + complex schemas) is refused; a same-size neutral tool block passes. |
+| **`skill` description** | The recognized `skill` description is fingerprinted: DSH's own wording is refused, the official text passes; the plugin always sends the official description for the direct `skill` tool. |
 
 These checks are satisfied by the official client's own form, which is why they work as a client check. A user can rewrite the system prompt and prune the tool list, but the client still appends an `<env>` block and still declares tools. The declaration-content check is satisfied by the official client's Code Mode — only a few tools on the wire, the full catalog in the system prompt; the plugin uses Code Mode for the free models too.
 
@@ -194,7 +193,7 @@ Build output is not committed. To install a local build:
 
 ```sh
 pnpm pack
-dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.2.tgz
+dsh plugin --profile desktop add ./dsh-opencode-bridge-1.2.3.tgz
 ```
 
 </details>

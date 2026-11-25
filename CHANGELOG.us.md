@@ -6,6 +6,13 @@ Releases are published from `v*` tags, and the notes on the release page are tak
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-25
+
+### Fixed
+
+- **`skill` now aligns with the official client as a native direct tool.** The official client registers `skill` with `codemode:false` (like `subagent`, it stays on the native tool list and the model calls it directly, not through `execute`). The bridge previously kept `skill` only as a Code Mode anchor, so a direct model call was discarded and the skill never loaded. `skill` is now removed from the anchors and declared direct alongside `execute`/`subagent`; it stays out of the SDK and out of `execute`'s nested tool set, and a direct call dispatches to DSH normally.
+- **The wire `skill` description now uses the official text.** A live A/B showed the gateway fingerprints the recognized `skill` description: DSH's own wording is refused (`FreeUsageLimitError`) while the official text passes (`docs/evidence/skill-direct-gate-2026-11-25.json`). The wire therefore always carries the official `skill` description; the input stays DSH's `{name}` (also accepted), so dispatch needs no rewrite. The offline suite and the real adapter both verify a direct `skill` call round-trips.
+
 ## [1.2.2] - 2026-11-23
 
 ### Added

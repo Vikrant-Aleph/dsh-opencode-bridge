@@ -20,7 +20,7 @@ DSH agent loop
    ▼
 OpenCodeFreeAdapter              src/adapter.ts
    ├── planTools                 declare caller tools (placeholder only if none)
-   ├── code-mode (free routes)   anchors + execute + admitted subagent; other tools in the SDK
+   ├── code-mode (free routes)   anchors + execute + admitted subagent/skill; other tools in the SDK
    ├── buildChatMessages         DSH messages → OpenAI chat, append environment instructions
    ├── buildHeaders              identity headers + optional tracing
    ├── prepareImageProjection    official attachment API
@@ -34,7 +34,7 @@ https://opencode.ai/inference/...
 There are two declaration paths. What the model sees is in §2.2; who executes a call is in §5:
 
 - **Direct declaration**: sanitized caller tools go on the wire. Used for non-free routes, or as the fallback when the host has no PTC runtime.
-- **Code Mode**: when a free-model step admits `execute`, the wire declares the anchors, `execute`, and `subagent` if the step admits it. The remaining tools go in the SDK in the system prompt. If PTC or `execute` is unavailable, the adapter falls back to direct declaration.
+- **Code Mode**: when a free-model step admits `execute`, the wire declares the anchors, `execute`, and `subagent`/`skill` if the step admits them. The remaining tools go in the SDK in the system prompt. If PTC or `execute` is unavailable, the adapter falls back to direct declaration.
 
 Other modules:
 
@@ -109,7 +109,9 @@ The outgoing body consists of (key order matches the official):
 2. **Name shape.** Unrecognized names with underscores/dashes/dots/capitals are refused; recognized names may carry separators; at least one recognized name. `planTools` reduces to `[a-z0-9]` (counter on collision) and keeps a map back. This caused every refusal before 1.0.4 (error looked like quota exhaustion).
 3. **Not many rich tools at once.** Real descriptions and complex schemas each trigger refusal (`docs/evidence/tool-gate-codemode-2026-11-17.json`).
 
-**Code Mode** keeps the wire list small. The anchors are not callable; `execute` and an admitted `subagent` are. As in OpenCode v2.3.0, `subagent` stays out of the SDK. DSH's SDK renderer lists the remaining admitted tools in the system prompt with their real return types (`read`, for example, returns `{lines,totalLines}`). `subagent` keeps DSH's own argument schema. See §5 for execution and permissions.
+**skill declaration**: the official client registers `skill` with `codemode:false` — like `subagent`, it stays on the native tool list and the model calls it directly, not through `execute`; the bridge likewise declares it direct when the step admits it, keeping it out of the SDK and out of `execute`'s nested tool set. [checked] The gateway fingerprints the recognized `skill` description: DSH's own wording is refused (`FreeUsageLimitError`) while the official text passes (`docs/evidence/skill-direct-gate-2026-11-25.json`), so the wire always carries the official `skill` description; the input stays DSH's `{name}` (also accepted), so dispatch needs no argument rewrite. See §5 for execution and permissions.
+
+**Code Mode** keeps the wire list small. The anchors are not callable; `execute` and an admitted `subagent`/`skill` are. DSH's SDK renderer lists the remaining admitted tools in the system prompt with their real return types (`read`, for example, returns `{lines,totalLines}`). `subagent` keeps DSH's own argument schema. See §5 for execution and permissions.
 
 ### 2.3 TLS and HTTP transport
 
@@ -160,7 +162,7 @@ Message mapping (DSH → wire):
 After the model issues a call, execution and permissions stay in DSH; the bridge adds no separate flow.
 
 - Returned calls keep id, name and raw argument bytes; lookup and schema validation are DSH's. The batch is buffered until `finish_reason:tool_calls`; a truncated batch returns `TOOL_BRIDGE_INCOMPLETE` and dispatches nothing.
-- DSH's existing tool handles direct `subagent` calls, including model selection, permissions, and result delivery. `execute` borrows the current step's tool set and excludes `subagent` and `execute` from nested dispatch without changing the outer tool set or registry.
+- DSH's existing tools handle direct `subagent` and `skill` calls, including model selection, permissions, and result delivery. `execute` borrows the current step's tool set and excludes `subagent`, `skill` and `execute` from nested dispatch without changing the outer tool set or registry.
 - The adapter drops placeholder calls. In Code Mode, it also drops calls to anchors and other tools not admitted for direct calls, and logs a warning.
 - **Code Mode execution side**: `execute` is an ordinary registered tool whose body delegates to a `PtcExecutor` running `run_code`, reusing DSH's native PTC sandboxed runtime and guarded nested dispatch; nested tool calls still go through DSH permissions and dispatch. DSH's `run_code` is executor-private and unregistrable, so `execute` carries it. Enabled only on free routes admitting `execute`; without a host PTC it falls back to direct declaration. Behavior is closer to DSH's PTC mode. Verified end to end: simple answer, four-step read/write, six-step task with parallel reads and `edit` (`docs/evidence/codemode-complex-test-2026-11-17.json`). Known boundary: the SDK renders parameters as TypeScript types and cannot express numeric caps like `read`'s `limit<=2000`, so the model may guess large, get refused, then correct (same as native PTC rendering).
 

@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-25",
+  "topic": "Official-aligned direct `skill` tool and the free-lane description fingerprint",
+  "issue": "https://github.com/Vikrant-Aleph/dsh-opencode-bridge/issues/5",
+  "officialReference": {
+    "client": "OpenCode (research/opencode-src)",
+    "skillRegistration": "packages/core/src/tool/plugin/skill.ts registers `skill` with options { codemode: false }.",
+    "wireRule": "packages/core/src/tool.ts snapshot(): tools with codemode:false go on the provider's native (direct) tool list; the rest are reached through execute. Always-direct built-ins include skill, subagent, question, todo, image-generate.",
+    "officialSkillDescription": "Load a specialized skill's instructions and resources into the current conversation when the task at hand matches its description.\\n\\nThe skill ID must match an available skill or a skill explicitly referenced by the user.",
+    "officialSkillInput": "{ id: string }",
+    "conclusion": "The official model calls `skill` DIRECTLY (not through execute). The bridge previously declared `skill` only as a dropped Code Mode anchor, so a direct model call was discarded and the skill never loaded."
+  },
+  "finding": {
+    "summary": "Declaring `skill` as a real direct tool with DSH's own description is refused by the free lane (FreeUsageLimitError, HTTP 429). The official description passes. The input schema ({name} vs official {id}) does not matter. The refusal is deterministic, not a quota/time flip.",
+    "method": "Same egress (direct), same model (deepseek-v4.1-flash-free), single-variable hand-built wire bodies sent over the real Bun-shaped transport, interleaved. Control = the prior anchor shape. Marker prompts only; no private conversation.",
+    "cases": [
+      { "name": "control old anchor shape (skill as dropped anchor)", "status": 200 },
+      { "name": "skill direct + DSH description + {name} schema", "status": 429, "errorType": "FreeUsageLimitError" },
+      { "name": "skill direct + trivial anchor description + {name} schema", "status": 200 },
+      { "name": "skill direct + official description + {name} schema", "status": 200 },
+      { "name": "skill direct + official description + official {id} schema", "status": 200 },
+      { "name": "real DSH subagent description, direct (unchanged since 1.2.1)", "status": 200 }
+    ],
+    "determinism": "Two interleaved rounds: DSH-description skill -> 429 both rounds; official-description skill -> 200 both rounds. Same {name} schema, everything else identical.",
+    "retryAfterCaveat": "The shape refusal carries the same midnight-pointing Retry-After as a real quota exhaustion, so Retry-After alone cannot distinguish a gate refusal from quota. The interleaved same-egress control is what isolates the cause.",
+    "scope": "The description fingerprint was observed on the recognized `skill` name. The real (long, rich) DSH `subagent` description passes, so this is not a blanket rejection of real DSH descriptions."
+  },
+  "fix": {
+    "approach": "Align with the official client: declare `skill` as a native direct tool (remove it from CODE_MODE_ANCHOR_NAMES, add it to the wire-native set beside execute/subagent), and carry the official skill description verbatim on the wire. Keep DSH's {name} input schema (also accepted) so dispatch needs no argument rewrite; skill stays out of the SDK catalog and out of execute's nested tool set, exactly like subagent.",
+    "files": ["src/code-mode.ts (DIRECT_SKILL_TOOL_NAME, OFFICIAL_SKILL_DESCRIPTION, anchors, instruction, nested view, renderCatalog)", "src/adapter.ts (belongsOnWire + description override)"],
+    "endToEndVerification": {
+      "realAdapterShape": "finish=stop, replied PROBE_D_OK (gate passed).",
+      "realAdapterSkillCall": "finish=tool-calls, dispatched call name=skill arguments={\"name\":\"office\"} (direct call round-trips to DSH dispatch).",
+      "wireDescription": "skill declaration carries the official description verbatim; parameters remain DSH {name}; strict:false.",
+      "offlineSuite": "485 pass / 0 fail / 1 skipped after the change."
+    }
+  },
+  "relationToIssue5": "This makes a direct `skill` call actually load the skill (previously dropped), removing the repro obstacle where the maintainer's free-model session discarded the anchor call. It does not by itself prove the reporter's FREE_USAGE_LIMIT was quota; that still needs the reporter's diagnostic log (tool count + interleaved control). The reporter's 'my OpenCode is not exhausted' is not a valid control because the official signed-in client uses account quota while the bridge uses the egress-IP free allowance."
+}

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { OpenCodeFreeAdapter } from '../lib/adapter.js'
 import { PtcExecutor } from '@deepseek-ai/dsh-tool-executor-ptc'
-import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, createCodeMode } from '../lib/code-mode.js'
+import { CODE_MODE_TOOL_NAME, CODE_MODE_ANCHOR_NAMES, OFFICIAL_SKILL_DESCRIPTION, createCodeMode } from '../lib/code-mode.js'
 
 const recipe = { baseUrl: 'https://opencode.ai/inference/openai/v1', apiKey: 'public', userAgent: 'opencode/latest/2.2.0/cli', client: 'cli', project: 'global', extraHeaders: {} }
 const executeSchema = { name: CODE_MODE_TOOL_NAME, description: 'Execute a program.', parameters: { type: 'object', properties: { code: { type: 'string' }, description: { type: 'string' } }, required: ['code', 'description'], additionalProperties: false } }
@@ -95,6 +95,7 @@ test('renderCatalog shows each tool\'s real return type, not a generic placehold
 })
 
 const subagent = { name: 'subagent', description: 'Start a DSH child.', parameters: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] } }
+const skill = { name: 'skill', description: 'Load a skill.', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }
 
 test('an admitted subagent is a native declaration and does not leak into the SDK', async t => {
   const { run } = adapter(t, { codeMode: handle, tools: [{ ...subagent, name: 'sub_agent' }, executeSchema, subagent, richRead] })
@@ -103,6 +104,28 @@ test('an admitted subagent is a native declaration and does not leak into the SD
   assert.deepEqual(declaration.function.parameters, subagent.parameters)
   assert.match(body.messages[0].content, /CATALOG_MARKER:sub_agent,read/)
   assert.ok(!body.tools.some(tool => tool.function.name === 'subagent2'))
+})
+
+test('an admitted skill is a native declaration (official codemode:false) and does not leak into the SDK', async t => {
+  const { run } = adapter(t, { codeMode: handle, tools: [executeSchema, skill, richRead] })
+  const { body } = await run()
+  const declaration = body.tools.find(tool => tool.function.name === 'skill')
+  assert.ok(declaration, 'skill must be declared on the wire, not kept as a dropped anchor')
+  assert.deepEqual(declaration.function.parameters, skill.parameters)
+  assert.equal(declaration.function.description, OFFICIAL_SKILL_DESCRIPTION, 'skill must carry the official description the free lane accepts')
+  assert.match(body.messages[0].content, /CATALOG_MARKER:read/)
+  assert.ok(!body.messages[0].content.includes('skill,'), 'skill must not appear in the SDK catalog')
+})
+
+test('a direct skill call is dispatched, not dropped like an anchor', async t => {
+  const calls = ['skill', 'read'].map((name, index) => ({ index, id: `call_${index}`, function: { name, arguments: '{"name":"office"}' } }))
+  t.mock.method(globalThis, 'fetch', async () => new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: calls }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`))
+  const a = new OpenCodeFreeAdapter({ list: async () => [] }, { providerRoute: 'opencode-bridge', recipe, requestTimeoutMs: 2000, codeMode: () => handle })
+  const names = []
+  for await (const chunk of a.stream({ provider: 'opencode-bridge', model: 'fixture', tools: [executeSchema, skill, richRead], messages: [] })) {
+    if (chunk.type === 'block-end' && chunk.block.type === 'tool-call') names.push(chunk.block.name)
+  }
+  assert.deepEqual(names, ['skill'])
 })
 
 test('Code Mode emits only actual native calls admitted for the step', async t => {
@@ -124,13 +147,14 @@ test('execute passes a narrowed borrowed tool set to PTC but leaves the host set
   let registered, nestedSet
   const ctx = { get: name => name === 'ptcRuntime' ? { language: 'typescript', programFormat: 'function-body' } : undefined, on: () => () => {}, effect: () => () => {}, tools: { register: tool => { registered = tool; return () => {} }, get: () => undefined }, systemPrompt: { getSectionOrder: () => 100 } }
   const codeMode = createCodeMode(ctx, { providers: ['opencode-bridge'] })
-  assert.ok(!codeMode.renderCatalog([subagent, richRead]).includes('subagent'))
+  assert.ok(!codeMode.renderCatalog([subagent, skill, richRead]).includes('subagent'))
+  assert.ok(!codeMode.renderCatalog([subagent, skill, richRead]).includes('skill'))
   t.mock.method(PtcExecutor.prototype, 'execute', async ({ toolSet }) => {
     nestedSet = toolSet
     return { additionalContexts: [], results: [{ result: { value: { result: 1 } } }] }
   })
   const agent = {}
-  const original = new Map([['subagent', subagent], ['execute', executeSchema], ['read', richRead]])
+  const original = new Map([['subagent', subagent], ['skill', skill], ['execute', executeSchema], ['read', richRead]])
   let disposed = false
   const toolSet = { view: scope => scope === agent ? original : new Map(), dispose: () => { disposed = true } }
   await registered.execute({ code: 'return 1', description: 'Test nested set' }, { callId: 'fixture', signal: new AbortController().signal, toolSet, agent })
@@ -138,5 +162,5 @@ test('execute passes a narrowed borrowed tool set to PTC but leaves the host set
   assert.equal(nestedSet.view({}).size, 0)
   nestedSet.dispose()
   assert.ok(!disposed)
-  assert.deepEqual([...original.keys()], ['subagent', 'execute', 'read'])
+  assert.deepEqual([...original.keys()], ['subagent', 'skill', 'execute', 'read'])
 })

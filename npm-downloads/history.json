@@ -3,8 +3,8 @@
   "package": "dsh-opencode-bridge",
   "source": "https://api.npmjs.org/downloads",
   "start": "2026-10-18",
-  "end": "2026-11-24",
-  "totalDownloads": 7530,
+  "end": "2026-11-25",
+  "totalDownloads": 7873,
   "days": [
     {
       "day": "2026-10-18",
@@ -195,6 +195,11 @@
       "day": "2026-11-24",
       "downloads": 145,
       "cumulative": 7530
+    },
+    {
+      "day": "2026-11-25",
+      "downloads": 343,
+      "cumulative": 7873
     }
   ]
 }
